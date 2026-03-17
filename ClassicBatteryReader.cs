@@ -15,9 +15,9 @@ public class ClassicBatteryReader
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
-        Task.Run(ReadAll);
+        Task.Run(ReadAllAsync_Internal).Unwrap();
 
-    private static List<(string Name, int Battery)> ReadAll()
+    private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal()
     {
         var candidates = new List<(string Name, string InstanceId, ulong Address)>();
 
@@ -33,7 +33,6 @@ public class ClassicBatteryReader
                 string? instanceId = obj["DeviceID"]?.ToString();
                 if (rawName is null || instanceId is null) continue;
 
-                // Extract MAC and convert to ulong address for connection check
                 Match match = MacRegex.Match(instanceId);
                 if (!match.Success) continue;
 
@@ -52,9 +51,13 @@ public class ClassicBatteryReader
 
         if (candidates.Count == 0) return new();
 
-        // Filter to connected devices only — eliminates stale cached battery
-        var connected = candidates
-            .Where(c => IsConnected(c.Address))
+        // Check connectivity asynchronously — no blocking WinRT calls
+        var connectTasks = candidates.Select(async c => (c, connected: await IsConnectedAsync(c.Address)));
+        var connectResults = await Task.WhenAll(connectTasks);
+
+        var connected = connectResults
+            .Where(r => r.connected)
+            .Select(r => r.c)
             .ToList();
 
         if (connected.Count == 0) return new();
@@ -70,19 +73,15 @@ public class ClassicBatteryReader
         return results;
     }
 
-    private static bool IsConnected(ulong bluetoothAddress)
+    private static async Task<bool> IsConnectedAsync(ulong bluetoothAddress)
     {
         try
         {
-            // FromBluetoothAddressAsync must run on a thread with STA or via Task
-            var device = BluetoothDevice
-                .FromBluetoothAddressAsync(bluetoothAddress)
-                .AsTask().GetAwaiter().GetResult();
+            using BluetoothDevice? device =
+                await BluetoothDevice.FromBluetoothAddressAsync(bluetoothAddress)
+                    .AsTask().ConfigureAwait(false);
 
-            if (device is null) return false;
-            bool connected = device.ConnectionStatus == BluetoothConnectionStatus.Connected;
-            device.Dispose();
-            return connected;
+            return device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
         }
         catch { return false; }
     }
