@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Management;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Windows.Devices.Bluetooth;
@@ -11,7 +10,9 @@ public class ClassicBatteryReader
     private const string BatteryPKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
     private const string HfagPattern = "_HCIBYPASS_";
 
-    // MAC extracted from InstanceId: BTHENUM\...\7&xxx&0&7CC95E99FBB3_C00000000
+    private static readonly Guid BatteryPropertyGuid =
+        new("104EA319-6EE2-4701-BD47-8DDBF425BBE5");
+
     private static readonly Regex MacRegex =
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
@@ -20,62 +21,181 @@ public class ClassicBatteryReader
 
     private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal()
     {
-        var candidates = new List<(string Name, string InstanceId, ulong Address)>();
-
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(
-                $"SELECT Name, DeviceID FROM Win32_PnPEntity " +
-                $"WHERE DeviceID LIKE 'BTHENUM%{HfagPattern}%'");
-
-            foreach (ManagementObject obj in searcher.Get())
-            {
-                string? rawName = obj["Name"]?.ToString();
-                string? instanceId = obj["DeviceID"]?.ToString();
-                if (rawName is null || instanceId is null) continue;
-
-                Match match = MacRegex.Match(instanceId);
-                if (!match.Success) continue;
-
-                ulong address = Convert.ToUInt64(match.Groups[1].Value, 16);
-
-                string name = Regex.Replace(
-                    rawName,
-                    @"\s*(Hands-Free AG|HFP|AG)$",
-                    "",
-                    RegexOptions.IgnoreCase).Trim();
-
-                candidates.Add((name, instanceId, address));
-            }
-        }
-        catch
-        {
-        }
+        // Enumerate candidate devices via SetupDi — no WMI, no COM stack
+        var candidates = EnumerateCandidates();
 
         if (candidates.Count == 0) return new();
 
-        var connectTasks = candidates.Select(async c => (c, connected: await IsConnectedAsync(c.Address)));
-        var connectResults = await Task.WhenAll(connectTasks);
+        // Filter to connected devices via WinRT
+        var connectTasks = candidates.Select(async c =>
+            (c, connected: await IsConnectedAsync(c.Address)));
 
-        var connected = connectResults
+        var connected = (await Task.WhenAll(connectTasks))
             .Where(r => r.connected)
             .Select(r => r.c)
             .ToList();
 
         if (connected.Count == 0) return new();
 
-        var batteryMap = await BatchQueryPnpBatteryAsync(
-            connected.Select(c => c.InstanceId).ToList());
-
+        // Read battery via SetupDi — no PowerShell process
         var results = new List<(string, int)>();
         foreach (var (name, instanceId, _) in connected)
         {
-            if (batteryMap.TryGetValue(instanceId, out int battery) && battery >= 0)
+            int battery = ReadBatteryProperty(instanceId);
+            if (battery >= 0)
                 results.Add((name, battery));
         }
 
         return results;
     }
+
+    // ── SetupDi enumeration ──────────────────────────────────────────────────
+
+    private static List<(string Name, string InstanceId, ulong Address)> EnumerateCandidates()
+    {
+        var results = new List<(string Name, string InstanceId, ulong Address)>();
+
+        IntPtr devList = NativeMethods.SetupDiGetClassDevsW(
+            IntPtr.Zero, "BTHENUM", IntPtr.Zero,
+            NativeMethods.DIGCF_ALLCLASSES | NativeMethods.DIGCF_PRESENT);
+
+        if (devList == NativeMethods.INVALID_HANDLE_VALUE) return results;
+
+        try
+        {
+            var devData = new NativeMethods.SP_DEVINFO_DATA();
+            devData.cbSize = (uint)Marshal.SizeOf(devData);
+
+            for (uint i = 0; NativeMethods.SetupDiEnumDeviceInfo(devList, i, ref devData); i++)
+            {
+                string? instanceId = GetInstanceId(devList, ref devData);
+                if (instanceId is null) continue;
+                if (!instanceId.Contains(HfagPattern, StringComparison.OrdinalIgnoreCase)) continue;
+
+                Match match = MacRegex.Match(instanceId);
+                if (!match.Success) continue;
+
+                ulong address = Convert.ToUInt64(match.Groups[1].Value, 16);
+
+                string rawName = GetDeviceDescription(devList, ref devData) ?? instanceId;
+                string name = Regex.Replace(
+                    rawName,
+                    @"\s*(Hands-Free AG|HFP|AG)$",
+                    "",
+                    RegexOptions.IgnoreCase).Trim();
+
+                results.Add((name, instanceId, address));
+            }
+        }
+        finally
+        {
+            NativeMethods.SetupDiDestroyDeviceInfoList(devList);
+        }
+
+        return results;
+    }
+
+    private static string? GetInstanceId(IntPtr devList, ref NativeMethods.SP_DEVINFO_DATA devData)
+    {
+        var sb = new StringBuilder(512);
+        return NativeMethods.SetupDiGetDeviceInstanceIdW(
+            devList, ref devData, sb, (uint)sb.Capacity, out _)
+            ? sb.ToString()
+            : null;
+    }
+
+    private static string? GetDeviceDescription(IntPtr devList, ref NativeMethods.SP_DEVINFO_DATA devData)
+    {
+        byte[] buf = new byte[1024];
+        var key = new NativeMethods.DEVPROPKEY
+        {
+            // DEVPKEY_Device_FriendlyName: {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=14
+            fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"),
+            pid = 14
+        };
+
+        if (NativeMethods.SetupDiGetDevicePropertyW(
+                devList, ref devData, ref key,
+                out _, buf, (uint)buf.Length, out uint needed, 0)
+            && needed > 2)
+        {
+            return Encoding.Unicode.GetString(buf, 0, (int)needed - 2); // strip null terminator
+        }
+
+        // Fallback: DEVPKEY_Device_DeviceDesc {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=2
+        key.pid = 2;
+        if (NativeMethods.SetupDiGetDevicePropertyW(
+                devList, ref devData, ref key,
+                out _, buf, (uint)buf.Length, out needed, 0)
+            && needed > 2)
+        {
+            return Encoding.Unicode.GetString(buf, 0, (int)needed - 2);
+        }
+
+        return null;
+    }
+
+    // ── Battery property read ────────────────────────────────────────────────
+
+    public static int ReadBatteryProperty(string instanceId)
+    {
+        IntPtr devList = NativeMethods.SetupDiGetClassDevsW(
+            IntPtr.Zero, "BTHENUM", IntPtr.Zero,
+            NativeMethods.DIGCF_ALLCLASSES | NativeMethods.DIGCF_PRESENT);
+
+        if (devList == NativeMethods.INVALID_HANDLE_VALUE) return -1;
+
+        try
+        {
+            var devData = new NativeMethods.SP_DEVINFO_DATA();
+            devData.cbSize = (uint)Marshal.SizeOf(devData);
+
+            for (uint i = 0; NativeMethods.SetupDiEnumDeviceInfo(devList, i, ref devData); i++)
+            {
+                string? id = GetInstanceId(devList, ref devData);
+                if (id is null || !id.Equals(instanceId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                return ReadBatteryFromDevInfo(devList, ref devData);
+            }
+        }
+        finally
+        {
+            NativeMethods.SetupDiDestroyDeviceInfoList(devList);
+        }
+
+        return -1;
+    }
+
+    private static int ReadBatteryFromDevInfo(
+        IntPtr devList, ref NativeMethods.SP_DEVINFO_DATA devData)
+    {
+        var key = new NativeMethods.DEVPROPKEY
+        {
+            fmtid = BatteryPropertyGuid,
+            pid = 2
+        };
+
+        byte[] buf = new byte[64];
+        if (!NativeMethods.SetupDiGetDevicePropertyW(
+                devList, ref devData, ref key,
+                out uint propType, buf, (uint)buf.Length, out uint needed, 0))
+            return -1;
+
+        // Property type determines how to interpret the bytes
+        return propType switch
+        {
+            NativeMethods.DEVPROP_TYPE_BYTE => buf[0],
+            NativeMethods.DEVPROP_TYPE_SBYTE => (sbyte)buf[0],
+            NativeMethods.DEVPROP_TYPE_UINT16 => BitConverter.ToUInt16(buf, 0),
+            NativeMethods.DEVPROP_TYPE_INT16 => BitConverter.ToInt16(buf, 0),
+            NativeMethods.DEVPROP_TYPE_UINT32 => (int)Math.Min(BitConverter.ToUInt32(buf, 0), 100),
+            NativeMethods.DEVPROP_TYPE_INT32 => BitConverter.ToInt32(buf, 0),
+            _ => -1
+        };
+    }
+
+    // ── WinRT connectivity check ─────────────────────────────────────────────
 
     private static async Task<bool> IsConnectedAsync(ulong bluetoothAddress)
     {
@@ -87,76 +207,69 @@ public class ClassicBatteryReader
 
             return device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
-    private static Task<Dictionary<string, int>> BatchQueryPnpBatteryAsync(List<string> instanceIds) =>
-        Task.Run(() => BatchQueryPnpBattery(instanceIds));
+    // ── Async query helper for DeviceDumper ──────────────────────────────────
 
-    private static Dictionary<string, int> BatchQueryPnpBattery(List<string> instanceIds)
+    public static Task<int> QueryPnpBatteryAsync(string instanceId) =>
+        Task.Run(() => ReadBatteryProperty(instanceId));
+}
+
+// ── P/Invoke declarations ────────────────────────────────────────────────────
+
+internal static class NativeMethods
+{
+    public const uint DIGCF_PRESENT = 0x00000002;
+    public const uint DIGCF_ALLCLASSES = 0x00000004;
+    public static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    public const uint DEVPROP_TYPE_SBYTE = 0x00000002;
+    public const uint DEVPROP_TYPE_BYTE = 0x00000003;
+    public const uint DEVPROP_TYPE_INT16 = 0x00000004;
+    public const uint DEVPROP_TYPE_UINT16 = 0x00000005;
+    public const uint DEVPROP_TYPE_INT32 = 0x00000006;
+    public const uint DEVPROP_TYPE_UINT32 = 0x00000007;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SP_DEVINFO_DATA
     {
-        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        if (instanceIds.Count == 0) return result;
-
-        try
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("$ErrorActionPreference = 'SilentlyContinue'");
-            sb.AppendLine("$key = '" + BatteryPKey + "'");
-            sb.AppendLine("$ids = @(");
-            foreach (string id in instanceIds)
-                sb.AppendLine($"  '{id.Replace("'", "''")}'");
-            sb.AppendLine(")");
-            sb.AppendLine("foreach ($id in $ids) {");
-            sb.AppendLine("  $val = (Get-PnpDeviceProperty -InstanceId $id -KeyName $key -ErrorAction SilentlyContinue).Data");
-            sb.AppendLine("  Write-Output \"$id=$val\"");
-            sb.AppendLine("}");
-
-            string script = Convert.ToBase64String(
-                Encoding.Unicode.GetBytes(sb.ToString()));
-
-            using var ps = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -NonInteractive -EncodedCommand {script}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            ps.Start();
-            string output = ps.StandardOutput.ReadToEnd();
-            ps.WaitForExit();
-
-            foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                int eq = line.LastIndexOf('=');
-                if (eq < 0) continue;
-
-                string id = line[..eq].Trim();
-                string val = line[(eq + 1)..].Trim();
-
-                if (int.TryParse(val, out int pct) && pct is >= 0 and <= 100)
-                    result[id] = pct;
-            }
-        }
-        catch
-        {
-        }
-
-        return result;
+        public uint cbSize;
+        public Guid ClassGuid;
+        public uint DevInst;
+        public IntPtr Reserved;
     }
 
-    public static async Task<int> QueryPnpBatteryAsync(string instanceId)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DEVPROPKEY
     {
-        var map = await BatchQueryPnpBatteryAsync(new List<string> { instanceId });
-        return map.TryGetValue(instanceId, out int v) ? v : -1;
+        public Guid fmtid;
+        public uint pid;
     }
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr SetupDiGetClassDevsW(
+        IntPtr ClassGuid, string? Enumerator,
+        IntPtr hwndParent, uint Flags);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    public static extern bool SetupDiEnumDeviceInfo(
+        IntPtr DeviceInfoSet, uint MemberIndex,
+        ref SP_DEVINFO_DATA DeviceInfoData);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool SetupDiGetDeviceInstanceIdW(
+        IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
+        StringBuilder DeviceInstanceId, uint DeviceInstanceIdSize,
+        out uint RequiredSize);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool SetupDiGetDevicePropertyW(
+        IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
+        ref DEVPROPKEY PropertyKey, out uint PropertyType,
+        byte[] PropertyBuffer, uint PropertyBufferSize,
+        out uint RequiredSize, uint Flags);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    public static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
 }

@@ -15,62 +15,78 @@ public class GattBatteryReader
         var results = new List<(string, int)>();
         try
         {
+            // Enumerate only devices that actually advertise the Battery Service UUID.
+            // This is the correct filter — pairing state alone is too broad.
             string selector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
             DeviceInformationCollection serviceInfos =
                 await DeviceInformation.FindAllAsync(selector);
 
-            var tasks = serviceInfos.Cast<DeviceInformation>().Select(async serviceInfo =>
-            {
-                GattDeviceService? service = null;
-                try
-                {
-                    service = await GattDeviceService.FromIdAsync(serviceInfo.Id);
-                    if (service is null) return ((string?)null, -1);
-
-                    string name = await ResolveNameAsync(service, serviceInfo);
-                    int battery = await ReadFromServiceAsync(service);
-                    return ((string?)name, battery);
-                }
-                catch { return ((string?)null, -1); }
-                finally { service?.Dispose(); }
-            });
-
+            var tasks = serviceInfos.Cast<DeviceInformation>().Select(ReadDeviceAsync);
             var taskResults = await Task.WhenAll(tasks);
+
             foreach (var (name, battery) in taskResults)
-                if (name is not null) results.Add((name, battery));
+                if (name is not null)
+                    results.Add((name, battery));
         }
         catch { }
 
         return results;
     }
 
-    private static async Task<string> ResolveNameAsync(
-        GattDeviceService service, DeviceInformation fallback)
+    private static async Task<(string? Name, int Battery)> ReadDeviceAsync(DeviceInformation serviceInfo)
     {
+        BluetoothLEDevice? device = null;
         try
         {
-            using BluetoothLEDevice? dev =
-                await BluetoothLEDevice.FromIdAsync(service.DeviceId);
-            return ResolveDeviceName(dev?.Name, fallback.Name, fallback.Id);
+            // Open the device via the service's DeviceId — avoids a second FromIdAsync call
+            device = await BluetoothLEDevice.FromIdAsync(
+                serviceInfo.Properties.TryGetValue("System.Devices.ContainerId", out _)
+                    ? serviceInfo.Id
+                    : serviceInfo.Id);
+
+            if (device is null) return (null, -1);
+
+            // GetGattServicesForUuidAsync on the already-open device — no extra driver call
+            GattDeviceServicesResult svcResult =
+                await device.GetGattServicesForUuidAsync(
+                    BatterySvcUuid, BluetoothCacheMode.Cached);
+
+            if (svcResult.Status != GattCommunicationStatus.Success
+                || svcResult.Services.Count == 0)
+                return (null, -1);
+
+            try
+            {
+                int battery = await ReadBatteryLevelAsync(svcResult.Services[0]);
+                if (battery < 0) return (null, -1);
+
+                string name = ResolveDeviceName(device.Name, serviceInfo.Name, serviceInfo.Id);
+                return (name, battery);
+            }
+            finally
+            {
+                foreach (var svc in svcResult.Services)
+                    svc.Dispose();
+            }
         }
-        catch
-        {
-            return ResolveDeviceName(fallback.Name, fallback.Id);
-        }
+        catch { return (null, -1); }
+        finally { device?.Dispose(); }
     }
 
-    private static async Task<int> ReadFromServiceAsync(GattDeviceService service)
+    private static async Task<int> ReadBatteryLevelAsync(GattDeviceService service)
     {
         try
         {
+            // Cached is fine for characteristic *discovery* — it is metadata, not a live value
             GattCharacteristicsResult charResult =
                 await service.GetCharacteristicsForUuidAsync(
-                    BatteryLevelUuid, BluetoothCacheMode.Uncached);
+                    BatteryLevelUuid, BluetoothCacheMode.Cached);
 
             if (charResult.Status != GattCommunicationStatus.Success
                 || charResult.Characteristics.Count == 0)
                 return -1;
 
+            // Always Uncached for the actual byte — Windows cache is stale until first live read
             GattReadResult readResult =
                 await charResult.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Uncached);
 
@@ -78,7 +94,8 @@ public class GattBatteryReader
                 return -1;
 
             using DataReader reader = DataReader.FromBuffer(readResult.Value);
-            return reader.ReadByte();
+            byte value = reader.ReadByte();
+            return value is >= 0 and <= 100 ? value : -1;
         }
         catch { return -1; }
     }
