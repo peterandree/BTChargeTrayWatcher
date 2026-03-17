@@ -18,6 +18,9 @@ public class ThresholdSettings
 
     public void SetLow(int value)
     {
+        if (value >= High)
+            throw new ArgumentOutOfRangeException(nameof(value),
+                $"Low threshold ({value}) must be strictly less than High threshold ({High}).");
         Low = value;
         Save();
         Changed?.Invoke();
@@ -25,6 +28,9 @@ public class ThresholdSettings
 
     public void SetHigh(int value)
     {
+        if (value <= Low)
+            throw new ArgumentOutOfRangeException(nameof(value),
+                $"High threshold ({value}) must be strictly greater than Low threshold ({Low}).");
         High = value;
         Save();
         Changed?.Invoke();
