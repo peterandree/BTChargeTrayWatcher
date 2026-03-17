@@ -13,8 +13,10 @@ public class BluetoothBatteryMonitor : IDisposable
     public event Action<string, int>? DeviceBatteryRead;
     public event Action<string, int>? DeviceFound;
     public event Action<IReadOnlyList<(string, int)>>? ScanCompleted;
+    public event Action? ScanStarted;
 
-    // Snapshot of last known state — empty until first poll/scan completes
+    public bool IsScanning { get; private set; }
+
     public IReadOnlyList<(string Name, int Battery)> LastKnownDevices =>
         _lastKnown.Select(kv => (kv.Key, kv.Value)).ToList();
 
@@ -34,28 +36,34 @@ public class BluetoothBatteryMonitor : IDisposable
 
     public async Task<List<(string Name, int Battery)>> ScanNowAsync()
     {
+        IsScanning = true;
+        ScanStarted?.Invoke();
+
         var results = new List<(string, int)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (name, battery) in await _gattReader.ReadAllAsync())
+        try
         {
-            if (!seen.Add(name)) continue;
-            DeviceFound?.Invoke(name, battery);
-            results.Add((name, battery));
+            foreach (var (name, battery) in await _gattReader.ReadAllAsync())
+            {
+                if (!seen.Add(name)) continue;
+                DeviceFound?.Invoke(name, battery);
+                results.Add((name, battery));
+            }
+
+            foreach (var (name, battery) in await _classicReader.ReadAllAsync())
+            {
+                if (!seen.Add(name)) continue;
+                DeviceFound?.Invoke(name, battery);
+                results.Add((name, battery));
+            }
+        }
+        finally
+        {
+            IsScanning = false;
+            ScanCompleted?.Invoke(results);
         }
 
-        foreach (var (name, battery) in await _classicReader.ReadAllAsync())
-        {
-            if (!seen.Add(name)) continue;
-            DeviceFound?.Invoke(name, battery);
-            results.Add((name, battery));
-        }
-
-        // Update cache with fresh results
-        foreach (var (name, battery) in results)
-            if (battery >= 0) _lastKnown[name] = battery;
-
-        ScanCompleted?.Invoke(results);
         return results;
     }
 
@@ -64,22 +72,26 @@ public class BluetoothBatteryMonitor : IDisposable
         if (!await _pollLock.WaitAsync(0)) return;
         try
         {
+            var snapshot = new Dictionary<string, int>(_lastKnown);
             var devices = await ScanNowAsync();
+
             foreach (var (name, battery) in devices)
             {
                 if (battery < 0) continue;
 
-                bool known = _lastKnown.TryGetValue(name, out int prev);
-                if (!known || prev != battery)
-                {
-                    _lastKnown[name] = battery;
-                    DeviceBatteryRead?.Invoke(name, battery);
+                snapshot.TryGetValue(name, out int prev);
+                bool isNew = !snapshot.ContainsKey(name);
 
-                    if (battery <= _settings.Low)
-                        _notifier.NotifyLow(name, battery);
-                    else if (battery >= _settings.High)
-                        _notifier.NotifyHigh(name, battery);
-                }
+                _lastKnown[name] = battery;
+                DeviceBatteryRead?.Invoke(name, battery);
+
+                if (isNew) continue;
+                if (prev == battery) continue;
+
+                if (battery <= _settings.Low && prev > _settings.Low)
+                    _notifier.NotifyLow(name, battery);
+                else if (battery >= _settings.High && prev < _settings.High)
+                    _notifier.NotifyHigh(name, battery);
             }
         }
         finally { _pollLock.Release(); }
