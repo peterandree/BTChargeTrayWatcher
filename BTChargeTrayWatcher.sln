@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11605.240 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTChargeTrayWatcher", "BTChargeTrayWatcher.csproj", "{37C9867D-FF87-6F13-42F2-D8551DF198EA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{37C9867D-FF87-6F13-42F2-D8551DF198EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{37C9867D-FF87-6F13-42F2-D8551DF198EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{37C9867D-FF87-6F13-42F2-D8551DF198EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{37C9867D-FF87-6F13-42F2-D8551DF198EA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {99576F14-1883-4760-966A-43643B0C77F6}
+	EndGlobalSection
+EndGlobal
