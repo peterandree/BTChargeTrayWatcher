@@ -15,7 +15,7 @@ public class ClassicBatteryReader
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
-        Task.Run(ReadAllAsync_Internal).Unwrap();
+    Task.Run(ReadAllAsync_Internal);
 
     private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal()
     {
