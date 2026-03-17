@@ -15,21 +15,20 @@ public class NotificationService
     }
 
     public void NotifyLow(string deviceName, int battery) =>
-        ShowToast("⚠ Low Battery", $"{deviceName}: {battery}% — charge now");
+        ShowToast("\u26a0 Low Battery", $"{deviceName}: {battery}% \u2014 charge now");
 
     public void NotifyHigh(string deviceName, int battery) =>
-        ShowToast("🔋 Battery High", $"{deviceName}: {battery}% — unplug charger");
+        ShowToast("\U0001f50b Battery High", $"{deviceName}: {battery}% \u2014 unplug charger");
 
     public void NotifyDeviceFound(string deviceName, int battery)
     {
         string body = battery >= 0
-            ? $"{deviceName}: {battery}%  {BatteryBar(battery)}"
+            ? $"{deviceName}: {battery}%  {BluetoothBatteryMonitor.BatteryBar(battery)}"
             : $"{deviceName}: battery n/a";
 
-        ShowToast("🔵 BT Device Found", body);
+        ShowToast("\U0001f535 BT Device Found", body);
     }
 
-    // Register AUMID so unpackaged app can send toasts [web:36]
     private static void RegisterAumid()
     {
         try
@@ -45,7 +44,6 @@ public class NotificationService
     {
         try
         {
-            // Escape XML special chars
             string safeTitle = System.Security.SecurityElement.Escape(title);
             string safeMessage = System.Security.SecurityElement.Escape(message);
 
@@ -68,11 +66,5 @@ public class NotificationService
                 .Show(new ToastNotification(doc));
         }
         catch { }
-    }
-
-    private static string BatteryBar(int pct)
-    {
-        int filled = (int)Math.Round(pct / 10.0);
-        return "[" + new string('█', filled) + new string('░', 10 - filled) + "]";
     }
 }
