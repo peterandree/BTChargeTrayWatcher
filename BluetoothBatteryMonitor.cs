@@ -34,6 +34,7 @@ public partial class BluetoothBatteryMonitor : IDisposable
             TimeSpan.FromSeconds(60));
     }
 
+    // User-initiated scan: sets IsScanning, fires ScanStarted / DeviceFound / ScanCompleted.
     public async Task<List<(string Name, int Battery)>> ScanNowAsync()
     {
         IsScanning = true;
@@ -67,13 +68,34 @@ public partial class BluetoothBatteryMonitor : IDisposable
         return results;
     }
 
+    // Silent read used by the background timer: does NOT touch IsScanning or any UI events.
+    private async Task<List<(string Name, int Battery)>> QuietReadAsync()
+    {
+        List<(string, int)> results = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, battery) in await _gattReader.ReadAllAsync())
+        {
+            if (!seen.Add(name)) continue;
+            results.Add((name, battery));
+        }
+
+        foreach (var (name, battery) in await _classicReader.ReadAllAsync())
+        {
+            if (!seen.Add(name)) continue;
+            results.Add((name, battery));
+        }
+
+        return results;
+    }
+
     public async Task PollAsync()
     {
         if (!await _pollLock.WaitAsync(0)) return;
         try
         {
             var snapshot = new Dictionary<string, int>(_lastKnown);
-            var devices = await ScanNowAsync();
+            var devices = await QuietReadAsync();
 
             foreach (var (name, battery) in devices)
             {
@@ -100,7 +122,7 @@ public partial class BluetoothBatteryMonitor : IDisposable
     public static string BatteryBar(int pct)
     {
         int filled = (int)Math.Round(pct / 10.0);
-        return "[" + new string('█', filled) + new string('░', 10 - filled) + "]";
+        return "[" + new string('\u2588', filled) + new string('\u2591', 10 - filled) + "]";
     }
 
     public void Dispose()
