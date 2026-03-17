@@ -9,8 +9,10 @@ public class DeviceDumper
     public async Task DumpToDesktopAsync()
     {
         var lines = new List<string>();
+        var devices = new List<(string? Name, string? InstanceId, string? Status)>();
 
         lines.Add("=== WMI BTHENUM PnP Devices ===");
+
         await Task.Run(() =>
         {
             using var searcher = new ManagementObjectSearcher(
@@ -19,21 +21,26 @@ public class DeviceDumper
 
             foreach (ManagementObject obj in searcher.Get())
             {
-                string? name = obj["Name"]?.ToString();
-                string? instanceId = obj["DeviceID"]?.ToString();
-                string? status = obj["Status"]?.ToString();
-
-                lines.Add($"  Name={name}  Status={status}");
-                lines.Add($"  InstanceId={instanceId}");
-
-                if (instanceId is not null)
-                {
-                    int val = ClassicBatteryReader.QueryPnpBattery(instanceId);
-                    lines.Add($"    {BatteryPKey} => {val}");
-                }
-                lines.Add("");
+                devices.Add((
+                    obj["Name"]?.ToString(),
+                    obj["DeviceID"]?.ToString(),
+                    obj["Status"]?.ToString()));
             }
         });
+
+        foreach (var (name, instanceId, status) in devices)
+        {
+            lines.Add($"  Name={name}  Status={status}");
+            lines.Add($"  InstanceId={instanceId}");
+
+            if (instanceId is not null)
+            {
+                int val = await ClassicBatteryReader.QueryPnpBatteryAsync(instanceId);
+                lines.Add($"    {BatteryPKey} => {val}");
+            }
+
+            lines.Add("");
+        }
 
         string path = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Desktop),

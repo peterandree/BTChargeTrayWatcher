@@ -1,4 +1,5 @@
-﻿using System.Management;
+﻿using System.Diagnostics;
+using System.Management;
 using System.Text;
 using System.Text.RegularExpressions;
 using Windows.Devices.Bluetooth;
@@ -15,7 +16,7 @@ public class ClassicBatteryReader
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
-    Task.Run(ReadAllAsync_Internal);
+        Task.Run(ReadAllAsync_Internal);
 
     private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal()
     {
@@ -47,11 +48,12 @@ public class ClassicBatteryReader
                 candidates.Add((name, instanceId, address));
             }
         }
-        catch { }
+        catch
+        {
+        }
 
         if (candidates.Count == 0) return new();
 
-        // Check connectivity asynchronously — no blocking WinRT calls
         var connectTasks = candidates.Select(async c => (c, connected: await IsConnectedAsync(c.Address)));
         var connectResults = await Task.WhenAll(connectTasks);
 
@@ -62,7 +64,8 @@ public class ClassicBatteryReader
 
         if (connected.Count == 0) return new();
 
-        var batteryMap = BatchQueryPnpBattery(connected.Select(c => c.InstanceId).ToList());
+        var batteryMap = await BatchQueryPnpBatteryAsync(
+            connected.Select(c => c.InstanceId).ToList());
 
         var results = new List<(string, int)>();
         foreach (var (name, instanceId, _) in connected)
@@ -70,6 +73,7 @@ public class ClassicBatteryReader
             if (batteryMap.TryGetValue(instanceId, out int battery) && battery >= 0)
                 results.Add((name, battery));
         }
+
         return results;
     }
 
@@ -83,15 +87,24 @@ public class ClassicBatteryReader
 
             return device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
         }
-        catch { return false; }
+        catch
+        {
+            return false;
+        }
     }
+
+    private static Task<Dictionary<string, int>> BatchQueryPnpBatteryAsync(List<string> instanceIds) =>
+        Task.Run(() => BatchQueryPnpBattery(instanceIds));
 
     private static Dictionary<string, int> BatchQueryPnpBattery(List<string> instanceIds)
     {
         var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (instanceIds.Count == 0) return result;
+
         try
         {
             var sb = new StringBuilder();
+            sb.AppendLine("$ErrorActionPreference = 'SilentlyContinue'");
             sb.AppendLine("$key = '" + BatteryPKey + "'");
             sb.AppendLine("$ids = @(");
             foreach (string id in instanceIds)
@@ -105,17 +118,19 @@ public class ClassicBatteryReader
             string script = Convert.ToBase64String(
                 Encoding.Unicode.GetBytes(sb.ToString()));
 
-            using var ps = new System.Diagnostics.Process
+            using var ps = new Process
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
+                StartInfo = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -EncodedCommand {script}",
+                    Arguments = $"-NoProfile -NonInteractive -EncodedCommand {script}",
                     RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
+
             ps.Start();
             string output = ps.StandardOutput.ReadToEnd();
             ps.WaitForExit();
@@ -124,17 +139,24 @@ public class ClassicBatteryReader
             {
                 int eq = line.LastIndexOf('=');
                 if (eq < 0) continue;
+
                 string id = line[..eq].Trim();
                 string val = line[(eq + 1)..].Trim();
+
                 if (int.TryParse(val, out int pct) && pct is >= 0 and <= 100)
                     result[id] = pct;
             }
         }
-        catch { }
+        catch
+        {
+        }
+
         return result;
     }
 
-    public static int QueryPnpBattery(string instanceId) =>
-        BatchQueryPnpBattery(new List<string> { instanceId })
-            .TryGetValue(instanceId, out int v) ? v : -1;
+    public static async Task<int> QueryPnpBatteryAsync(string instanceId)
+    {
+        var map = await BatchQueryPnpBatteryAsync(new List<string> { instanceId });
+        return map.TryGetValue(instanceId, out int v) ? v : -1;
+    }
 }
