@@ -34,7 +34,7 @@ public class TrayApp : IDisposable
         _lowMenu = BuildLowMenu();
         _highMenu = BuildHighMenu();
         _devicesMenu = BuildDevicesMenu();
-        _scanMenuItem = new ToolStripMenuItem("Scan devices…");
+        _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => OpenScanWindow();
 
         _trayIcon.ContextMenuStrip = BuildContextMenu();
@@ -56,23 +56,21 @@ public class TrayApp : IDisposable
     private void PostToUi(Action action) =>
         _uiContext.Post(_ => action(), null);
 
-    // Called on UI thread when scan starts
     private void OnScanStarted()
     {
         _devicesMenu.DropDownItems.Clear();
         _devicesMenu.DropDownItems.Add(
-            new ToolStripMenuItem("⏳ Scan in progress…") { Enabled = false });
+            new ToolStripMenuItem("\u23f3 Scan in progress\u2026") { Enabled = false });
 
-        _scanMenuItem.Text = "⏳ Scanning…";
+        _scanMenuItem.Text = "\u23f3 Scanning\u2026";
         _scanMenuItem.Enabled = false;
         _lowMenu.Enabled = false;
         _highMenu.Enabled = false;
     }
 
-    // Called on UI thread when scan ends
     private void OnScanCompleted()
     {
-        _scanMenuItem.Text = "Scan devices…";
+        _scanMenuItem.Text = "Scan devices\u2026";
         _scanMenuItem.Enabled = true;
         _lowMenu.Enabled = true;
         _highMenu.Enabled = true;
@@ -101,27 +99,36 @@ public class TrayApp : IDisposable
     {
         if (_monitor.IsScanning)
         {
-            // Scan already running — just open window to show live progress
             if (_scanWindow is null || _scanWindow.IsDisposed)
             {
                 _scanWindow = new ScanWindow();
                 _scanWindow.Show();
 
-                void OnDeviceFound(string name, int battery) =>
-                    PostToUi(() => _scanWindow.OnDeviceFound(name, battery));
+                // Capture reference so lambdas never see a replaced _scanWindow field
+                ScanWindow capturedWindow = _scanWindow;
 
-                void OnCompleted(IReadOnlyList<(string, int)> results) =>
-                    PostToUi(() => _scanWindow.OnScanComplete(results.Count));
+                void OnDeviceFound(string name, int battery)
+                {
+                    PostToUi(() =>
+                    {
+                        if (!capturedWindow.IsDisposed)
+                            capturedWindow.OnDeviceFound(name, battery);
+                    });
+                }
+
+                void OnCompleted(IReadOnlyList<(string, int)> results)
+                {
+                    PostToUi(() =>
+                    {
+                        if (!capturedWindow.IsDisposed)
+                            capturedWindow.OnScanComplete(results.Count);
+                    });
+                    _monitor.DeviceFound -= OnDeviceFound;
+                    _monitor.ScanCompleted -= OnCompleted;
+                }
 
                 _monitor.DeviceFound += OnDeviceFound;
                 _monitor.ScanCompleted += OnCompleted;
-
-                // Detach when scan completes
-                _monitor.ScanCompleted += _ =>
-                {
-                    _monitor.DeviceFound -= OnDeviceFound;
-                    _monitor.ScanCompleted -= OnCompleted;
-                };
             }
             else
             {
@@ -130,7 +137,6 @@ public class TrayApp : IDisposable
             return;
         }
 
-        // No scan running — open window and start fresh scan
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
         {
             _scanWindow.BringToFront();
@@ -140,8 +146,16 @@ public class TrayApp : IDisposable
         _scanWindow = new ScanWindow();
         _scanWindow.Show();
 
-        void OnFound(string name, int battery) =>
-            PostToUi(() => _scanWindow.OnDeviceFound(name, battery));
+        ScanWindow win = _scanWindow;
+
+        void OnFound(string name, int battery)
+        {
+            PostToUi(() =>
+            {
+                if (!win.IsDisposed)
+                    win.OnDeviceFound(name, battery);
+            });
+        }
 
         _monitor.DeviceFound += OnFound;
 
@@ -150,7 +164,11 @@ public class TrayApp : IDisposable
             try
             {
                 var results = await _monitor.ScanNowAsync();
-                PostToUi(() => _scanWindow.OnScanComplete(results.Count));
+                PostToUi(() =>
+                {
+                    if (!win.IsDisposed)
+                        win.OnScanComplete(results.Count);
+                });
             }
             finally
             {
@@ -167,8 +185,16 @@ public class TrayApp : IDisposable
             int val = v;
             item.DropDownItems.Add($"{val}%", null, (_, _) =>
             {
-                _settings.SetLow(val);
-                item.Text = $"Low threshold: {val}%";
+                try
+                {
+                    _settings.SetLow(val);
+                    item.Text = $"Low threshold: {val}%";
+                }
+                catch (ArgumentOutOfRangeException ex)
+                {
+                    MessageBox.Show(ex.Message, "Invalid Threshold",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             });
         }
         return item;
@@ -182,8 +208,16 @@ public class TrayApp : IDisposable
             int val = v;
             item.DropDownItems.Add($"{val}%", null, (_, _) =>
             {
-                _settings.SetHigh(val);
-                item.Text = $"High threshold: {val}%";
+                try
+                {
+                    _settings.SetHigh(val);
+                    item.Text = $"High threshold: {val}%";
+                }
+                catch (ArgumentOutOfRangeException ex)
+                {
+                    MessageBox.Show(ex.Message, "Invalid Threshold",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             });
         }
         return item;
@@ -194,7 +228,7 @@ public class TrayApp : IDisposable
         var item = new ToolStripMenuItem("Connected devices");
         item.DropDownOpening += (_, _) =>
         {
-            if (_monitor.IsScanning) return;  // Already showing scan-in-progress state
+            if (_monitor.IsScanning) return;
 
             if (_monitor.HasCachedResults)
                 PopulateDevicesMenu(item, _monitor.LastKnownDevices);
@@ -202,7 +236,7 @@ public class TrayApp : IDisposable
             {
                 item.DropDownItems.Clear();
                 item.DropDownItems.Add(
-                    new ToolStripMenuItem("No data yet — use Scan devices…")
+                    new ToolStripMenuItem("No data yet \u2014 use Scan devices\u2026")
                     { Enabled = false });
             }
         };
@@ -242,14 +276,25 @@ public class TrayApp : IDisposable
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_scanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Dump device properties…", null, async (_, _) =>
+        menu.Items.Add("Dump device properties\u2026", null, async (_, _) =>
         {
-            await _dumper.DumpToDesktopAsync();
-            MessageBox.Show(
-                "Dump written to Desktop\\BTBatteryDump.txt",
-                "BT Battery",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            try
+            {
+                await _dumper.DumpToDesktopAsync();
+                MessageBox.Show(
+                    "Dump written to Desktop\\BTBatteryDump.txt",
+                    "BT Battery",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Dump failed: {ex.Message}",
+                    "BT Battery",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) =>
@@ -262,7 +307,7 @@ public class TrayApp : IDisposable
 
     private void UpdateTooltip()
     {
-        _trayIcon.Text = $"BT Battery Alert  ▼{_settings.Low}%  ▲{_settings.High}%";
+        _trayIcon.Text = $"BT Battery Alert  \u25bc{_settings.Low}%  \u25b2{_settings.High}%";
     }
 
     public void Dispose()
