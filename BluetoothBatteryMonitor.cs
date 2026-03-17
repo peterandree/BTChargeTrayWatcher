@@ -1,12 +1,12 @@
 ﻿namespace BTChargeTrayWatcher;
 
-public class BluetoothBatteryMonitor : IDisposable
+public partial class BluetoothBatteryMonitor : IDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly NotificationService _notifier;
     private readonly GattBatteryReader _gattReader = new();
     private readonly ClassicBatteryReader _classicReader = new();
-    private readonly Dictionary<string, int> _lastKnown = new();
+    private readonly Dictionary<string, int> _lastKnown = [];
     private readonly System.Threading.Timer _timer;
     private readonly SemaphoreSlim _pollLock = new(1, 1);
 
@@ -39,8 +39,8 @@ public class BluetoothBatteryMonitor : IDisposable
         IsScanning = true;
         ScanStarted?.Invoke();
 
-        var results = new List<(string, int)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<(string, int)> results = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -107,5 +107,6 @@ public class BluetoothBatteryMonitor : IDisposable
     {
         _timer.Dispose();
         _pollLock.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
