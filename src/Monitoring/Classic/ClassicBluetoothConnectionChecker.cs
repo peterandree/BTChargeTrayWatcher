@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using Windows.Devices.Bluetooth;
 
 namespace BTChargeTrayWatcher;
@@ -26,7 +29,7 @@ internal sealed class ClassicBluetoothConnectionChecker
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            Debug.WriteLine($"[ClassicBluetoothConnectionChecker] Connection check fault: {ex.Message}");
             return false;
         }
     }

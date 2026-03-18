@@ -10,12 +10,10 @@ namespace BTChargeTrayWatcher;
 public sealed class ClassicBatteryReader : IBatteryReader
 {
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(3);
-    private const int MaxConcurrentBatteryReads = 2;
 
     private readonly ClassicBluetoothDeviceEnumerator _deviceEnumerator = new();
     private readonly ClassicBluetoothConnectionChecker _connectionChecker = new();
     private readonly ClassicBatteryPropertyReader _batteryPropertyReader = new();
-    private readonly SemaphoreSlim _batteryReadGate = new(MaxConcurrentBatteryReads, MaxConcurrentBatteryReads);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
         ReadAllAsync(CancellationToken.None);
@@ -55,13 +53,17 @@ public sealed class ClassicBatteryReader : IBatteryReader
         if (connected.Count == 0)
             return new();
 
-        Task<(string Name, int Battery)>[] batteryTasks = connected
-            .Select(candidate => ReadBatteryAsync(candidate, cancellationToken))
-            .ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        (string Name, int Battery)[] readings = await Task.WhenAll(batteryTasks).ConfigureAwait(false);
+        // Batch read all batteries in a single SetupAPI pass on a background thread
+        Dictionary<string, int> batteryMap = await Task.Run(() =>
+        {
+            var instanceIds = connected.Select(c => c.InstanceId);
+            return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
+        }, cancellationToken).ConfigureAwait(false);
 
-        return readings
+        return connected
+            .Select(c => (c.Name, Battery: batteryMap.TryGetValue(c.InstanceId, out int b) ? b : -1))
             .Where(r => !string.IsNullOrWhiteSpace(r.Name) && r.Battery >= 0)
             .ToList();
     }
@@ -87,50 +89,13 @@ public sealed class ClassicBatteryReader : IBatteryReader
         }
         catch (Exception ex) when (IsExpectedBluetoothException(ex))
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ClassicBatteryReader] Connection check failed for '{candidate.Name}': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[ClassicBatteryReader] Connection check failed for '{candidate.Name}': {ex.Message}");
             return (candidate, false);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ClassicBatteryReader] Unexpected connection check fault for '{candidate.Name}': {ex}");
+            System.Diagnostics.Debug.WriteLine($"[ClassicBatteryReader] Unexpected connection check fault for '{candidate.Name}': {ex}");
             return (candidate, false);
-        }
-    }
-
-    private async Task<(string Name, int Battery)> ReadBatteryAsync(
-        ClassicBluetoothCandidate candidate,
-        CancellationToken cancellationToken)
-    {
-        await _batteryReadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            int battery = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
-            return (candidate.Name, battery);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsExpectedBluetoothException(ex))
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ClassicBatteryReader] Battery read failed for '{candidate.Name}': {ex.Message}");
-            return (candidate.Name, -1);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[ClassicBatteryReader] Unexpected battery read fault for '{candidate.Name}': {ex}");
-            return (candidate.Name, -1);
-        }
-        finally
-        {
-            _batteryReadGate.Release();
         }
     }
 

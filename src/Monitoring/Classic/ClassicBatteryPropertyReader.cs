@@ -1,4 +1,7 @@
-﻿using System.Runtime.InteropServices;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
@@ -7,8 +10,14 @@ internal sealed class ClassicBatteryPropertyReader
     private static readonly Guid BatteryPropertyGuid =
         new("104EA319-6EE2-4701-BD47-8DDBF425BBE5");
 
-    public int ReadBatteryProperty(string instanceId)
+    public Dictionary<string, int> ReadBatteryProperties(IEnumerable<string> instanceIds)
     {
+        var targetIds = new HashSet<string>(instanceIds, StringComparer.OrdinalIgnoreCase);
+        var results = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        if (targetIds.Count == 0)
+            return results;
+
         IntPtr devList = SetupApiNative.SetupDiGetClassDevsW(
             IntPtr.Zero,
             "BTHENUM",
@@ -16,22 +25,25 @@ internal sealed class ClassicBatteryPropertyReader
             SetupApiNative.DIGCF_ALLCLASSES | SetupApiNative.DIGCF_PRESENT);
 
         if (devList == SetupApiNative.INVALID_HANDLE_VALUE)
-            return -1;
+            return results;
 
         try
         {
             var devData = new SetupApiNative.SP_DEVINFO_DATA
             {
-                cbSize = (uint)Marshal.SizeOf<SetupApiNative.SP_DEVINFO_DATA>()
+                cbSize = (uint)Marshal.SizeOf(typeof(SetupApiNative.SP_DEVINFO_DATA))
             };
 
             for (uint i = 0; SetupApiNative.SetupDiEnumDeviceInfo(devList, i, ref devData); i++)
             {
-                string? id = GetInstanceId(devList, ref devData);
-                if (id is null || !id.Equals(instanceId, StringComparison.OrdinalIgnoreCase))
-                    continue;
+                if (targetIds.Count == 0)
+                    break; // All requested targets found; terminate enumeration early
 
-                return ReadBatteryFromDevInfo(devList, ref devData);
+                string? id = GetInstanceId(devList, ref devData);
+                if (id != null && targetIds.Remove(id))
+                {
+                    results[id] = ReadBatteryFromDevInfo(devList, ref devData);
+                }
             }
         }
         finally
@@ -39,7 +51,7 @@ internal sealed class ClassicBatteryPropertyReader
             SetupApiNative.SetupDiDestroyDeviceInfoList(devList);
         }
 
-        return -1;
+        return results;
     }
 
     private static string? GetInstanceId(IntPtr devList, ref SetupApiNative.SP_DEVINFO_DATA devData)
@@ -67,14 +79,14 @@ internal sealed class ClassicBatteryPropertyReader
 
         byte[] buf = new byte[64];
         if (!SetupApiNative.SetupDiGetDevicePropertyW(
-                devList,
-                ref devData,
-                ref key,
-                out uint propType,
-                buf,
-                (uint)buf.Length,
-                out _,
-                0))
+            devList,
+            ref devData,
+            ref key,
+            out uint propType,
+            buf,
+            (uint)buf.Length,
+            out _,
+            0))
             return -1;
 
         int raw = propType switch
