@@ -10,37 +10,37 @@ public partial class BluetoothBatteryMonitor
         ThrowIfDisposingOrDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        _isScanning = true;
-        ScanStarted?.Invoke();
+        await _scanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         List<(string, int)> results = [];
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
         try
         {
-            foreach (var (name, battery) in await _gattReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            _isScanning = true;
+            ScanStarted?.Invoke();
+
+            Task<List<(string Name, int Battery)>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
+            Task<List<(string Name, int Battery)>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
+
+            await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
+
+            results = MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: true);
+
+            foreach (var (name, battery) in results)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!seen.Add(name)) continue;
-                DeviceFound?.Invoke(name, battery);
-                results.Add((name, battery));
+                _lastKnown[name] = battery;
+                _alertStates[name] = ClassifyBatteryState(battery);
+                DeviceBatteryRead?.Invoke(name, battery);
             }
 
-            foreach (var (name, battery) in await _classicReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!seen.Add(name)) continue;
-                DeviceFound?.Invoke(name, battery);
-                results.Add((name, battery));
-            }
+            return results;
         }
         finally
         {
             _isScanning = false;
+            _scanLock.Release();
             ScanCompleted?.Invoke(results);
         }
-
-        return results;
     }
 
     public Task<List<(string Name, int Battery)>> StartTrackedScanAsync() =>
@@ -86,20 +86,39 @@ public partial class BluetoothBatteryMonitor
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        List<(string, int)> results = [];
+        Task<List<(string Name, int Battery)>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
+        Task<List<(string Name, int Battery)>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
+
+        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
+
+        return MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: false);
+    }
+
+    private List<(string Name, int Battery)> MergeResults(
+        IReadOnlyList<(string Name, int Battery)> first,
+        IReadOnlyList<(string Name, int Battery)> second,
+        bool raiseDeviceFound)
+    {
+        List<(string Name, int Battery)> results = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (name, battery) in await _gattReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var (name, battery) in first)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (battery < 0) continue;
             if (!seen.Add(name)) continue;
+
+            if (raiseDeviceFound)
+                DeviceFound?.Invoke(name, battery);
             results.Add((name, battery));
         }
 
-        foreach (var (name, battery) in await _classicReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var (name, battery) in second)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (battery < 0) continue;
             if (!seen.Add(name)) continue;
+
+            if (raiseDeviceFound)
+                DeviceFound?.Invoke(name, battery);
             results.Add((name, battery));
         }
 

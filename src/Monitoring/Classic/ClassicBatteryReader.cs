@@ -1,6 +1,6 @@
 ﻿namespace BTChargeTrayWatcher;
 
-public class ClassicBatteryReader
+public class ClassicBatteryReader : IBatteryReader
 {
     private readonly ClassicBluetoothDeviceEnumerator _deviceEnumerator = new();
     private readonly ClassicBluetoothConnectionChecker _connectionChecker = new();
@@ -13,7 +13,7 @@ public class ClassicBatteryReader
         Task.Run(() => ReadAllInternalAsync(cancellationToken), cancellationToken);
 
     private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
-        CancellationToken cancellationToken)
+       CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -34,16 +34,19 @@ public class ClassicBatteryReader
         if (connected.Count == 0)
             return new();
 
-        var results = new List<(string, int)>();
-        foreach (var candidate in connected)
+        // Parallelise the synchronous SetupAPI battery reads across connected devices.
+        var batteryTasks = connected.Select(candidate => Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-
             int battery = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
-            if (battery >= 0)
-                results.Add((candidate.Name, battery));
-        }
+            return (candidate.Name, battery);
+        }, cancellationToken));
 
-        return results;
+        var readings = await Task.WhenAll(batteryTasks).ConfigureAwait(false);
+
+        return readings
+            .Where(r => r.battery >= 0)
+            .Select(r => (r.Name, r.battery))
+            .ToList();
     }
 }

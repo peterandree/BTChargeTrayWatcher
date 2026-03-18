@@ -6,13 +6,14 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly NotificationService _notifier;
-    private readonly GattBatteryReader _gattReader = new();
-    private readonly ClassicBatteryReader _classicReader = new();
+    private readonly IBatteryReader _gattReader;
+    private readonly IBatteryReader _classicReader;
     private readonly ConcurrentDictionary<string, int> _lastKnown = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly System.Threading.Timer _timer;
     private readonly SemaphoreSlim _pollLock = new(1, 1);
+    private readonly SemaphoreSlim _scanLock = new(1, 1);
 
     private readonly object _taskGate = new();
     private readonly HashSet<Task> _activeTasks = [];
@@ -34,9 +35,20 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
     public BluetoothBatteryMonitor(ThresholdSettings settings, NotificationService notifier)
+        : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader())
+    {
+    }
+
+    public BluetoothBatteryMonitor(
+        ThresholdSettings settings,
+        NotificationService notifier,
+        IBatteryReader gattReader,
+        IBatteryReader classicReader)
     {
         _settings = settings;
         _notifier = notifier;
+        _gattReader = gattReader;
+        _classicReader = classicReader;
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
@@ -80,6 +92,12 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         _timer.Dispose();
         _shutdownCts.Dispose();
         _pollLock.Dispose();
+        _scanLock.Dispose();
+
+        if (_gattReader is IDisposable gd)
+        {
+            gd.Dispose();
+        }
 
         _isDisposed = true;
         GC.SuppressFinalize(this);
@@ -87,6 +105,25 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_isDisposed) return;
+        if (_disposeStarted) return;
+
+        _disposeStarted = true;
+
+        _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _shutdownCts.Cancel();
+
+        _timer.Dispose();
+        _shutdownCts.Dispose();
+        _pollLock.Dispose();
+        _scanLock.Dispose();
+
+        if (_gattReader is IDisposable gd)
+        {
+            gd.Dispose();
+        }
+
+        _isDisposed = true;
+        GC.SuppressFinalize(this);
     }
 }
