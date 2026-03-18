@@ -11,7 +11,7 @@ public partial class TrayApp
         BuildThresholdMenu(
             prefix: "Low threshold",
             currentValue: _settings.Low,
-            values: new[] { 10, 15, 20, 25, 30 },
+            values: new[] { 10, 15, 20, 25, 30, 50, 60 },
             apply: _settings.SetLow,
             successLogLabel: "Low");
 

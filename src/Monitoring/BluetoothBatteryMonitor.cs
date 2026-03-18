@@ -55,6 +55,18 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
             null,
             TimeSpan.Zero,
             TimeSpan.FromSeconds(60));
+
+        // Subscribe to threshold changes to trigger an immediate re-evaluation
+        _settings.Changed += Settings_Changed;
+    }
+
+    private void Settings_Changed()
+    {
+        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
+            return;
+
+        // Force an immediate poll when thresholds change
+        StartTrackedTask(ct => SafePollAsync(ct));
     }
 
     private void ThrowIfDisposingOrDisposed()
@@ -69,6 +81,8 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_disposeStarted) return;
 
         _disposeStarted = true;
+
+        _settings.Changed -= Settings_Changed;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();
@@ -109,6 +123,8 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_disposeStarted) return;
 
         _disposeStarted = true;
+
+        _settings.Changed -= Settings_Changed;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();

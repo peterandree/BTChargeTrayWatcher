@@ -1,4 +1,8 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BTChargeTrayWatcher;
 
@@ -13,6 +17,9 @@ public partial class BluetoothBatteryMonitor
 
     private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private int _lastLowThreshold = -1;
+    private int _lastHighThreshold = -1;
 
     private void OnTimerTick()
     {
@@ -52,8 +59,20 @@ public partial class BluetoothBatteryMonitor
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            bool thresholdsChanged = false;
+
+            if (_lastLowThreshold != _settings.Low || _lastHighThreshold != _settings.High)
+            {
+                _lastLowThreshold = _settings.Low;
+                _lastHighThreshold = _settings.High;
+                thresholdsChanged = true;
+                _alertStates.Clear();
+            }
+
             var snapshot = new Dictionary<string, int>(_lastKnown, StringComparer.OrdinalIgnoreCase);
             var devices = await QuietReadAsync(cancellationToken).ConfigureAwait(false);
+
+            var currentValid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var (name, battery) in devices)
             {
@@ -61,18 +80,29 @@ public partial class BluetoothBatteryMonitor
 
                 if (battery < 0) continue;
 
+                currentValid.Add(name);
+
                 snapshot.TryGetValue(name, out int prev);
                 bool isNew = !snapshot.ContainsKey(name);
 
                 _lastKnown[name] = battery;
                 DeviceBatteryRead?.Invoke(name, battery);
 
-                if (isNew)
+                BatteryAlertState currentState = ClassifyBatteryState(battery);
+
+                // If device is newly discovered, or if thresholds just changed, evaluate immediately
+                if (isNew || thresholdsChanged)
                 {
-                    _alertStates[name] = ClassifyBatteryState(battery);
+                    if (currentState == BatteryAlertState.Low)
+                        _notifier.NotifyLow(name, battery);
+                    else if (currentState == BatteryAlertState.High)
+                        _notifier.NotifyHigh(name, battery);
+
+                    _alertStates[name] = currentState;
                     continue;
                 }
 
+                // If battery percentage hasn't changed, state hasn't changed
                 if (prev == battery)
                     continue;
 
@@ -80,8 +110,7 @@ public partial class BluetoothBatteryMonitor
                     ? existingState
                     : ClassifyBatteryState(prev);
 
-                BatteryAlertState currentState = ClassifyBatteryState(battery);
-
+                // Only notify when crossing a threshold boundary
                 if (previousState != currentState)
                 {
                     if (currentState == BatteryAlertState.Low)
@@ -92,6 +121,23 @@ public partial class BluetoothBatteryMonitor
 
                 _alertStates[name] = currentState;
             }
+
+            // Purge devices that disconnected or stopped reporting battery
+            foreach (var name in snapshot.Keys)
+            {
+                if (!currentValid.Contains(name))
+                {
+                    _lastKnown.TryRemove(name, out _);
+                    _alertStates.TryRemove(name, out _);
+                }
+            }
+
+            var activeList = new List<(string, int)>();
+            foreach (var kvp in _lastKnown)
+            {
+                activeList.Add((kvp.Key, kvp.Value));
+            }
+            ScanCompleted?.Invoke(activeList);
         }
         finally
         {
