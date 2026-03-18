@@ -4,7 +4,9 @@ public partial class BluetoothBatteryMonitor
 {
     private void StartTrackedTask(Func<CancellationToken, Task> work)
     {
-        // Always create the task first
+        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
+            return;
+
         Task task;
         try
         {
@@ -15,15 +17,10 @@ public partial class BluetoothBatteryMonitor
             return;
         }
 
-        // Track it immediately; disposal logic will await it
         lock (_taskGate)
         {
             if (_disposeStarted || _isDisposed)
-            {
-                // If already disposing, we still need to wait for this task
-                _activeTasks.Add(task);
                 return;
-            }
 
             _activeTasks.Add(task);
         }

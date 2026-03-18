@@ -10,7 +10,7 @@ public class ClassicBatteryReader
         ReadAllAsync(CancellationToken.None);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken) =>
-        ReadAllInternalAsync(cancellationToken);
+        Task.Run(() => ReadAllInternalAsync(cancellationToken), cancellationToken);
 
     private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
         CancellationToken cancellationToken)

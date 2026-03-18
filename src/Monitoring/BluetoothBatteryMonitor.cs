@@ -48,22 +48,13 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
     private void ThrowIfDisposingOrDisposed()
     {
         if (_disposeStarted || _isDisposed)
-        {
             throw new ObjectDisposedException(nameof(BluetoothBatteryMonitor));
-        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        if (_disposeStarted)
-        {
-            return;
-        }
+        if (_isDisposed) return;
+        if (_disposeStarted) return;
 
         _disposeStarted = true;
 

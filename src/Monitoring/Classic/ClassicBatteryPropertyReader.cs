@@ -16,9 +16,7 @@ internal sealed class ClassicBatteryPropertyReader
             SetupApiNative.DIGCF_ALLCLASSES | SetupApiNative.DIGCF_PRESENT);
 
         if (devList == SetupApiNative.INVALID_HANDLE_VALUE)
-        {
             return -1;
-        }
 
         try
         {
@@ -31,9 +29,7 @@ internal sealed class ClassicBatteryPropertyReader
             {
                 string? id = GetInstanceId(devList, ref devData);
                 if (id is null || !id.Equals(instanceId, StringComparison.OrdinalIgnoreCase))
-                {
                     continue;
-                }
 
                 return ReadBatteryFromDevInfo(devList, ref devData);
             }
@@ -79,9 +75,7 @@ internal sealed class ClassicBatteryPropertyReader
                 (uint)buf.Length,
                 out _,
                 0))
-        {
             return -1;
-        }
 
         int raw = propType switch
         {

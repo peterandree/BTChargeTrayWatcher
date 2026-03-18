@@ -1,21 +1,13 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
 
 public partial class TrayApp
 {
-    // Helper to await UI marshaling
-    private Task PostToUiAsync(Action action)
-    {
-        var tcs = new TaskCompletionSource<object?>();
-        PostToUi(() =>
-        {
-            try { action(); }
-            finally { tcs.TrySetResult(null); }
-        });
-        return tcs.Task;
-    }
-
     private async Task RunStartupScanAsync()
     {
         if (_disposed || _exitStarted)
@@ -41,7 +33,9 @@ public partial class TrayApp
         }
     }
 
-    private void Monitor_ScanStarted() => PostToUi(OnScanStarted);
+    private void Monitor_ScanStarted() =>
+        PostToUi(OnScanStarted);
+
     private void Monitor_ScanCompleted(IReadOnlyList<(string, int)> results) =>
         PostToUi(() =>
         {
@@ -79,13 +73,13 @@ public partial class TrayApp
     {
         if (_disposed || _exitStarted)
             return Task.CompletedTask;
+
         return OpenScanWindowCoreAsync();
     }
 
     private async Task OpenScanWindowCoreAsync()
     {
-        // Create and show window on UI thread FIRST, then subscribe
-        await PostToUiAsync(() =>
+        PostToUi(() =>
         {
             if (_scanWindow is not null && !_scanWindow.IsDisposed)
             {
@@ -105,7 +99,6 @@ public partial class TrayApp
             window.Show();
         });
 
-        // Now we have a valid window reference on the UI thread
         ScanWindow? win = _scanWindow;
         if (win is null || win.IsDisposed)
             return;
@@ -133,11 +126,9 @@ public partial class TrayApp
 
         try
         {
-            // Only start a new scan if none is in progress
             if (_monitor.IsScanning)
             {
                 Debug.WriteLine("[TrayApp] Scan window opened while scan already in progress.");
-                // Subscriptions remain; window will receive updates from ongoing scan
                 return;
             }
 

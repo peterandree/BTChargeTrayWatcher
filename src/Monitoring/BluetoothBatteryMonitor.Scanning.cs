@@ -10,7 +10,7 @@ public partial class BluetoothBatteryMonitor
         ThrowIfDisposingOrDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        _isScanning = true; // FIXED: moved inside try block
+        _isScanning = true;
         ScanStarted?.Invoke();
 
         List<(string, int)> results = [];
@@ -21,9 +21,7 @@ public partial class BluetoothBatteryMonitor
             foreach (var (name, battery) in await _gattReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!seen.Add(name))
-                    continue;
-
+                if (!seen.Add(name)) continue;
                 DeviceFound?.Invoke(name, battery);
                 results.Add((name, battery));
             }
@@ -31,9 +29,7 @@ public partial class BluetoothBatteryMonitor
             foreach (var (name, battery) in await _classicReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!seen.Add(name))
-                    continue;
-
+                if (!seen.Add(name)) continue;
                 DeviceFound?.Invoke(name, battery);
                 results.Add((name, battery));
             }
@@ -80,9 +76,7 @@ public partial class BluetoothBatteryMonitor
             linkedCts.Dispose();
 
             if (t.IsFaulted && t.Exception is not null)
-            {
                 System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Scan task fault: {t.Exception}");
-            }
         }, TaskScheduler.Default);
 
         return task;
@@ -98,18 +92,14 @@ public partial class BluetoothBatteryMonitor
         foreach (var (name, battery) in await _gattReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!seen.Add(name))
-                continue;
-
+            if (!seen.Add(name)) continue;
             results.Add((name, battery));
         }
 
         foreach (var (name, battery) in await _classicReader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!seen.Add(name))
-                continue;
-
+            if (!seen.Add(name)) continue;
             results.Add((name, battery));
         }
 

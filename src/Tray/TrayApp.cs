@@ -64,16 +64,12 @@ public partial class TrayApp : IDisposable
     private void PostToUi(Action action)
     {
         if (_disposed)
-        {
             return;
-        }
 
         _uiContext.Post(_ =>
         {
             if (_disposed)
-            {
                 return;
-            }
 
             try
             {
@@ -91,9 +87,7 @@ public partial class TrayApp : IDisposable
         _ = task.ContinueWith(t =>
         {
             if (t.IsFaulted && t.Exception is not null)
-            {
                 Debug.WriteLine($"[TrayApp] {operationName} fault: {t.Exception}");
-            }
         }, TaskScheduler.Default);
     }
 

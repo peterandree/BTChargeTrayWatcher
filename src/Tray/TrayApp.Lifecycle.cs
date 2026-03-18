@@ -10,9 +10,7 @@ public partial class TrayApp
     private async Task ExitAsync()
     {
         if (_exitStarted)
-        {
             return;
-        }
 
         _exitStarted = true;
 
@@ -40,9 +38,7 @@ public partial class TrayApp
     public void Dispose()
     {
         if (_disposed)
-        {
             return;
-        }
 
         _disposed = true;
 
@@ -59,9 +55,7 @@ public partial class TrayApp
         _trayIcon.Dispose();
 
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
-        {
             _scanWindow.Dispose();
-        }
 
         GC.SuppressFinalize(this);
     }

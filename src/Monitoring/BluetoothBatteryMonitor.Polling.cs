@@ -17,9 +17,7 @@ public partial class BluetoothBatteryMonitor
     private void OnTimerTick()
     {
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
-        {
             return;
-        }
 
         StartTrackedTask(ct => SafePollAsync(ct));
     }
@@ -61,10 +59,7 @@ public partial class BluetoothBatteryMonitor
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (battery < 0)
-                {
-                    continue;
-                }
+                if (battery < 0) continue;
 
                 snapshot.TryGetValue(name, out int prev);
                 bool isNew = !snapshot.ContainsKey(name);
@@ -79,9 +74,7 @@ public partial class BluetoothBatteryMonitor
                 }
 
                 if (prev == battery)
-                {
                     continue;
-                }
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(name, out var existingState)
                     ? existingState
@@ -92,13 +85,9 @@ public partial class BluetoothBatteryMonitor
                 if (previousState != currentState)
                 {
                     if (currentState == BatteryAlertState.Low)
-                    {
                         _notifier.NotifyLow(name, battery);
-                    }
                     else if (currentState == BatteryAlertState.High)
-                    {
                         _notifier.NotifyHigh(name, battery);
-                    }
                 }
 
                 _alertStates[name] = currentState;
@@ -113,19 +102,13 @@ public partial class BluetoothBatteryMonitor
     private BatteryAlertState ClassifyBatteryState(int battery)
     {
         if (battery < 0)
-        {
             return BatteryAlertState.Normal;
-        }
 
         if (battery <= _settings.Low)
-        {
             return BatteryAlertState.Low;
-        }
 
         if (battery >= _settings.High)
-        {
             return BatteryAlertState.High;
-        }
 
         return BatteryAlertState.Normal;
     }
