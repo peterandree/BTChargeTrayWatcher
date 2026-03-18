@@ -79,6 +79,8 @@ public partial class TrayApp
 
     private async Task OpenScanWindowCoreAsync()
     {
+        bool isAlreadyScanning = _monitor.IsScanning;
+
         PostToUi(() =>
         {
             if (_scanWindow is not null && !_scanWindow.IsDisposed)
@@ -89,8 +91,34 @@ public partial class TrayApp
             }
 
             var window = new ScanWindow();
+
+            void OnFound(string name, int battery)
+            {
+                PostToUi(() =>
+                {
+                    if (!window.IsDisposed)
+                        window.OnDeviceFound(name, battery);
+                });
+            }
+
+            void OnCompleted(IReadOnlyList<(string, int)> results)
+            {
+                PostToUi(() =>
+                {
+                    if (!window.IsDisposed)
+                        window.OnScanComplete(results.Count);
+                });
+            }
+
+            _monitor.DeviceFound += OnFound;
+            _monitor.ScanCompleted += OnCompleted;
+
+            // Tie event detaching to form lifecycle, NOT method lifecycle
             window.FormClosed += (_, _) =>
             {
+                _monitor.DeviceFound -= OnFound;
+                _monitor.ScanCompleted -= OnCompleted;
+
                 if (ReferenceEquals(_scanWindow, window))
                     _scanWindow = null;
             };
@@ -99,39 +127,14 @@ public partial class TrayApp
             window.Show();
         });
 
-        ScanWindow? win = _scanWindow;
-        if (win is null || win.IsDisposed)
+        if (isAlreadyScanning)
+        {
+            Debug.WriteLine("[TrayApp] Scan window opened while scan already in progress. Listening to ongoing scan.");
             return;
-
-        void OnFound(string name, int battery)
-        {
-            PostToUi(() =>
-            {
-                if (!win.IsDisposed)
-                    win.OnDeviceFound(name, battery);
-            });
         }
-
-        void OnCompleted(IReadOnlyList<(string, int)> results)
-        {
-            PostToUi(() =>
-            {
-                if (!win.IsDisposed)
-                    win.OnScanComplete(results.Count);
-            });
-        }
-
-        _monitor.DeviceFound += OnFound;
-        _monitor.ScanCompleted += OnCompleted;
 
         try
         {
-            if (_monitor.IsScanning)
-            {
-                Debug.WriteLine("[TrayApp] Scan window opened while scan already in progress.");
-                return;
-            }
-
             Debug.WriteLine("[TrayApp] Manual scan started.");
             var results = await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
             Debug.WriteLine($"[TrayApp] Manual scan completed. Devices found: {results.Count}.");
@@ -148,11 +151,6 @@ public partial class TrayApp
         {
             Debug.WriteLine($"[TrayApp] Manual scan fault: {ex}");
             throw;
-        }
-        finally
-        {
-            _monitor.DeviceFound -= OnFound;
-            _monitor.ScanCompleted -= OnCompleted;
         }
     }
 }

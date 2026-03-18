@@ -1,4 +1,10 @@
-﻿namespace BTChargeTrayWatcher;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace BTChargeTrayWatcher;
 
 public class ClassicBatteryReader : IBatteryReader
 {
@@ -13,7 +19,7 @@ public class ClassicBatteryReader : IBatteryReader
         Task.Run(() => ReadAllInternalAsync(cancellationToken), cancellationToken);
 
     private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
-       CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -24,9 +30,29 @@ public class ClassicBatteryReader : IBatteryReader
         cancellationToken.ThrowIfCancellationRequested();
 
         var connectTasks = candidates.Select(async c =>
-            (c, connected: await _connectionChecker.IsConnectedAsync(c.Address, cancellationToken).ConfigureAwait(false)));
+        {
+            try
+            {
+                // Enforce a strict 3-second limit per device to prevent OS connection stalls
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
 
-        var connected = (await Task.WhenAll(connectTasks).ConfigureAwait(false))
+                bool connected = await _connectionChecker.IsConnectedAsync(c.Address, timeoutCts.Token).ConfigureAwait(false);
+                return (c, connected);
+            }
+            catch (OperationCanceledException)
+            {
+                return (c, connected: false);
+            }
+            catch
+            {
+                return (c, connected: false);
+            }
+        });
+
+        var connectedResults = await Task.WhenAll(connectTasks).ConfigureAwait(false);
+
+        var connected = connectedResults
             .Where(r => r.connected)
             .Select(r => r.c)
             .ToList();
@@ -34,7 +60,6 @@ public class ClassicBatteryReader : IBatteryReader
         if (connected.Count == 0)
             return new();
 
-        // Parallelise the synchronous SetupAPI battery reads across connected devices.
         var batteryTasks = connected.Select(candidate => Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
