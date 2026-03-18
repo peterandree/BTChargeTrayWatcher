@@ -1,18 +1,41 @@
-﻿using System.Windows.Forms;
+﻿using System;
+using System.Threading;
+using System.Windows.Forms;
 using BTChargeTrayWatcher;
 
-Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+internal static class Program
+{
+    private const string AppMutexName = @"Local\BTChargeTrayWatcher.SingleInstance";
 
-// Install WinForms sync context before creating TrayApp so
-// SynchronizationContext.Current is non-null on the UI thread
-SynchronizationContext.SetSynchronizationContext(
-    new WindowsFormsSynchronizationContext());
+    [STAThread]
+    private static void Main()
+    {
+        bool createdNew;
+        using Mutex mutex = new(initiallyOwned: true, name: AppMutexName, createdNew: out createdNew);
 
-var settings = new ThresholdSettings();
-var notifier = new NotificationService();
-var monitor = new BluetoothBatteryMonitor(settings, notifier);
-var app = new TrayApp(settings, monitor, notifier);
+        if (!createdNew)
+        {
+            MessageBox.Show(
+                "BT Charge Tray Watcher is already running.",
+                "BT Charge Tray Watcher",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
 
-app.StartBackgroundScan();
+        GC.KeepAlive(mutex);
 
-app.Run();
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+
+        SynchronizationContext.SetSynchronizationContext(
+            new WindowsFormsSynchronizationContext());
+
+        var settings = new ThresholdSettings();
+        var notifier = new NotificationService();
+        var monitor = new BluetoothBatteryMonitor(settings, notifier);
+        using var app = new TrayApp(settings, monitor);
+
+        app.StartBackgroundScan();
+        app.Run();
+    }
+}

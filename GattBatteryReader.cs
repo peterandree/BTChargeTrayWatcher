@@ -1,4 +1,10 @@
-﻿using Windows.Devices.Bluetooth;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
@@ -10,55 +16,84 @@ public class GattBatteryReader
     private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
     private static readonly Guid BatteryLevelUuid = new("00002a19-0000-1000-8000-00805f9b34fb");
 
-    public async Task<List<(string Name, int Battery)>> ReadAllAsync()
+    public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
+        ReadAllAsync(CancellationToken.None);
+
+    public async Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var results = new List<(string, int)>();
+
         try
         {
-            // Enumerate only devices that actually advertise the Battery Service UUID.
-            // This is the correct filter — pairing state alone is too broad.
             string selector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
-            DeviceInformationCollection serviceInfos =
-                await DeviceInformation.FindAllAsync(selector);
 
-            var tasks = serviceInfos.Cast<DeviceInformation>().Select(ReadDeviceAsync);
-            var taskResults = await Task.WhenAll(tasks);
+            DeviceInformationCollection serviceInfos =
+                await DeviceInformation.FindAllAsync(selector)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
+
+            var tasks = serviceInfos
+                .Cast<DeviceInformation>()
+                .Select(info => ReadDeviceAsync(info, cancellationToken));
+
+            var taskResults = await Task.WhenAll(tasks).ConfigureAwait(false);
 
             foreach (var (name, battery) in taskResults)
-                if (name is not null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!string.IsNullOrWhiteSpace(name))
                     results.Add((name, battery));
+            }
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GattBatteryReader] ReadAllAsync fault: {ex}");
+        }
 
         return results;
     }
 
-    private static async Task<(string? Name, int Battery)> ReadDeviceAsync(DeviceInformation serviceInfo)
+    private static async Task<(string? Name, int Battery)> ReadDeviceAsync(
+        DeviceInformation serviceInfo,
+        CancellationToken cancellationToken)
     {
         BluetoothLEDevice? device = null;
+
         try
         {
-            // Open the device via the service's DeviceId — avoids a second FromIdAsync call
-            device = await BluetoothLEDevice.FromIdAsync(
-                serviceInfo.Properties.TryGetValue("System.Devices.ContainerId", out _)
-                    ? serviceInfo.Id
-                    : serviceInfo.Id);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (device is null) return (null, -1);
+            device = await BluetoothLEDevice.FromIdAsync(serviceInfo.Id)
+                .AsTask(cancellationToken)
+                .ConfigureAwait(false);
 
-            // GetGattServicesForUuidAsync on the already-open device — no extra driver call
+            if (device is null)
+                return (null, -1);
+
             GattDeviceServicesResult svcResult =
                 await device.GetGattServicesForUuidAsync(
-                    BatterySvcUuid, BluetoothCacheMode.Cached);
+                        BatterySvcUuid,
+                        BluetoothCacheMode.Cached)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (svcResult.Status != GattCommunicationStatus.Success
-                || svcResult.Services.Count == 0)
+            if (svcResult.Status != GattCommunicationStatus.Success || svcResult.Services.Count == 0)
                 return (null, -1);
 
             try
             {
-                int battery = await ReadBatteryLevelAsync(svcResult.Services[0]);
-                if (battery < 0) return (null, -1);
+                int battery = await ReadBatteryLevelAsync(svcResult.Services[0], cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (battery < 0)
+                    return (null, -1);
 
                 string name = ResolveDeviceName(device.Name, serviceInfo.Name, serviceInfo.Id);
                 return (name, battery);
@@ -69,41 +104,72 @@ public class GattBatteryReader
                     svc.Dispose();
             }
         }
-        catch { return (null, -1); }
-        finally { device?.Dispose(); }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GattBatteryReader] ReadDeviceAsync fault for '{serviceInfo.Id}': {ex}");
+            return (null, -1);
+        }
+        finally
+        {
+            device?.Dispose();
+        }
     }
 
-    private static async Task<int> ReadBatteryLevelAsync(GattDeviceService service)
+    private static async Task<int> ReadBatteryLevelAsync(
+        GattDeviceService service,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // Cached is fine for characteristic *discovery* — it is metadata, not a live value
+            cancellationToken.ThrowIfCancellationRequested();
+
             GattCharacteristicsResult charResult =
                 await service.GetCharacteristicsForUuidAsync(
-                    BatteryLevelUuid, BluetoothCacheMode.Cached);
+                        BatteryLevelUuid,
+                        BluetoothCacheMode.Cached)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (charResult.Status != GattCommunicationStatus.Success
-                || charResult.Characteristics.Count == 0)
+            if (charResult.Status != GattCommunicationStatus.Success || charResult.Characteristics.Count == 0)
                 return -1;
 
-            // Always Uncached for the actual byte — Windows cache is stale until first live read
             GattReadResult readResult =
-                await charResult.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Uncached);
+                await charResult.Characteristics[0]
+                    .ReadValueAsync(BluetoothCacheMode.Uncached)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
 
             if (readResult.Status != GattCommunicationStatus.Success)
                 return -1;
 
             using DataReader reader = DataReader.FromBuffer(readResult.Value);
             byte value = reader.ReadByte();
+
             return value is >= 0 and <= 100 ? value : -1;
         }
-        catch { return -1; }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GattBatteryReader] ReadBatteryLevelAsync fault: {ex}");
+            return -1;
+        }
     }
 
     private static string ResolveDeviceName(params string?[] candidates)
     {
         foreach (string? s in candidates)
-            if (!string.IsNullOrWhiteSpace(s)) return s!;
+        {
+            if (!string.IsNullOrWhiteSpace(s))
+                return s;
+        }
+
         return "Unknown";
     }
 }

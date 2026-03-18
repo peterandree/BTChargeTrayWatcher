@@ -1,13 +1,18 @@
-﻿using System.Runtime.InteropServices;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Windows.Devices.Bluetooth;
 
 namespace BTChargeTrayWatcher;
 
 public class ClassicBatteryReader
 {
-    private const string BatteryPKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
     private const string HfagPattern = "_HCIBYPASS_";
 
     private static readonly Guid BatteryPropertyGuid =
@@ -17,30 +22,36 @@ public class ClassicBatteryReader
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
-        Task.Run(ReadAllAsync_Internal);
+        ReadAllAsync(CancellationToken.None);
 
-    private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal()
+    public Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken) =>
+        Task.Run(() => ReadAllAsync_Internal(cancellationToken), cancellationToken);
+
+    private static async Task<List<(string Name, int Battery)>> ReadAllAsync_Internal(
+        CancellationToken cancellationToken)
     {
-        // Enumerate candidate devices via SetupDi — no WMI, no COM stack
-        var candidates = EnumerateCandidates();
+        cancellationToken.ThrowIfCancellationRequested();
 
+        var candidates = EnumerateCandidates();
         if (candidates.Count == 0) return new();
 
-        // Filter to connected devices via WinRT
-        var connectTasks = candidates.Select(async c =>
-            (c, connected: await IsConnectedAsync(c.Address)));
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var connected = (await Task.WhenAll(connectTasks))
+        var connectTasks = candidates.Select(async c =>
+            (c, connected: await IsConnectedAsync(c.Address, cancellationToken).ConfigureAwait(false)));
+
+        var connected = (await Task.WhenAll(connectTasks).ConfigureAwait(false))
             .Where(r => r.connected)
             .Select(r => r.c)
             .ToList();
 
         if (connected.Count == 0) return new();
 
-        // Read battery via SetupDi — no PowerShell process
         var results = new List<(string, int)>();
         foreach (var (name, instanceId, _) in connected)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             int battery = ReadBatteryProperty(instanceId);
             if (battery >= 0)
                 results.Add((name, battery));
@@ -49,22 +60,25 @@ public class ClassicBatteryReader
         return results;
     }
 
-    // ── SetupDi enumeration ──────────────────────────────────────────────────
-
     private static List<(string Name, string InstanceId, ulong Address)> EnumerateCandidates()
     {
         var results = new List<(string Name, string InstanceId, ulong Address)>();
 
         IntPtr devList = NativeMethods.SetupDiGetClassDevsW(
-            IntPtr.Zero, "BTHENUM", IntPtr.Zero,
+            IntPtr.Zero,
+            "BTHENUM",
+            IntPtr.Zero,
             NativeMethods.DIGCF_ALLCLASSES | NativeMethods.DIGCF_PRESENT);
 
-        if (devList == NativeMethods.INVALID_HANDLE_VALUE) return results;
+        if (devList == NativeMethods.INVALID_HANDLE_VALUE)
+            return results;
 
         try
         {
-            var devData = new NativeMethods.SP_DEVINFO_DATA();
-            devData.cbSize = (uint)Marshal.SizeOf(devData);
+            var devData = new NativeMethods.SP_DEVINFO_DATA
+            {
+                cbSize = (uint)Marshal.SizeOf<NativeMethods.SP_DEVINFO_DATA>()
+            };
 
             for (uint i = 0; NativeMethods.SetupDiEnumDeviceInfo(devList, i, ref devData); i++)
             {
@@ -99,7 +113,11 @@ public class ClassicBatteryReader
     {
         var sb = new StringBuilder(512);
         return NativeMethods.SetupDiGetDeviceInstanceIdW(
-            devList, ref devData, sb, (uint)sb.Capacity, out _)
+            devList,
+            ref devData,
+            sb,
+            (uint)sb.Capacity,
+            out _)
             ? sb.ToString()
             : null;
     }
@@ -109,24 +127,34 @@ public class ClassicBatteryReader
         byte[] buf = new byte[1024];
         var key = new NativeMethods.DEVPROPKEY
         {
-            // DEVPKEY_Device_FriendlyName: {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=14
             fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"),
             pid = 14
         };
 
         if (NativeMethods.SetupDiGetDevicePropertyW(
-                devList, ref devData, ref key,
-                out _, buf, (uint)buf.Length, out uint needed, 0)
+                devList,
+                ref devData,
+                ref key,
+                out _,
+                buf,
+                (uint)buf.Length,
+                out uint needed,
+                0)
             && needed > 2)
         {
-            return Encoding.Unicode.GetString(buf, 0, (int)needed - 2); // strip null terminator
+            return Encoding.Unicode.GetString(buf, 0, (int)needed - 2);
         }
 
-        // Fallback: DEVPKEY_Device_DeviceDesc {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=2
         key.pid = 2;
         if (NativeMethods.SetupDiGetDevicePropertyW(
-                devList, ref devData, ref key,
-                out _, buf, (uint)buf.Length, out needed, 0)
+                devList,
+                ref devData,
+                ref key,
+                out _,
+                buf,
+                (uint)buf.Length,
+                out needed,
+                0)
             && needed > 2)
         {
             return Encoding.Unicode.GetString(buf, 0, (int)needed - 2);
@@ -135,20 +163,23 @@ public class ClassicBatteryReader
         return null;
     }
 
-    // ── Battery property read ────────────────────────────────────────────────
-
     public static int ReadBatteryProperty(string instanceId)
     {
         IntPtr devList = NativeMethods.SetupDiGetClassDevsW(
-            IntPtr.Zero, "BTHENUM", IntPtr.Zero,
+            IntPtr.Zero,
+            "BTHENUM",
+            IntPtr.Zero,
             NativeMethods.DIGCF_ALLCLASSES | NativeMethods.DIGCF_PRESENT);
 
-        if (devList == NativeMethods.INVALID_HANDLE_VALUE) return -1;
+        if (devList == NativeMethods.INVALID_HANDLE_VALUE)
+            return -1;
 
         try
         {
-            var devData = new NativeMethods.SP_DEVINFO_DATA();
-            devData.cbSize = (uint)Marshal.SizeOf(devData);
+            var devData = new NativeMethods.SP_DEVINFO_DATA
+            {
+                cbSize = (uint)Marshal.SizeOf<NativeMethods.SP_DEVINFO_DATA>()
+            };
 
             for (uint i = 0; NativeMethods.SetupDiEnumDeviceInfo(devList, i, ref devData); i++)
             {
@@ -168,7 +199,8 @@ public class ClassicBatteryReader
     }
 
     private static int ReadBatteryFromDevInfo(
-        IntPtr devList, ref NativeMethods.SP_DEVINFO_DATA devData)
+        IntPtr devList,
+        ref NativeMethods.SP_DEVINFO_DATA devData)
     {
         var key = new NativeMethods.DEVPROPKEY
         {
@@ -178,45 +210,62 @@ public class ClassicBatteryReader
 
         byte[] buf = new byte[64];
         if (!NativeMethods.SetupDiGetDevicePropertyW(
-                devList, ref devData, ref key,
-                out uint propType, buf, (uint)buf.Length, out uint needed, 0))
+                devList,
+                ref devData,
+                ref key,
+                out uint propType,
+                buf,
+                (uint)buf.Length,
+                out _,
+                0))
             return -1;
 
-        // Property type determines how to interpret the bytes
-        return propType switch
+        int raw = propType switch
         {
             NativeMethods.DEVPROP_TYPE_BYTE => buf[0],
             NativeMethods.DEVPROP_TYPE_SBYTE => (sbyte)buf[0],
             NativeMethods.DEVPROP_TYPE_UINT16 => BitConverter.ToUInt16(buf, 0),
             NativeMethods.DEVPROP_TYPE_INT16 => BitConverter.ToInt16(buf, 0),
-            NativeMethods.DEVPROP_TYPE_UINT32 => (int)Math.Min(BitConverter.ToUInt32(buf, 0), 100),
+            NativeMethods.DEVPROP_TYPE_UINT32 => checked((int)BitConverter.ToUInt32(buf, 0)),
             NativeMethods.DEVPROP_TYPE_INT32 => BitConverter.ToInt32(buf, 0),
             _ => -1
         };
+
+        return NormalizeBatteryPercent(raw);
     }
 
-    // ── WinRT connectivity check ─────────────────────────────────────────────
+    private static int NormalizeBatteryPercent(int value) =>
+        value is >= 0 and <= 100 ? value : -1;
 
-    private static async Task<bool> IsConnectedAsync(ulong bluetoothAddress)
+    private static async Task<bool> IsConnectedAsync(
+        ulong bluetoothAddress,
+        CancellationToken cancellationToken)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             using BluetoothDevice? device =
                 await BluetoothDevice.FromBluetoothAddressAsync(bluetoothAddress)
-                    .AsTask().ConfigureAwait(false);
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
 
             return device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
         }
-        catch { return false; }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            return false;
+        }
     }
-
-    // ── Async query helper for DeviceDumper ──────────────────────────────────
 
     public static Task<int> QueryPnpBatteryAsync(string instanceId) =>
         Task.Run(() => ReadBatteryProperty(instanceId));
 }
-
-// ── P/Invoke declarations ────────────────────────────────────────────────────
 
 internal static class NativeMethods
 {
@@ -249,26 +298,35 @@ internal static class NativeMethods
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr SetupDiGetClassDevsW(
-        IntPtr ClassGuid, string? Enumerator,
-        IntPtr hwndParent, uint Flags);
+        IntPtr ClassGuid,
+        string? Enumerator,
+        IntPtr hwndParent,
+        uint Flags);
 
     [DllImport("setupapi.dll", SetLastError = true)]
     public static extern bool SetupDiEnumDeviceInfo(
-        IntPtr DeviceInfoSet, uint MemberIndex,
+        IntPtr DeviceInfoSet,
+        uint MemberIndex,
         ref SP_DEVINFO_DATA DeviceInfoData);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool SetupDiGetDeviceInstanceIdW(
-        IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
-        StringBuilder DeviceInstanceId, uint DeviceInstanceIdSize,
+        IntPtr DeviceInfoSet,
+        ref SP_DEVINFO_DATA DeviceInfoData,
+        StringBuilder DeviceInstanceId,
+        uint DeviceInstanceIdSize,
         out uint RequiredSize);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool SetupDiGetDevicePropertyW(
-        IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
-        ref DEVPROPKEY PropertyKey, out uint PropertyType,
-        byte[] PropertyBuffer, uint PropertyBufferSize,
-        out uint RequiredSize, uint Flags);
+        IntPtr DeviceInfoSet,
+        ref SP_DEVINFO_DATA DeviceInfoData,
+        ref DEVPROPKEY PropertyKey,
+        out uint PropertyType,
+        byte[] PropertyBuffer,
+        uint PropertyBufferSize,
+        out uint RequiredSize,
+        uint Flags);
 
     [DllImport("setupapi.dll", SetLastError = true)]
     public static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);

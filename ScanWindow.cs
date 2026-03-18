@@ -1,4 +1,5 @@
-﻿using System.Windows.Forms;
+﻿using System;
+using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
 
@@ -8,7 +9,6 @@ public class ScanWindow : Form
     private readonly Label _status;
     private readonly ProgressBar _progress;
     private readonly Button _closeBtn;
-    private bool _scanComplete;
 
     public ScanWindow()
     {
@@ -20,7 +20,7 @@ public class ScanWindow : Form
 
         _status = new Label
         {
-            Text = "Scanning for Bluetooth devices\u2026",
+            Text = "Scanning for Bluetooth devices…",
             Dock = DockStyle.Top,
             Height = 28,
             TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
@@ -52,7 +52,7 @@ public class ScanWindow : Form
             Text = "Close",
             Dock = DockStyle.Bottom,
             Height = 32,
-            Enabled = false  // disabled until scan completes
+            Enabled = false
         };
         _closeBtn.Click += (_, _) => Close();
 
@@ -71,7 +71,7 @@ public class ScanWindow : Form
         }
 
         string batteryText = battery >= 0 ? $"{battery}%" : "n/a";
-        string barText = battery >= 0 ? BluetoothBatteryMonitor.BatteryBar(battery) : "\u2014";
+        string barText = battery >= 0 ? BluetoothBatteryMonitor.BatteryBar(battery) : "—";
 
         foreach (ListViewItem existing in _list.Items)
         {
@@ -99,26 +99,13 @@ public class ScanWindow : Form
             return;
         }
 
-        _scanComplete = true;
         _closeBtn.Enabled = true;
 
         _progress.Style = ProgressBarStyle.Continuous;
         _progress.Value = 100;
         _status.Text = count == 0
-            ? "Scan complete \u2014 no devices with Battery Service found."
-            : $"Scan complete \u2014 {count} device(s) found.";
-    }
-
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        // Allow OS-level close (Alt+F4, title bar X) even mid-scan,
-        // but block the Close button while scan is running.
-        if (!_scanComplete && e.CloseReason == CloseReason.UserClosing
-            && !_closeBtn.Enabled)
-        {
-            // Only the Close button is guarded; Alt+F4 / X still works.
-        }
-        base.OnFormClosing(e);
+            ? "Scan complete — no devices with Battery Service found."
+            : $"Scan complete — {count} device(s) found.";
     }
 
     private static System.Drawing.Color BatteryColor(int pct) => pct switch
