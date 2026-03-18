@@ -80,13 +80,18 @@ public partial class BluetoothBatteryMonitor
                 _lastKnown[name] = battery;
                 DeviceBatteryRead?.Invoke(name, battery);
 
-                // Determine the old state first so we can apply hysteresis rules
                 BatteryAlertState previousState = _alertStates.TryGetValue(name, out var existingState)
                     ? existingState
                     : ClassifyBatteryState(name, prev, BatteryAlertState.Normal);
 
-                // Determine the new state based on current battery AND previous state
                 BatteryAlertState currentState = ClassifyBatteryState(name, battery, previousState);
+
+                // Silently skip any alerts if device is ignored
+                if (_settings.IgnoredDevices.Contains(name))
+                {
+                    _alertStates[name] = BatteryAlertState.Normal;
+                    continue;
+                }
 
                 if (isNew || thresholdsChanged || !_alertStates.ContainsKey(name))
                 {
@@ -102,7 +107,6 @@ public partial class BluetoothBatteryMonitor
                 if (prev == battery)
                     continue;
 
-                // Notify only if state transitioned across the hysteresis boundary
                 if (previousState != currentState)
                 {
                     if (currentState == BatteryAlertState.Low)
@@ -138,13 +142,12 @@ public partial class BluetoothBatteryMonitor
 
     private BatteryAlertState ClassifyBatteryState(string name, int battery, BatteryAlertState previousState)
     {
-        if (battery < 0)
+        if (battery < 0 || _settings.IgnoredDevices.Contains(name))
             return BatteryAlertState.Normal;
 
         int low = _settings.GetLow(name);
         int high = _settings.GetHigh(name);
 
-        // 2% Hysteresis gap to prevent oscillation spam
         const int hysteresis = 2;
 
         if (battery <= low)
@@ -153,11 +156,9 @@ public partial class BluetoothBatteryMonitor
         if (battery >= high)
             return BatteryAlertState.High;
 
-        // If recovering from Low, stay Low until it exceeds low + 2%
         if (previousState == BatteryAlertState.Low && battery <= low + hysteresis)
             return BatteryAlertState.Low;
 
-        // If recovering from High, stay High until it drops below high - 2%
         if (previousState == BatteryAlertState.High && battery >= high - hysteresis)
             return BatteryAlertState.High;
 

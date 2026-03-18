@@ -72,32 +72,46 @@ public partial class TrayApp
 
         foreach (var (name, battery) in results)
         {
-            string label = battery >= 0
-                ? $"{name}   {battery}%  {BatteryDisplay.Bar(battery)}"
-                : $"{name}   N/A";
+            bool isIgnored = _settings.IgnoredDevices.Contains(name);
+
+            string label;
+            if (isIgnored)
+            {
+                label = $"{name}   [Ignored]";
+            }
+            else
+            {
+                label = battery >= 0
+                    ? $"{name}   {battery}%  {BatteryDisplay.Bar(battery)}"
+                    : $"{name}   N/A";
+            }
 
             var item = new ToolStripMenuItem(label);
 
-            var lowMenu = BuildDeviceThresholdMenu(
-                "Low limit",
-                _settings.Low,
-                _settings.HasCustomLow(name) ? _settings.GetLow(name) : null,
-                new[] { 10, 15, 20, 25, 30 },
-                val => _settings.SetLow(name, val));
+            if (!isIgnored)
+            {
+                var lowMenu = BuildDeviceThresholdMenu(
+                    "Low limit",
+                    _settings.Low,
+                    _settings.HasCustomLow(name) ? _settings.GetLow(name) : null,
+                    new[] { 10, 15, 20, 25, 30 },
+                    val => _settings.SetLow(name, val));
 
-            var highMenu = BuildDeviceThresholdMenu(
-                "High limit",
-                _settings.High,
-                _settings.HasCustomHigh(name) ? _settings.GetHigh(name) : null,
-                new[] { 70, 75, 80, 85, 90 },
-                val => _settings.SetHigh(name, val));
+                var highMenu = BuildDeviceThresholdMenu(
+                    "High limit",
+                    _settings.High,
+                    _settings.HasCustomHigh(name) ? _settings.GetHigh(name) : null,
+                    new[] { 70, 75, 80, 85, 90 },
+                    val => _settings.SetHigh(name, val));
 
-            var ignoreItem = new ToolStripMenuItem("Ignore device");
+                item.DropDownItems.Add(lowMenu);
+                item.DropDownItems.Add(highMenu);
+                item.DropDownItems.Add(new ToolStripSeparator());
+            }
+
+            var ignoreItem = new ToolStripMenuItem(isIgnored ? "Stop ignoring device" : "Ignore device");
             ignoreItem.Click += (_, _) => _settings.ToggleIgnoreDevice(name);
 
-            item.DropDownItems.Add(lowMenu);
-            item.DropDownItems.Add(highMenu);
-            item.DropDownItems.Add(new ToolStripSeparator());
             item.DropDownItems.Add(ignoreItem);
 
             parent.DropDownItems.Add(item);

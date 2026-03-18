@@ -37,7 +37,6 @@ public partial class BluetoothBatteryMonitor
 
                 _lastKnown[name] = battery;
 
-                // Fetch the existing state to feed into the hysteresis logic
                 BatteryAlertState existingState = _alertStates.TryGetValue(name, out var s)
                     ? s
                     : BatteryAlertState.Normal;
@@ -118,7 +117,7 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in first)
         {
-            if (_settings.IgnoredDevices.Contains(name)) continue;
+            // Removed: if (_settings.IgnoredDevices.Contains(name)) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)
@@ -128,7 +127,7 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in second)
         {
-            if (_settings.IgnoredDevices.Contains(name)) continue;
+            // Removed: if (_settings.IgnoredDevices.Contains(name)) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)
