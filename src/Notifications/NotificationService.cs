@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Diagnostics;
 using Microsoft.Win32;
 using Windows.Data.Xml.Dom;
 using Windows.UI.Notifications;
@@ -9,6 +10,8 @@ public class NotificationService
 {
     private const string AppId = "BTChargeTrayWatcher";
     private const string AppDisplay = "BT Charge Tray Watcher";
+
+    public event Action? OnNotificationClicked;
 
     public NotificationService()
     {
@@ -45,7 +48,7 @@ public class NotificationService
         }
     }
 
-    private static void ShowToast(string title, string message)
+    private void ShowToast(string title, string message)
     {
         try
         {
@@ -53,7 +56,7 @@ public class NotificationService
             string safeMessage = System.Security.SecurityElement.Escape(message);
 
             string xml = $"""
-                <toast>
+                <toast launch="action=open">
                   <visual>
                     <binding template="ToastGeneric">
                       <text>{safeTitle}</text>
@@ -66,9 +69,12 @@ public class NotificationService
             var doc = new XmlDocument();
             doc.LoadXml(xml);
 
+            var toast = new ToastNotification(doc);
+            toast.Activated += (sender, args) => OnNotificationClicked?.Invoke();
+
             ToastNotificationManager
                 .CreateToastNotifier(AppId)
-                .Show(new ToastNotification(doc));
+                .Show(toast);
         }
         catch (Exception ex)
         {

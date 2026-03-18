@@ -30,7 +30,7 @@ internal static class Program
         var settings = new ThresholdSettings();
         var notifier = new NotificationService();
         var monitor = new BluetoothBatteryMonitor(settings, notifier);
-        using var app = new TrayApp(settings, monitor);
+        var app = new TrayApp(settings, monitor, notifier);
 
         app.StartBackgroundScan();
         app.Run();

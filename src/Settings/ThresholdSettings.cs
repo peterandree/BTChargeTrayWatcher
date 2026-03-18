@@ -1,125 +1,166 @@
-﻿using Microsoft.Win32;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
 public class ThresholdSettings
 {
-    private const string RegKey = @"Software\BTChargeTrayWatcher";
-    private const int DefaultLow = 20;
-    private const int DefaultHigh = 80;
-    private const int MinThreshold = 0;
-    private const int MaxThreshold = 100;
+    private const string AppName = "BTChargeTrayWatcher";
+    private readonly string _settingsFilePath;
 
-    public int Low { get; private set; } = DefaultLow;
-    public int High { get; private set; } = DefaultHigh;
+    private int _low;
+    private int _high;
+    private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? Changed;
 
     public ThresholdSettings()
     {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string appDir = Path.Combine(localAppData, AppName);
+        Directory.CreateDirectory(appDir);
+        _settingsFilePath = Path.Combine(appDir, "settings.json");
+
         Load();
     }
 
-    public void SetLow(int value)
+    public int Low
     {
-        ValidateRange(value, nameof(value));
-
-        if (value >= High)
-            throw new ArgumentOutOfRangeException(
-                nameof(value),
-                $"Low threshold ({value}) must be strictly less than High threshold ({High}).");
-
-        Low = value;
-        Save();
-        Changed?.Invoke();
+        get => _low;
+        set
+        {
+            if (_low == value) return;
+            if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
+            _low = value;
+            Save();
+            Changed?.Invoke();
+        }
     }
 
-    public void SetHigh(int value)
+    public int High
     {
-        ValidateRange(value, nameof(value));
+        get => _high;
+        set
+        {
+            if (_high == value) return;
+            if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
+            _high = value;
+            Save();
+            Changed?.Invoke();
+        }
+    }
 
-        if (value <= Low)
-            throw new ArgumentOutOfRangeException(
-                nameof(value),
-                $"High threshold ({value}) must be strictly greater than Low threshold ({Low}).");
+    public HashSet<string> IgnoredDevices
+    {
+        get => _ignoredDevices;
+        set
+        {
+            _ignoredDevices = new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
+            Save();
+            Changed?.Invoke();
+        }
+    }
 
-        High = value;
+    public bool RunOnStartup
+    {
+        get
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
+                return key?.GetValue(AppName) != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        set
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                if (key == null) return;
+
+                if (value)
+                    key.SetValue(AppName, Application.ExecutablePath);
+                else
+                    key.DeleteValue(AppName, false);
+
+                Changed?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] RunOnStartup fault: {ex}");
+            }
+        }
+    }
+
+    public void ToggleIgnoreDevice(string deviceName)
+    {
+        if (_ignoredDevices.Contains(deviceName))
+            _ignoredDevices.Remove(deviceName);
+        else
+            _ignoredDevices.Add(deviceName);
+
         Save();
         Changed?.Invoke();
     }
 
     private void Load()
     {
-        Low = DefaultLow;
-        High = DefaultHigh;
-
         try
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RegKey);
-            if (key is null) return;
-
-            int? low = ReadIntValue(key, "Low");
-            int? high = ReadIntValue(key, "High");
-
-            if (low is int parsedLow)
-                Low = Clamp(parsedLow);
-
-            if (high is int parsedHigh)
-                High = Clamp(parsedHigh);
-
-            Normalize();
+            if (File.Exists(_settingsFilePath))
+            {
+                string json = File.ReadAllText(_settingsFilePath);
+                var dto = JsonSerializer.Deserialize<SettingsDto>(json);
+                if (dto != null)
+                {
+                    _low = dto.Low;
+                    _high = dto.High;
+                    if (dto.IgnoredDevices != null)
+                        _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
+                    return;
+                }
+            }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] ThresholdSettings.Load fault: {ex}");
-            Low = DefaultLow;
-            High = DefaultHigh;
+            System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] Load fault: {ex}");
         }
+
+        _low = 20;
+        _high = 80;
     }
 
     private void Save()
     {
-        using RegistryKey key = Registry.CurrentUser.CreateSubKey(RegKey);
-        key.SetValue("Low", Low, RegistryValueKind.DWord);
-        key.SetValue("High", High, RegistryValueKind.DWord);
-    }
-
-    private static int? ReadIntValue(RegistryKey key, string name)
-    {
-        object? raw = key.GetValue(name, null);
-        if (raw is null) return null;
-
-        return raw switch
+        try
         {
-            int i => i,
-            byte b => b,
-            short s => s,
-            long l when l is >= int.MinValue and <= int.MaxValue => (int)l,
-            string text when int.TryParse(text, out int parsed) => parsed,
-            _ => null
-        };
-    }
-
-    private void Normalize()
-    {
-        Low = Clamp(Low);
-        High = Clamp(High);
-
-        if (Low >= High)
+            var dto = new SettingsDto
+            {
+                Low = _low,
+                High = _high,
+                IgnoredDevices = new List<string>(_ignoredDevices)
+            };
+            string json = JsonSerializer.Serialize(dto);
+            File.WriteAllText(_settingsFilePath, json);
+        }
+        catch (Exception ex)
         {
-            Low = DefaultLow;
-            High = DefaultHigh;
+            System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] Save fault: {ex}");
         }
     }
 
-    private static void ValidateRange(int value, string paramName)
+    private class SettingsDto
     {
-        if (value < MinThreshold || value > MaxThreshold)
-            throw new ArgumentOutOfRangeException(
-                paramName,
-                $"Threshold must be between {MinThreshold} and {MaxThreshold}.");
+        public int Low { get; set; }
+        public int High { get; set; }
+        public List<string>? IgnoredDevices { get; set; }
     }
-
-    private static int Clamp(int value) =>
-        Math.Min(MaxThreshold, Math.Max(MinThreshold, value));
 }

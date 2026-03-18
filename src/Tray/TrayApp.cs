@@ -13,6 +13,7 @@ public partial class TrayApp : IDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
+    private readonly NotificationService _notifier;
     private readonly DeviceDumper _dumper = new();
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _lowMenu;
@@ -27,13 +28,15 @@ public partial class TrayApp : IDisposable
 
     public TrayApp(
         ThresholdSettings settings,
-        BluetoothBatteryMonitor monitor)
+        BluetoothBatteryMonitor monitor,
+        NotificationService notifier)
     {
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
 
         _settings = settings;
         _monitor = monitor;
+        _notifier = notifier;
 
         _trayIcon = new NotifyIcon
         {
@@ -55,6 +58,9 @@ public partial class TrayApp : IDisposable
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
         UpdateTrayIcon(false); // Draw initial normal icon
+
+        // Wire up the toast click to open the scan window
+        _notifier.OnNotificationClicked += () => PostToUi(() => _ = OpenScanWindowAsync());
     }
 
     private void UpdateTrayIcon(bool hasAlert)

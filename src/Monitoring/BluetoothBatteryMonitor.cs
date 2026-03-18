@@ -1,4 +1,10 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
@@ -56,8 +62,24 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
             TimeSpan.Zero,
             TimeSpan.FromSeconds(60));
 
-        // Subscribe to threshold changes to trigger an immediate re-evaluation
         _settings.Changed += Settings_Changed;
+        SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+    }
+
+    private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (_disposeStarted || _isDisposed) return;
+
+        if (e.Mode == PowerModes.Suspend)
+        {
+            // Stop polling immediately
+            _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+        else if (e.Mode == PowerModes.Resume)
+        {
+            // Delay 10 seconds to allow the Bluetooth driver stack to initialize
+            _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+        }
     }
 
     private void Settings_Changed()
@@ -65,7 +87,6 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
             return;
 
-        // Force an immediate poll when thresholds change
         StartTrackedTask(ct => SafePollAsync(ct));
     }
 
@@ -83,6 +104,7 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         _disposeStarted = true;
 
         _settings.Changed -= Settings_Changed;
+        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();
@@ -125,6 +147,7 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         _disposeStarted = true;
 
         _settings.Changed -= Settings_Changed;
+        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();
