@@ -1,55 +1,27 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
-using Windows.Devices.Bluetooth;
+﻿using System.Diagnostics;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
-using Windows.Storage.Streams;
 
 namespace BTChargeTrayWatcher;
 
-public class GattBatteryReader : IDisposable, IBatteryReader
+public sealed class GattBatteryReader : IDisposable, IBatteryReader
 {
-    private static readonly Guid BatterySvcUuid = new Guid("0000180f-0000-1000-8000-00805f9b34fb");
-    private static readonly Guid BatteryLevelUuid = new Guid("00002a19-0000-1000-8000-00805f9b34fb");
-
+    private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
     private static readonly TimeSpan PerDeviceTimeout = TimeSpan.FromSeconds(4);
+
     private readonly SemaphoreSlim _deviceReadGate = new(2, 2);
+    private readonly GattConnectionCache _cache = new();
+    private readonly GattBatteryProcessor _processor;
 
-    private readonly ConcurrentDictionary<string, BluetoothLEDevice> _deviceCache =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    private readonly ConcurrentDictionary<string, GattCharacteristic> _characteristicCache =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    public GattBatteryReader() { }
-
-    public void Dispose()
+    public GattBatteryReader()
     {
-        foreach (var kvp in _deviceCache)
-        {
-            if (kvp.Value is IDisposable disposable)
-            {
-                try { disposable.Dispose(); } catch { }
-            }
-        }
-        _characteristicCache.Clear();
-        _deviceCache.Clear();
-        _deviceReadGate.Dispose();
+        _processor = new GattBatteryProcessor(_cache);
     }
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
         ReadAllAsync(CancellationToken.None);
 
-    public Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken) =>
-        ReadAllInternalAsync(cancellationToken);
-
-    private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
-        CancellationToken cancellationToken)
+    public async Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -57,42 +29,24 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         try
         {
             string selector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
-            dis = await DeviceInformation.FindAllAsync(selector)
-                    .AsTask(cancellationToken)
-                    .ConfigureAwait(false);
+            dis = await DeviceInformation.FindAllAsync(selector).AsTask(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        catch (Exception ex) when (GattBatteryProcessor.IsExpectedBluetoothException(ex))
         {
-            Debug.WriteLine($"[GattBatteryReader] Radio unavailable or COM fault during enumeration: {ex.Message}");
-            return []; // Return empty gracefully
+            Debug.WriteLine($"[GattBatteryReader] Radio unavailable: {ex.Message}");
+            return [];
         }
 
-        var currentDeviceIds = new HashSet<string>(dis.Count);
-        foreach (DeviceInformation info in dis)
+        var currentDeviceIds = new HashSet<string>(dis.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var info in dis)
         {
             currentDeviceIds.Add(info.Id);
         }
 
-        foreach (var deviceId in _deviceCache.Keys)
-        {
-            if (!currentDeviceIds.Contains(deviceId))
-            {
-                _deviceCache.TryRemove(deviceId, out var device);
-                if (device is IDisposable d) d.Dispose();
-            }
-        }
-        foreach (var deviceId in _characteristicCache.Keys)
-        {
-            if (!currentDeviceIds.Contains(deviceId))
-            {
-                _characteristicCache.TryRemove(deviceId, out _);
-            }
-        }
+        _cache.PruneStaleDevices(currentDeviceIds);
 
-        var results = new List<(string Name, int Battery)>(dis.Count);
         var readTasks = new List<Task<(string Name, int Battery)>>(dis.Count);
-
-        foreach (DeviceInformation info in dis)
+        foreach (var info in dis)
         {
             cancellationToken.ThrowIfCancellationRequested();
             readTasks.Add(ProcessDeviceBoundedAsync(info.Id, info.Name, cancellationToken));
@@ -100,19 +54,19 @@ public class GattBatteryReader : IDisposable, IBatteryReader
 
         var perDeviceResults = await Task.WhenAll(readTasks).ConfigureAwait(false);
 
+        var results = new List<(string Name, int Battery)>(dis.Count);
         foreach (var res in perDeviceResults)
         {
             if (!string.IsNullOrWhiteSpace(res.Name))
+            {
                 results.Add(res);
+            }
         }
 
         return results;
     }
 
-    private async Task<(string Name, int Battery)> ProcessDeviceBoundedAsync(
-        string deviceId,
-        string fallbackName,
-        CancellationToken cancellationToken)
+    private async Task<(string Name, int Battery)> ProcessDeviceBoundedAsync(string deviceId, string fallbackName, CancellationToken cancellationToken)
     {
         await _deviceReadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -123,14 +77,14 @@ public class GattBatteryReader : IDisposable, IBatteryReader
 
             try
             {
-                return await ProcessDeviceAsync(deviceId, fallbackName, timeoutCts.Token).ConfigureAwait(false);
+                return await _processor.ProcessDeviceAsync(deviceId, fallbackName, timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 Debug.WriteLine($"[GattBatteryReader] Timeout while reading '{deviceId}'.");
                 return (fallbackName, -1);
             }
-            catch (Exception ex) when (IsExpectedBluetoothException(ex))
+            catch (Exception ex) when (GattBatteryProcessor.IsExpectedBluetoothException(ex))
             {
                 Debug.WriteLine($"[GattBatteryReader] Device unavailable '{deviceId}': {ex.Message}");
                 return (fallbackName, -1);
@@ -142,170 +96,9 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         }
     }
 
-    private async Task<(string Name, int Battery)> ProcessDeviceAsync(
-        string deviceId,
-        string fallbackName,
-        CancellationToken cancellationToken)
+    public void Dispose()
     {
-        var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (device is null)
-            return (fallbackName, -1);
-
-        string deviceName = await GetDeviceNameAsync(device, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (string.IsNullOrWhiteSpace(deviceName))
-            deviceName = fallbackName;
-
-        if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-            return (deviceName, -1);
-
-        if (_characteristicCache.TryGetValue(deviceId, out GattCharacteristic? cachedChar))
-        {
-            try
-            {
-                int battery = await ReadCharacteristicValueAsync(cachedChar, cancellationToken)
-                    .ConfigureAwait(false);
-                if (battery >= 0)
-                    return (deviceName, battery);
-            }
-            catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
-            {
-                Debug.WriteLine($"[GattBatteryReader] Cached characteristic failed: {ex.Message}");
-                _characteristicCache.TryRemove(deviceId, out _); // Purge bad cache
-            }
-        }
-
-        try
-        {
-            GattDeviceServicesResult servicesResult =
-                await device.GetGattServicesForUuidAsync(
-                        BatterySvcUuid,
-                        BluetoothCacheMode.Cached)
-                    .AsTask(cancellationToken)
-                    .ConfigureAwait(false);
-
-            if (servicesResult.Status != GattCommunicationStatus.Success ||
-                servicesResult.Services.Count == 0)
-            {
-                return (deviceName, -1);
-            }
-
-            GattDeviceService service = servicesResult.Services[0];
-
-            GattCharacteristicsResult charsResult =
-                await service.GetCharacteristicsForUuidAsync(
-                        BatteryLevelUuid,
-                        BluetoothCacheMode.Cached)
-                    .AsTask(cancellationToken)
-                    .ConfigureAwait(false);
-
-            if (charsResult.Status != GattCommunicationStatus.Success ||
-                charsResult.Characteristics.Count == 0)
-            {
-                return (deviceName, -1);
-            }
-
-            GattCharacteristic characteristic = charsResult.Characteristics[0];
-
-            _characteristicCache[deviceId] = characteristic;
-
-            int battery = await ReadCharacteristicValueAsync(characteristic, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (battery >= 0)
-                return (deviceName, battery);
-
-            return (deviceName, -1);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine(
-                $"[GattBatteryReader] ProcessDeviceAsync failed for '{deviceId}': {ex}");
-            return (deviceName, -1);
-        }
-    }
-
-    private async Task<BluetoothLEDevice?> GetOrCreateDeviceAsync(
-        string deviceId,
-        CancellationToken cancellationToken)
-    {
-        if (_deviceCache.TryGetValue(deviceId, out var existing) && existing != null)
-            return existing;
-
-        try
-        {
-            BluetoothLEDevice? device =
-                await BluetoothLEDevice.FromIdAsync(deviceId)
-                    .AsTask(cancellationToken)
-                    .ConfigureAwait(false);
-
-            if (device != null)
-            {
-                _deviceCache[deviceId] = device;
-            }
-            else
-            {
-                _deviceCache.TryRemove(deviceId, out _);
-            }
-
-            return device;
-        }
-        catch (Exception ex) when (IsExpectedBluetoothException(ex))
-        {
-            return null;
-        }
-    }
-
-    private async Task<string> GetDeviceNameAsync(
-        BluetoothLEDevice device,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            string? name = device.Name;
-            if (!string.IsNullOrWhiteSpace(name))
-                return name;
-
-            return device.BluetoothAddress.ToString("X");
-        }
-        catch
-        {
-            return device.BluetoothAddress.ToString("X");
-        }
-    }
-
-    private static async Task<int> ReadCharacteristicValueAsync(
-        GattCharacteristic characteristic,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        GattReadResult readResult =
-            await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
-
-        if (readResult.Status != GattCommunicationStatus.Success)
-            return -1;
-
-        using DataReader reader = DataReader.FromBuffer(readResult.Value);
-        byte value = reader.ReadByte();
-
-        return value is >= 0 and <= 100 ? value : -1;
-    }
-
-    // Helper to safely identify normal runtime state faults from the OS
-    private static bool IsExpectedBluetoothException(Exception ex)
-    {
-        return ex is COMException ||
-               ex is UnauthorizedAccessException ||
-               ex is InvalidOperationException;
+        _cache.Dispose();
+        _deviceReadGate.Dispose();
     }
 }

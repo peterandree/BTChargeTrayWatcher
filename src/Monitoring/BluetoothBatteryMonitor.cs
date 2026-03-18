@@ -148,6 +148,23 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();
 
+        Task[] tasks = SnapshotActiveTasks();
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                Task.WaitAll(tasks, TimeSpan.FromSeconds(5));
+            }
+            catch (AggregateException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
+            }
+        }
+
         _timer.Dispose();
         _shutdownCts.Dispose();
         _pollLock.Dispose();
