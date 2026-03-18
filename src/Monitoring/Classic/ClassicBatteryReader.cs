@@ -7,20 +7,20 @@ using System.Threading.Tasks;
 
 namespace BTChargeTrayWatcher;
 
-public class ClassicBatteryReader : IBatteryReader
+public sealed class ClassicBatteryReader : IBatteryReader
 {
+    private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(3);
+    private const int MaxConcurrentBatteryReads = 2;
+
     private readonly ClassicBluetoothDeviceEnumerator _deviceEnumerator = new();
     private readonly ClassicBluetoothConnectionChecker _connectionChecker = new();
     private readonly ClassicBatteryPropertyReader _batteryPropertyReader = new();
+    private readonly SemaphoreSlim _batteryReadGate = new(MaxConcurrentBatteryReads, MaxConcurrentBatteryReads);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
         ReadAllAsync(CancellationToken.None);
 
-    public Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken) =>
-        Task.Run(() => ReadAllInternalAsync(cancellationToken), cancellationToken);
-
-    private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
-        CancellationToken cancellationToken)
+    public async Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -40,60 +40,98 @@ public class ClassicBatteryReader : IBatteryReader
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var connectTasks = candidates.Select(async c =>
-        {
-            try
-            {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+        Task<(ClassicBluetoothCandidate Candidate, bool Connected)>[] connectionTasks = candidates
+            .Select(candidate => CheckConnectedAsync(candidate, cancellationToken))
+            .ToArray();
 
-                bool connected = await _connectionChecker.IsConnectedAsync(c.Address, timeoutCts.Token).ConfigureAwait(false);
-                return (c, connected);
-            }
-            catch (OperationCanceledException)
-            {
-                return (c, connected: false);
-            }
-            catch (Exception ex) when (IsExpectedBluetoothException(ex))
-            {
-                return (c, connected: false);
-            }
-            catch
-            {
-                return (c, connected: false);
-            }
-        });
+        (ClassicBluetoothCandidate Candidate, bool Connected)[] connectionResults =
+            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
 
-        var connectedResults = await Task.WhenAll(connectTasks).ConfigureAwait(false);
-
-        var connected = connectedResults
-            .Where(r => r.connected)
-            .Select(r => r.c)
+        List<ClassicBluetoothCandidate> connected = connectionResults
+            .Where(r => r.Connected)
+            .Select(r => r.Candidate)
             .ToList();
 
         if (connected.Count == 0)
             return new();
 
-        var batteryTasks = connected.Select(candidate => Task.Run(() =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                int batteryVal = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
-                return (candidate.Name, Battery: batteryVal);
-            }
-            catch (Exception ex) when (IsExpectedBluetoothException(ex))
-            {
-                return (candidate.Name, Battery: -1);
-            }
-        }, cancellationToken));
+        Task<(string Name, int Battery)>[] batteryTasks = connected
+            .Select(candidate => ReadBatteryAsync(candidate, cancellationToken))
+            .ToArray();
 
-        var readings = await Task.WhenAll(batteryTasks).ConfigureAwait(false);
+        (string Name, int Battery)[] readings = await Task.WhenAll(batteryTasks).ConfigureAwait(false);
 
         return readings
-            .Where(r => r.Battery >= 0)
-            .Select(r => (r.Name, r.Battery))
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name) && r.Battery >= 0)
             .ToList();
+    }
+
+    private async Task<(ClassicBluetoothCandidate Candidate, bool Connected)> CheckConnectedAsync(
+        ClassicBluetoothCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(ConnectionTimeout);
+
+            bool connected = await _connectionChecker
+                .IsConnectedAsync(candidate.Address, timeoutCts.Token)
+                .ConfigureAwait(false);
+
+            return (candidate, connected);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (candidate, false);
+        }
+        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[ClassicBatteryReader] Connection check failed for '{candidate.Name}': {ex.Message}");
+            return (candidate, false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[ClassicBatteryReader] Unexpected connection check fault for '{candidate.Name}': {ex}");
+            return (candidate, false);
+        }
+    }
+
+    private async Task<(string Name, int Battery)> ReadBatteryAsync(
+        ClassicBluetoothCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        await _batteryReadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int battery = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
+            return (candidate.Name, battery);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[ClassicBatteryReader] Battery read failed for '{candidate.Name}': {ex.Message}");
+            return (candidate.Name, -1);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[ClassicBatteryReader] Unexpected battery read fault for '{candidate.Name}': {ex}");
+            return (candidate.Name, -1);
+        }
+        finally
+        {
+            _batteryReadGate.Release();
+        }
     }
 
     private static bool IsExpectedBluetoothException(Exception ex)
