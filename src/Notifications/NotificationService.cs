@@ -1,5 +1,4 @@
-﻿using System;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.Win32;
 using Windows.Data.Xml.Dom;
 using Windows.UI.Notifications;
@@ -25,7 +24,7 @@ public class NotificationService
     public void NotifyDeviceFound(string deviceName, int battery)
     {
         string body = battery >= 0
-            ? $"{deviceName}: {battery}%  {BluetoothBatteryMonitor.BatteryBar(battery)}"
+            ? $"{deviceName}: {battery}%  {BatteryDisplay.Bar(battery)}"
             : $"{deviceName}: battery n/a";
 
         ShowToast("🔵 BT Device Found", body);

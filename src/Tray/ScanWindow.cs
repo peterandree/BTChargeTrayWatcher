@@ -1,7 +1,4 @@
-﻿using System;
-using System.Windows.Forms;
-
-namespace BTChargeTrayWatcher;
+﻿namespace BTChargeTrayWatcher;
 
 public class ScanWindow : Form
 {
@@ -71,7 +68,7 @@ public class ScanWindow : Form
         }
 
         string batteryText = battery >= 0 ? $"{battery}%" : "n/a";
-        string barText = battery >= 0 ? BluetoothBatteryMonitor.BatteryBar(battery) : "—";
+        string barText = battery >= 0 ? BatteryDisplay.Bar(battery) : "—";
 
         foreach (ListViewItem existing in _list.Items)
         {

@@ -6,6 +6,8 @@ public class DeviceDumper
 {
     private const string BatteryPKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
 
+    private readonly ClassicBatteryPropertyReader _batteryPropertyReader = new();
+
     public async Task DumpToDesktopAsync()
     {
         var lines = new List<string>();
@@ -35,7 +37,7 @@ public class DeviceDumper
 
             if (instanceId is not null)
             {
-                int val = await ClassicBatteryReader.QueryPnpBatteryAsync(instanceId);
+                int val = await Task.Run(() => _batteryPropertyReader.ReadBatteryProperty(instanceId));
                 lines.Add($"    {BatteryPKey} => {val}");
             }
 

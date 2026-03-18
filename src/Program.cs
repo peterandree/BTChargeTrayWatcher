@@ -1,7 +1,4 @@
-﻿using System;
-using System.Threading;
-using System.Windows.Forms;
-using BTChargeTrayWatcher;
+﻿namespace BTChargeTrayWatcher;
 
 internal static class Program
 {
