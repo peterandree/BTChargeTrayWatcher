@@ -47,6 +47,9 @@ public partial class TrayApp
             bool hasAlert = false;
             foreach (var (name, battery) in results)
             {
+                if (_settings.IgnoredDevices.Contains(name))
+                    continue;
+
                 if (battery >= 0 && (battery <= _settings.GetLow(name) || battery >= _settings.GetHigh(name)))
                 {
                     hasAlert = true;
@@ -121,7 +124,7 @@ public partial class TrayApp
             return;
         }
 
-        var window = new ScanWindow();
+        var window = new ScanWindow(_settings);
 
         void OnFound(string name, int battery)
         {
@@ -172,7 +175,6 @@ public partial class TrayApp
 
         _scanWindow = window;
 
-        // Let WinForms naturally show the window and pump messages
         window.Show();
     }
 }
