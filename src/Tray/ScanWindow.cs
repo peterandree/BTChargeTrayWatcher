@@ -1,119 +1,110 @@
-﻿namespace BTChargeTrayWatcher;
+﻿using System;
+using System.Drawing;
+using System.Windows.Forms;
 
-public class ScanWindow : Form
+namespace BTChargeTrayWatcher;
+
+public partial class ScanWindow : Form
 {
-    private readonly ListView _list;
-    private readonly Label _status;
-    private readonly ProgressBar _progress;
-    private readonly Button _closeBtn;
+    private ListView lstDevices;
+    private ColumnHeader colDevice;
+    private ColumnHeader colBattery;
+    private ColumnHeader colLevel;
+    private Label lblStatus;
+    private Button btnClose;
 
     public ScanWindow()
     {
+        InitializeUI();
+        Icon = SystemIcons.Information;
+    }
+
+    private void InitializeUI()
+    {
         Text = "BT Battery Scan";
-        Size = new System.Drawing.Size(520, 400);
-        MinimumSize = new System.Drawing.Size(400, 300);
+        Size = new Size(500, 400);
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.Sizable;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
 
-        _status = new Label
+        lblStatus = new Label
         {
-            Text = "Scanning for Bluetooth devices…",
-            Dock = DockStyle.Top,
-            Height = 28,
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
-            Padding = new Padding(6, 0, 0, 0)
+            Text = "Scanning for Bluetooth devices...",
+            AutoSize = true,
+            Location = new Point(10, 10),
+            Font = new Font("Segoe UI", 9F)
         };
 
-        _progress = new ProgressBar
+        lstDevices = new ListView
         {
-            Dock = DockStyle.Top,
-            Height = 14,
-            Style = ProgressBarStyle.Marquee,
-            MarqueeAnimationSpeed = 30
-        };
-
-        _list = new ListView
-        {
-            Dock = DockStyle.Fill,
             View = View.Details,
+            Location = new Point(10, 35),
+            Size = new Size(465, 280),
             FullRowSelect = true,
-            GridLines = true,
-            Font = new System.Drawing.Font("Consolas", 10)
+            GridLines = true
         };
-        _list.Columns.Add("Device", 260);
-        _list.Columns.Add("Battery", 80);
-        _list.Columns.Add("Level", 130);
 
-        _closeBtn = new Button
+        colDevice = new ColumnHeader { Text = "Device", Width = 200 };
+        colBattery = new ColumnHeader { Text = "Battery", Width = 60 };
+        colLevel = new ColumnHeader { Text = "Level", Width = 150 };
+
+        lstDevices.Columns.AddRange(new[] { colDevice, colBattery, colLevel });
+
+        btnClose = new Button
         {
             Text = "Close",
-            Dock = DockStyle.Bottom,
-            Height = 32,
-            Enabled = false
+            Location = new Point(200, 325),
+            Size = new Size(100, 30)
         };
-        _closeBtn.Click += (_, _) => Close();
+        btnClose.Click += btnClose_Click;
 
-        Controls.Add(_list);
-        Controls.Add(_progress);
-        Controls.Add(_status);
-        Controls.Add(_closeBtn);
+        Controls.Add(lblStatus);
+        Controls.Add(lstDevices);
+        Controls.Add(btnClose);
     }
 
     public void OnDeviceFound(string name, int battery)
     {
-        if (InvokeRequired)
+        if (IsDisposed) return;
+
+        bool hasBattery = battery >= 0;
+        string batteryText = hasBattery ? $"{battery}%" : "N/A";
+        string levelText = hasBattery ? BatteryDisplay.Bar(battery) : "[- - - - - - - - - -]";
+
+        var item = new ListViewItem(name);
+        item.SubItems.Add(batteryText);
+        item.SubItems.Add(levelText);
+
+        if (!hasBattery)
         {
-            Invoke(() => OnDeviceFound(name, battery));
-            return;
+            item.ForeColor = Color.Gray;
         }
 
-        string batteryText = battery >= 0 ? $"{battery}%" : "n/a";
-        string barText = battery >= 0 ? BatteryDisplay.Bar(battery) : "—";
-
-        foreach (ListViewItem existing in _list.Items)
+        // Avoid adding duplicates if multiple events fire for the same device
+        foreach (ListViewItem existing in lstDevices.Items)
         {
-            if (existing.Text == name)
+            if (existing.Text.Equals(name, StringComparison.OrdinalIgnoreCase))
             {
                 existing.SubItems[1].Text = batteryText;
-                existing.SubItems[2].Text = barText;
-                existing.ForeColor = BatteryColor(battery);
+                existing.SubItems[2].Text = levelText;
+                existing.ForeColor = hasBattery ? SystemColors.WindowText : Color.Gray;
                 return;
             }
         }
 
-        var item = new ListViewItem(name);
-        item.SubItems.Add(batteryText);
-        item.SubItems.Add(barText);
-        item.ForeColor = BatteryColor(battery);
-        _list.Items.Add(item);
+        lstDevices.Items.Add(item);
+        lstDevices.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
     }
 
     public void OnScanComplete(int count)
     {
-        if (InvokeRequired)
-        {
-            Invoke(() => OnScanComplete(count));
-            return;
-        }
+        if (IsDisposed) return;
 
-        _closeBtn.Enabled = true;
-
-        // Snappy completion: overshoot then settle to avoid animation lag
-        _progress.Style = ProgressBarStyle.Continuous;
-        _progress.Value = 101; // forces immediate repaint
-        _progress.Value = 100;
-
-        _status.Text = count == 0
-            ? "Scan complete — no devices with Battery Service found."
-            : $"Scan complete — {count} device(s) found.";
+        lblStatus.Text = $"Scan complete. Found {count} device(s).";
     }
 
-    private static System.Drawing.Color BatteryColor(int pct) => pct switch
+    private void btnClose_Click(object? sender, EventArgs e)
     {
-        < 0 => System.Drawing.Color.Gray,
-        <= 20 => System.Drawing.Color.Red,
-        <= 40 => System.Drawing.Color.OrangeRed,
-        >= 80 => System.Drawing.Color.Green,
-        _ => System.Drawing.SystemColors.WindowText
-    };
+        Close();
+    }
 }

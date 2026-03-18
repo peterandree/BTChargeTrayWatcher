@@ -28,6 +28,8 @@ public partial class BluetoothBatteryMonitor
 
             foreach (var (name, battery) in results)
             {
+                if (battery < 0) continue;
+
                 _lastKnown[name] = battery;
                 _alertStates[name] = ClassifyBatteryState(battery);
                 DeviceBatteryRead?.Invoke(name, battery);
@@ -104,7 +106,6 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in first)
         {
-            if (battery < 0) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)
@@ -114,7 +115,6 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in second)
         {
-            if (battery < 0) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)

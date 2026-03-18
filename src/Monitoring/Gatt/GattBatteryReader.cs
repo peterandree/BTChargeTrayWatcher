@@ -86,7 +86,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         foreach (DeviceInformation info in dis)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            readTasks.Add(ProcessDeviceBoundedAsync(info.Id, cancellationToken));
+            readTasks.Add(ProcessDeviceBoundedAsync(info.Id, info.Name, cancellationToken));
         }
 
         var perDeviceResults = await Task.WhenAll(readTasks).ConfigureAwait(false);
@@ -102,6 +102,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
 
     private async Task<(string Name, int Battery)> ProcessDeviceBoundedAsync(
         string deviceId,
+        string fallbackName,
         CancellationToken cancellationToken)
     {
         await _deviceReadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -113,12 +114,12 @@ public class GattBatteryReader : IDisposable, IBatteryReader
 
             try
             {
-                return await ProcessDeviceAsync(deviceId, timeoutCts.Token).ConfigureAwait(false);
+                return await ProcessDeviceAsync(deviceId, fallbackName, timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 Debug.WriteLine($"[GattBatteryReader] Timeout while reading '{deviceId}'.");
-                return (string.Empty, -1);
+                return (fallbackName, -1);
             }
         }
         finally
@@ -129,19 +130,23 @@ public class GattBatteryReader : IDisposable, IBatteryReader
 
     private async Task<(string Name, int Battery)> ProcessDeviceAsync(
         string deviceId,
+        string fallbackName,
         CancellationToken cancellationToken)
     {
         var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken)
             .ConfigureAwait(false);
 
         if (device is null)
-            return (string.Empty, -1);
-
-        if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-            return (string.Empty, -1);
+            return (fallbackName, -1);
 
         string deviceName = await GetDeviceNameAsync(device, cancellationToken)
             .ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(deviceName))
+            deviceName = fallbackName;
+
+        if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
+            return (deviceName, -1);
 
         if (_characteristicCache.TryGetValue(deviceId, out GattCharacteristic? cachedChar))
         {
@@ -172,7 +177,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
             if (servicesResult.Status != GattCommunicationStatus.Success ||
                 servicesResult.Services.Count == 0)
             {
-                return (string.Empty, -1);
+                return (deviceName, -1);
             }
 
             GattDeviceService service = servicesResult.Services[0];
@@ -187,7 +192,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
             if (charsResult.Status != GattCommunicationStatus.Success ||
                 charsResult.Characteristics.Count == 0)
             {
-                return (string.Empty, -1);
+                return (deviceName, -1);
             }
 
             GattCharacteristic characteristic = charsResult.Characteristics[0];
@@ -200,7 +205,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
             if (battery >= 0)
                 return (deviceName, battery);
 
-            return (string.Empty, -1);
+            return (deviceName, -1);
         }
         catch (OperationCanceledException)
         {
@@ -210,7 +215,7 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         {
             Debug.WriteLine(
                 $"[GattBatteryReader] ProcessDeviceAsync failed for '{deviceId}': {ex}");
-            return (string.Empty, -1);
+            return (deviceName, -1);
         }
     }
 

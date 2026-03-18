@@ -80,6 +80,7 @@ public partial class TrayApp
     private async Task OpenScanWindowCoreAsync()
     {
         bool isAlreadyScanning = _monitor.IsScanning;
+        ScanWindow? currentWindow = null;
 
         PostToUi(() =>
         {
@@ -87,6 +88,7 @@ public partial class TrayApp
             {
                 _scanWindow.BringToFront();
                 _scanWindow.Activate();
+                currentWindow = _scanWindow;
                 return;
             }
 
@@ -113,7 +115,6 @@ public partial class TrayApp
             _monitor.DeviceFound += OnFound;
             _monitor.ScanCompleted += OnCompleted;
 
-            // Tie event detaching to form lifecycle, NOT method lifecycle
             window.FormClosed += (_, _) =>
             {
                 _monitor.DeviceFound -= OnFound;
@@ -124,6 +125,7 @@ public partial class TrayApp
             };
 
             _scanWindow = window;
+            currentWindow = window;
             window.Show();
         });
 
@@ -138,6 +140,15 @@ public partial class TrayApp
             Debug.WriteLine("[TrayApp] Manual scan started.");
             var results = await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
             Debug.WriteLine($"[TrayApp] Manual scan completed. Devices found: {results.Count}.");
+
+            // Explicitly force the window to show completion status once the task finishes
+            PostToUi(() =>
+            {
+                if (currentWindow is not null && !currentWindow.IsDisposed)
+                {
+                    currentWindow.OnScanComplete(results.Count);
+                }
+            });
         }
         catch (OperationCanceledException)
         {
