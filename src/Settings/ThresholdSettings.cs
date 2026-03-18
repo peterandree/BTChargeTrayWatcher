@@ -15,6 +15,7 @@ public class ThresholdSettings
     private int _low;
     private int _high;
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? Changed;
 
@@ -54,6 +55,57 @@ public class ThresholdSettings
         }
     }
 
+    public int GetLow(string deviceName) =>
+        _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
+
+    public int GetHigh(string deviceName) =>
+        _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
+
+    public bool HasCustomLow(string deviceName) =>
+        _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
+
+    public bool HasCustomHigh(string deviceName) =>
+        _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
+
+    public void SetLow(string deviceName, int? value)
+    {
+        if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+        {
+            if (value == null) return;
+            t = new DeviceThresholds();
+            _deviceOverrides[deviceName] = t;
+        }
+
+        t.Low = value;
+        CleanupEmptyOverrides(deviceName);
+        Save();
+        Changed?.Invoke();
+    }
+
+    public void SetHigh(string deviceName, int? value)
+    {
+        if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+        {
+            if (value == null) return;
+            t = new DeviceThresholds();
+            _deviceOverrides[deviceName] = t;
+        }
+
+        t.High = value;
+        CleanupEmptyOverrides(deviceName);
+        Save();
+        Changed?.Invoke();
+    }
+
+    private void CleanupEmptyOverrides(string deviceName)
+    {
+        if (_deviceOverrides.TryGetValue(deviceName, out var t))
+        {
+            if (!t.Low.HasValue && !t.High.HasValue)
+                _deviceOverrides.Remove(deviceName);
+        }
+    }
+
     public HashSet<string> IgnoredDevices
     {
         get => _ignoredDevices;
@@ -63,6 +115,17 @@ public class ThresholdSettings
             Save();
             Changed?.Invoke();
         }
+    }
+
+    public void ToggleIgnoreDevice(string deviceName)
+    {
+        if (_ignoredDevices.Contains(deviceName))
+            _ignoredDevices.Remove(deviceName);
+        else
+            _ignoredDevices.Add(deviceName);
+
+        Save();
+        Changed?.Invoke();
     }
 
     public bool RunOnStartup
@@ -100,17 +163,6 @@ public class ThresholdSettings
         }
     }
 
-    public void ToggleIgnoreDevice(string deviceName)
-    {
-        if (_ignoredDevices.Contains(deviceName))
-            _ignoredDevices.Remove(deviceName);
-        else
-            _ignoredDevices.Add(deviceName);
-
-        Save();
-        Changed?.Invoke();
-    }
-
     private void Load()
     {
         try
@@ -125,6 +177,10 @@ public class ThresholdSettings
                     _high = dto.High;
                     if (dto.IgnoredDevices != null)
                         _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
+
+                    if (dto.DeviceOverrides != null)
+                        _deviceOverrides = new Dictionary<string, DeviceThresholds>(dto.DeviceOverrides, StringComparer.OrdinalIgnoreCase);
+
                     return;
                 }
             }
@@ -146,7 +202,8 @@ public class ThresholdSettings
             {
                 Low = _low,
                 High = _high,
-                IgnoredDevices = new List<string>(_ignoredDevices)
+                IgnoredDevices = new List<string>(_ignoredDevices),
+                DeviceOverrides = _deviceOverrides
             };
             string json = JsonSerializer.Serialize(dto);
             File.WriteAllText(_settingsFilePath, json);
@@ -157,10 +214,17 @@ public class ThresholdSettings
         }
     }
 
+    public class DeviceThresholds
+    {
+        public int? Low { get; set; }
+        public int? High { get; set; }
+    }
+
     private class SettingsDto
     {
         public int Low { get; set; }
         public int High { get; set; }
         public List<string>? IgnoredDevices { get; set; }
+        public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
     }
 }

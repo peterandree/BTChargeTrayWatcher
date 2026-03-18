@@ -40,13 +40,11 @@ public partial class TrayApp
         PostToUi(() =>
         {
             OnScanCompleted();
-            PopulateDevicesMenu(_devicesMenu, results);
 
-            // Determine if any device is currently in an alert state
             bool hasAlert = false;
             foreach (var (name, battery) in results)
             {
-                if (battery >= 0 && (battery <= _settings.Low || battery >= _settings.High))
+                if (battery >= 0 && (battery <= _settings.GetLow(name) || battery >= _settings.GetHigh(name)))
                 {
                     hasAlert = true;
                     break;
@@ -64,22 +62,14 @@ public partial class TrayApp
 
     private void OnScanStarted()
     {
-        _devicesMenu.DropDownItems.Clear();
-        _devicesMenu.DropDownItems.Add(
-            new ToolStripMenuItem("⏳ Scan in progress…") { Enabled = false });
-
         _scanMenuItem.Text = "⏳ Scanning…";
         _scanMenuItem.Enabled = false;
-        _lowMenu.Enabled = false;
-        _highMenu.Enabled = false;
     }
 
     private void OnScanCompleted()
     {
         _scanMenuItem.Text = "Scan devices…";
         _scanMenuItem.Enabled = true;
-        _lowMenu.Enabled = true;
-        _highMenu.Enabled = true;
     }
 
     public Task OpenScanWindowAsync()
@@ -94,6 +84,7 @@ public partial class TrayApp
     {
         bool isAlreadyScanning = _monitor.IsScanning;
         ScanWindow? currentWindow = null;
+        var windowReadyCompletionSource = new TaskCompletionSource<bool>();
 
         PostToUi(() =>
         {
@@ -102,6 +93,7 @@ public partial class TrayApp
                 _scanWindow.BringToFront();
                 _scanWindow.Activate();
                 currentWindow = _scanWindow;
+                windowReadyCompletionSource.SetResult(true);
                 return;
             }
 
@@ -137,10 +129,20 @@ public partial class TrayApp
                     _scanWindow = null;
             };
 
+            // Ensure window paints before doing work
+            window.Shown += (_, _) =>
+            {
+                window.Refresh(); // Force synchronous paint
+                windowReadyCompletionSource.TrySetResult(true);
+            };
+
             _scanWindow = window;
             currentWindow = window;
-            window.Show();
+            window.Show(); // Show non-modal so it pumps messages
         });
+
+        // Wait until the UI thread has completely shown and painted the window
+        await windowReadyCompletionSource.Task.ConfigureAwait(false);
 
         if (isAlreadyScanning)
         {
@@ -154,7 +156,6 @@ public partial class TrayApp
             var results = await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
             Debug.WriteLine($"[TrayApp] Manual scan completed. Devices found: {results.Count}.");
 
-            // Explicitly force the window to show completion status once the task finishes
             PostToUi(() =>
             {
                 if (currentWindow is not null && !currentWindow.IsDisposed)
@@ -174,7 +175,6 @@ public partial class TrayApp
         catch (Exception ex)
         {
             Debug.WriteLine($"[TrayApp] Manual scan fault: {ex}");
-            throw;
         }
     }
 }

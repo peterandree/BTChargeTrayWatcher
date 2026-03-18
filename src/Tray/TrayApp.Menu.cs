@@ -53,12 +53,22 @@ public partial class TrayApp
     {
         var menu = new ToolStripMenuItem("Connected devices");
         menu.DropDownItems.Add(new ToolStripMenuItem("⏳ Initializing…") { Enabled = false });
+
+        // Dynamically build the menu ONLY when the user hovers over it to prevent cross-thread WinForms crashes
+        menu.DropDownOpening += (_, _) => PopulateDevicesMenu(menu, _monitor.LastKnownDevices);
+
         return menu;
     }
 
     private void PopulateDevicesMenu(ToolStripMenuItem parent, IReadOnlyList<(string Name, int Battery)> results)
     {
-        parent.DropDownItems.Clear();
+        // Safely dispose old items to prevent GDI leak
+        while (parent.DropDownItems.Count > 0)
+        {
+            var item = parent.DropDownItems[0];
+            parent.DropDownItems.RemoveAt(0);
+            item.Dispose();
+        }
 
         if (results.Count == 0)
         {
@@ -74,8 +84,26 @@ public partial class TrayApp
 
             var item = new ToolStripMenuItem(label);
 
+            var lowMenu = BuildDeviceThresholdMenu(
+                "Low limit",
+                _settings.Low,
+                _settings.HasCustomLow(name) ? _settings.GetLow(name) : null,
+                new[] { 10, 15, 20, 25, 30 },
+                val => _settings.SetLow(name, val));
+
+            var highMenu = BuildDeviceThresholdMenu(
+                "High limit",
+                _settings.High,
+                _settings.HasCustomHigh(name) ? _settings.GetHigh(name) : null,
+                new[] { 70, 75, 80, 85, 90 },
+                val => _settings.SetHigh(name, val));
+
             var ignoreItem = new ToolStripMenuItem("Ignore device");
             ignoreItem.Click += (_, _) => _settings.ToggleIgnoreDevice(name);
+
+            item.DropDownItems.Add(lowMenu);
+            item.DropDownItems.Add(highMenu);
+            item.DropDownItems.Add(new ToolStripSeparator());
             item.DropDownItems.Add(ignoreItem);
 
             parent.DropDownItems.Add(item);
@@ -83,12 +111,12 @@ public partial class TrayApp
     }
 
     private ToolStripMenuItem BuildLowMenu() =>
-        BuildThresholdMenu("Low threshold", _settings.Low, new[] { 10, 15, 20, 25, 30, 50, 60 }, val => _settings.Low = val);
+        BuildGlobalThresholdMenu("Global Low threshold", _settings.Low, new[] { 10, 15, 20, 25, 30 }, val => _settings.Low = val);
 
     private ToolStripMenuItem BuildHighMenu() =>
-        BuildThresholdMenu("High threshold", _settings.High, new[] { 70, 75, 80, 85, 90 }, val => _settings.High = val);
+        BuildGlobalThresholdMenu("Global High threshold", _settings.High, new[] { 70, 75, 80, 85, 90 }, val => _settings.High = val);
 
-    private ToolStripMenuItem BuildThresholdMenu(
+    private ToolStripMenuItem BuildGlobalThresholdMenu(
         string baseText,
         int currentValue,
         int[] candidates,
@@ -99,8 +127,7 @@ public partial class TrayApp
         foreach (int val in candidates)
         {
             var item = new ToolStripMenuItem($"{val}%");
-            if (val == currentValue)
-                item.Checked = true;
+            if (val == currentValue) item.Checked = true;
 
             item.Click += (_, _) =>
             {
@@ -108,18 +135,43 @@ public partial class TrayApp
                 {
                     setter(val);
                     root.Text = $"{baseText}: {val}%";
-
                     foreach (ToolStripItem child in root.DropDownItems)
                     {
-                        if (child is ToolStripMenuItem mi)
-                            mi.Checked = (mi.Text == $"{val}%");
+                        if (child is ToolStripMenuItem mi) mi.Checked = (mi.Text == $"{val}%");
                     }
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[TrayApp] Threshold update fault: {ex}");
+                    System.Diagnostics.Debug.WriteLine($"[TrayApp] Global threshold update fault: {ex}");
                 }
             };
+            root.DropDownItems.Add(item);
+        }
+        return root;
+    }
+
+    private ToolStripMenuItem BuildDeviceThresholdMenu(
+        string baseText,
+        int globalValue,
+        int? customValue,
+        int[] candidates,
+        Action<int?> setter)
+    {
+        string displayValue = customValue.HasValue ? $"{customValue.Value}%" : $"Global ({globalValue}%)";
+        var root = new ToolStripMenuItem($"{baseText}: {displayValue}");
+
+        var globalItem = new ToolStripMenuItem($"Global ({globalValue}%)");
+        globalItem.Checked = !customValue.HasValue;
+        globalItem.Click += (_, _) => setter(null);
+        root.DropDownItems.Add(globalItem);
+        root.DropDownItems.Add(new ToolStripSeparator());
+
+        foreach (int val in candidates)
+        {
+            var item = new ToolStripMenuItem($"{val}%");
+            item.Checked = customValue.HasValue && customValue.Value == val;
+
+            item.Click += (_, _) => setter(val);
             root.DropDownItems.Add(item);
         }
 

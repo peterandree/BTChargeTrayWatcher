@@ -36,7 +36,7 @@ public partial class BluetoothBatteryMonitor
                 if (battery < 0) continue;
 
                 _lastKnown[name] = battery;
-                _alertStates[name] = ClassifyBatteryState(battery);
+                _alertStates[name] = ClassifyBatteryState(name, battery);
                 DeviceBatteryRead?.Invoke(name, battery);
             }
 
