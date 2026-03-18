@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Devices.Bluetooth;
@@ -52,11 +53,19 @@ public class GattBatteryReader : IDisposable, IBatteryReader
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        string selector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
-        DeviceInformationCollection dis =
-            await DeviceInformation.FindAllAsync(selector)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
+        DeviceInformationCollection dis;
+        try
+        {
+            string selector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
+            dis = await DeviceInformation.FindAllAsync(selector)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        {
+            Debug.WriteLine($"[GattBatteryReader] Radio unavailable or COM fault during enumeration: {ex.Message}");
+            return []; // Return empty gracefully
+        }
 
         var currentDeviceIds = new HashSet<string>(dis.Count);
         foreach (DeviceInformation info in dis)
@@ -121,6 +130,11 @@ public class GattBatteryReader : IDisposable, IBatteryReader
                 Debug.WriteLine($"[GattBatteryReader] Timeout while reading '{deviceId}'.");
                 return (fallbackName, -1);
             }
+            catch (Exception ex) when (IsExpectedBluetoothException(ex))
+            {
+                Debug.WriteLine($"[GattBatteryReader] Device unavailable '{deviceId}': {ex.Message}");
+                return (fallbackName, -1);
+            }
         }
         finally
         {
@@ -157,11 +171,10 @@ public class GattBatteryReader : IDisposable, IBatteryReader
                 if (battery >= 0)
                     return (deviceName, battery);
             }
-            catch (Exception ex) when (ex is ObjectDisposedException ||
-                                       ex is InvalidOperationException)
+            catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
             {
-                Debug.WriteLine(
-                    $"[GattBatteryReader] Cached characteristic for {deviceId} failed: {ex}");
+                Debug.WriteLine($"[GattBatteryReader] Cached characteristic failed: {ex.Message}");
+                _characteristicCache.TryRemove(deviceId, out _); // Purge bad cache
             }
         }
 
@@ -226,21 +239,28 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         if (_deviceCache.TryGetValue(deviceId, out var existing) && existing != null)
             return existing;
 
-        BluetoothLEDevice? device =
-            await BluetoothLEDevice.FromIdAsync(deviceId)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
-
-        if (device != null)
+        try
         {
-            _deviceCache[deviceId] = device;
-        }
-        else
-        {
-            _deviceCache.TryRemove(deviceId, out _);
-        }
+            BluetoothLEDevice? device =
+                await BluetoothLEDevice.FromIdAsync(deviceId)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
 
-        return device;
+            if (device != null)
+            {
+                _deviceCache[deviceId] = device;
+            }
+            else
+            {
+                _deviceCache.TryRemove(deviceId, out _);
+            }
+
+            return device;
+        }
+        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        {
+            return null;
+        }
     }
 
     private async Task<string> GetDeviceNameAsync(
@@ -279,5 +299,13 @@ public class GattBatteryReader : IDisposable, IBatteryReader
         byte value = reader.ReadByte();
 
         return value is >= 0 and <= 100 ? value : -1;
+    }
+
+    // Helper to safely identify normal runtime state faults from the OS
+    private static bool IsExpectedBluetoothException(Exception ex)
+    {
+        return ex is COMException ||
+               ex is UnauthorizedAccessException ||
+               ex is InvalidOperationException;
     }
 }

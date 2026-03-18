@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -23,7 +24,17 @@ public class ClassicBatteryReader : IBatteryReader
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var candidates = _deviceEnumerator.EnumerateCandidates();
+        IReadOnlyList<ClassicBluetoothCandidate> candidates;
+        try
+        {
+            candidates = _deviceEnumerator.EnumerateCandidates();
+        }
+        catch (Exception ex) when (IsExpectedBluetoothException(ex))
+        {
+            System.Diagnostics.Debug.WriteLine($"[ClassicBatteryReader] Radio unavailable: {ex.Message}");
+            return [];
+        }
+
         if (candidates.Count == 0)
             return new();
 
@@ -33,7 +44,6 @@ public class ClassicBatteryReader : IBatteryReader
         {
             try
             {
-                // Enforce a strict 3-second limit per device to prevent OS connection stalls
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
 
@@ -41,6 +51,10 @@ public class ClassicBatteryReader : IBatteryReader
                 return (c, connected);
             }
             catch (OperationCanceledException)
+            {
+                return (c, connected: false);
+            }
+            catch (Exception ex) when (IsExpectedBluetoothException(ex))
             {
                 return (c, connected: false);
             }
@@ -63,15 +77,29 @@ public class ClassicBatteryReader : IBatteryReader
         var batteryTasks = connected.Select(candidate => Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            int battery = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
-            return (candidate.Name, battery);
+            try
+            {
+                int batteryVal = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
+                return (candidate.Name, Battery: batteryVal);
+            }
+            catch (Exception ex) when (IsExpectedBluetoothException(ex))
+            {
+                return (candidate.Name, Battery: -1);
+            }
         }, cancellationToken));
 
         var readings = await Task.WhenAll(batteryTasks).ConfigureAwait(false);
 
         return readings
-            .Where(r => r.battery >= 0)
-            .Select(r => (r.Name, r.battery))
+            .Where(r => r.Battery >= 0)
+            .Select(r => (r.Name, r.Battery))
             .ToList();
+    }
+
+    private static bool IsExpectedBluetoothException(Exception ex)
+    {
+        return ex is COMException ||
+               ex is UnauthorizedAccessException ||
+               ex is InvalidOperationException;
     }
 }
