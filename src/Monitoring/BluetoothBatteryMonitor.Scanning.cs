@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-
-namespace BTChargeTrayWatcher;
+﻿namespace BTChargeTrayWatcher;
 
 public partial class BluetoothBatteryMonitor
 {
@@ -117,7 +112,6 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in first)
         {
-            // Removed: if (_settings.IgnoredDevices.Contains(name)) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)
@@ -127,7 +121,6 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var (name, battery) in second)
         {
-            // Removed: if (_settings.IgnoredDevices.Contains(name)) continue;
             if (!seen.Add(name)) continue;
 
             if (raiseDeviceFound)

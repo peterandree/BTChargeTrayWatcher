@@ -86,7 +86,8 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
             return;
 
-        // Any setting change flags a wipe of alert memory
+        // Any setting change flags a wipe of alert memory.
+        // This flag is intentionally written from the UI thread and read under _pollLock.
         _thresholdsChanged = true;
         StartTrackedTask(ct => SafePollAsync(ct));
     }
@@ -148,6 +149,7 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _shutdownCts.Cancel();
 
+        // Drain active tasks similarly to DisposeAsync, but with a bounded wait
         Task[] tasks = SnapshotActiveTasks();
         if (tasks.Length > 0)
         {
@@ -155,13 +157,17 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
             {
                 Task.WaitAll(tasks, TimeSpan.FromSeconds(5));
             }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown; ignore
+            }
             catch (AggregateException ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
+                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault (sync): {ex}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
+                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait unexpected fault (sync): {ex}");
             }
         }
 
