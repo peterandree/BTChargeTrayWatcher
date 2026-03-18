@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -34,7 +37,6 @@ public partial class TrayApp : IDisposable
 
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
             Visible = true
         };
 
@@ -52,6 +54,78 @@ public partial class TrayApp : IDisposable
 
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
+        UpdateTrayIcon(false); // Draw initial normal icon
+    }
+
+    private void UpdateTrayIcon(bool hasAlert)
+    {
+        // Get standard system tray icon size for current DPI
+        int size = SystemInformation.SmallIconSize.Width;
+        using Bitmap bmp = new(size, size);
+        using Graphics g = Graphics.FromImage(bmp);
+
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+        // Base Bluetooth Blue
+        Color btBlue = Color.FromArgb(0, 120, 215);
+
+        // Draw background circle for the BT icon
+        using (SolidBrush bgBrush = new(btBlue))
+        {
+            g.FillEllipse(bgBrush, 1, 1, size - 2, size - 2);
+        }
+
+        // Draw the Bluetooth 'B' rune
+        using (Pen whitePen = new(Color.White, Math.Max(1.5f, size / 10f)))
+        {
+            whitePen.LineJoin = LineJoin.Round;
+            float midX = size / 2f;
+            float top = size * 0.2f;
+            float btm = size * 0.8f;
+            float right = size * 0.7f;
+            float left = size * 0.3f;
+
+            // Draw the runic lines
+            g.DrawLine(whitePen, midX, top, midX, btm); // Center spine
+            g.DrawLine(whitePen, left, size * 0.3f, midX, btm); // Left top to bottom center
+            g.DrawLine(whitePen, midX, btm, right, size * 0.65f); // Bottom center to right mid
+            g.DrawLine(whitePen, right, size * 0.65f, left, size * 0.35f); // Right mid to left cross
+
+            g.DrawLine(whitePen, left, size * 0.7f, midX, top); // Left btm to top center
+            g.DrawLine(whitePen, midX, top, right, size * 0.35f); // Top center to right mid
+            g.DrawLine(whitePen, right, size * 0.35f, left, size * 0.65f); // Right mid to left cross
+        }
+
+        if (hasAlert)
+        {
+            // Draw a yellow warning badge in bottom right
+            float badgeSize = size * 0.45f;
+            float badgeX = size - badgeSize;
+            float badgeY = size - badgeSize;
+
+            using SolidBrush badgeBg = new(Color.FromArgb(255, 193, 7)); // Yellow
+            g.FillEllipse(badgeBg, badgeX, badgeY, badgeSize, badgeSize);
+
+            using Pen darkEdge = new(Color.Black, 1f);
+            g.DrawEllipse(darkEdge, badgeX, badgeY, badgeSize, badgeSize);
+
+            // Draw exclamation mark
+            using StringFormat sf = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            using Font f = new("Tahoma", badgeSize * 0.75f, FontStyle.Bold);
+            g.DrawString("!", f, Brushes.Black, new RectangleF(badgeX, badgeY + (size * 0.02f), badgeSize, badgeSize), sf);
+        }
+
+        // Dispose the old icon before assigning the new one
+        Icon? oldIcon = _trayIcon.Icon;
+        _trayIcon.Icon = Icon.FromHandle(bmp.GetHicon());
+
+        if (oldIcon != null)
+        {
+            // We must destroy the HIcon handle to prevent GDI leaks
+            NativeMethods.DestroyIcon(oldIcon.Handle);
+            oldIcon.Dispose();
+        }
     }
 
     public void Run() => Application.Run();

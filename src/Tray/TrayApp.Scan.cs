@@ -41,6 +41,19 @@ public partial class TrayApp
         {
             OnScanCompleted();
             PopulateDevicesMenu(_devicesMenu, results);
+
+            // Determine if any device is currently in an alert state
+            bool hasAlert = false;
+            foreach (var (name, battery) in results)
+            {
+                if (battery >= 0 && (battery <= _settings.Low || battery >= _settings.High))
+                {
+                    hasAlert = true;
+                    break;
+                }
+            }
+
+            UpdateTrayIcon(hasAlert);
         });
 
     private async void ScanMenuItem_Click(object? sender, EventArgs e) =>
