@@ -40,7 +40,9 @@ public class GattBatteryReader
                 cancellationToken.ThrowIfCancellationRequested();
 
                 if (!string.IsNullOrWhiteSpace(name))
+                {
                     results.Add((name, battery));
+                }
             }
         }
         catch (OperationCanceledException)
@@ -70,7 +72,9 @@ public class GattBatteryReader
                 .ConfigureAwait(false);
 
             if (device is null)
+            {
                 return (null, -1);
+            }
 
             GattDeviceServicesResult svcResult =
                 await device.GetGattServicesForUuidAsync(
@@ -80,7 +84,9 @@ public class GattBatteryReader
                     .ConfigureAwait(false);
 
             if (svcResult.Status != GattCommunicationStatus.Success || svcResult.Services.Count == 0)
+            {
                 return (null, -1);
+            }
 
             try
             {
@@ -88,7 +94,9 @@ public class GattBatteryReader
                     .ConfigureAwait(false);
 
                 if (battery < 0)
+                {
                     return (null, -1);
+                }
 
                 string name = ResolveDeviceName(device.Name, serviceInfo.Name, serviceInfo.Id);
                 return (name, battery);
@@ -96,7 +104,9 @@ public class GattBatteryReader
             finally
             {
                 foreach (var svc in svcResult.Services)
+                {
                     svc.Dispose();
+                }
             }
         }
         catch (OperationCanceledException)
@@ -130,7 +140,9 @@ public class GattBatteryReader
                     .ConfigureAwait(false);
 
             if (charResult.Status != GattCommunicationStatus.Success || charResult.Characteristics.Count == 0)
+            {
                 return -1;
+            }
 
             GattReadResult readResult =
                 await charResult.Characteristics[0]
@@ -139,7 +151,9 @@ public class GattBatteryReader
                     .ConfigureAwait(false);
 
             if (readResult.Status != GattCommunicationStatus.Success)
+            {
                 return -1;
+            }
 
             using DataReader reader = DataReader.FromBuffer(readResult.Value);
             byte value = reader.ReadByte();
@@ -162,7 +176,9 @@ public class GattBatteryReader
         foreach (string? s in candidates)
         {
             if (!string.IsNullOrWhiteSpace(s))
+            {
                 return s;
+            }
         }
 
         return "Unknown";

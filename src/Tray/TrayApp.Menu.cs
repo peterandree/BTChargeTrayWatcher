@@ -7,11 +7,14 @@ namespace BTChargeTrayWatcher;
 
 public partial class TrayApp
 {
+    private static readonly int[] LowThresholdValues = [10, 15, 20, 25, 30];
+    private static readonly int[] HighThresholdValues = [70, 75, 80, 85, 90];
+
     private ToolStripMenuItem BuildLowMenu() =>
         BuildThresholdMenu(
             prefix: "Low threshold",
             currentValue: _settings.Low,
-            values: new[] { 10, 15, 20, 25, 30 },
+            values: LowThresholdValues,
             apply: _settings.SetLow,
             successLogLabel: "Low");
 
@@ -19,11 +22,11 @@ public partial class TrayApp
         BuildThresholdMenu(
             prefix: "High threshold",
             currentValue: _settings.High,
-            values: new[] { 70, 75, 80, 85, 90 },
+            values: HighThresholdValues,
             apply: _settings.SetHigh,
             successLogLabel: "High");
 
-    private ToolStripMenuItem BuildThresholdMenu(
+    private static ToolStripMenuItem BuildThresholdMenu(
         string prefix,
         int currentValue,
         IEnumerable<int> values,
@@ -64,10 +67,14 @@ public partial class TrayApp
         item.DropDownOpening += (_, _) =>
         {
             if (_disposed || _exitStarted)
+            {
                 return;
+            }
 
             if (_monitor.IsScanning)
+            {
                 return;
+            }
 
             if (_monitor.HasCachedResults)
             {
@@ -149,7 +156,9 @@ public partial class TrayApp
     private void UpdateTooltip()
     {
         if (_disposed)
+        {
             return;
+        }
 
         _trayIcon.Text = $"BT Battery Alert  ▼{_settings.Low}%  ▲{_settings.High}%";
     }

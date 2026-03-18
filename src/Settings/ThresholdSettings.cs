@@ -25,9 +25,11 @@ public class ThresholdSettings
         ValidateRange(value, nameof(value));
 
         if (value >= High)
+        {
             throw new ArgumentOutOfRangeException(
                 nameof(value),
                 $"Low threshold ({value}) must be strictly less than High threshold ({High}).");
+        }
 
         Low = value;
         Save();
@@ -39,9 +41,11 @@ public class ThresholdSettings
         ValidateRange(value, nameof(value));
 
         if (value <= Low)
+        {
             throw new ArgumentOutOfRangeException(
                 nameof(value),
                 $"High threshold ({value}) must be strictly greater than Low threshold ({Low}).");
+        }
 
         High = value;
         Save();
@@ -56,16 +60,23 @@ public class ThresholdSettings
         try
         {
             using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RegKey);
-            if (key is null) return;
+            if (key is null)
+            {
+                return;
+            }
 
             int? low = ReadIntValue(key, "Low");
             int? high = ReadIntValue(key, "High");
 
             if (low is int parsedLow)
+            {
                 Low = Clamp(parsedLow);
+            }
 
             if (high is int parsedHigh)
+            {
                 High = Clamp(parsedHigh);
+            }
 
             Normalize();
         }
@@ -87,7 +98,10 @@ public class ThresholdSettings
     private static int? ReadIntValue(RegistryKey key, string name)
     {
         object? raw = key.GetValue(name, null);
-        if (raw is null) return null;
+        if (raw is null)
+        {
+            return null;
+        }
 
         return raw switch
         {
@@ -115,9 +129,11 @@ public class ThresholdSettings
     private static void ValidateRange(int value, string paramName)
     {
         if (value < MinThreshold || value > MaxThreshold)
+        {
             throw new ArgumentOutOfRangeException(
                 paramName,
                 $"Threshold must be between {MinThreshold} and {MaxThreshold}.");
+        }
     }
 
     private static int Clamp(int value) =>

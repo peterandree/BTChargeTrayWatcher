@@ -11,7 +11,9 @@ public partial class TrayApp
     private async Task RunStartupScanAsync()
     {
         if (_disposed || _exitStarted)
+        {
             return;
+        }
 
         try
         {
@@ -72,7 +74,9 @@ public partial class TrayApp
     public Task OpenScanWindowAsync()
     {
         if (_disposed || _exitStarted)
+        {
             return Task.CompletedTask;
+        }
 
         return OpenScanWindowCoreAsync();
     }
@@ -92,7 +96,9 @@ public partial class TrayApp
             window.FormClosed += (_, _) =>
             {
                 if (ReferenceEquals(_scanWindow, window))
+                {
                     _scanWindow = null;
+                }
             };
 
             _scanWindow = window;
@@ -101,14 +107,18 @@ public partial class TrayApp
 
         ScanWindow? win = _scanWindow;
         if (win is null || win.IsDisposed)
+        {
             return;
+        }
 
         void OnFound(string name, int battery)
         {
             PostToUi(() =>
             {
                 if (!win.IsDisposed)
+                {
                     win.OnDeviceFound(name, battery);
+                }
             });
         }
 
@@ -117,7 +127,9 @@ public partial class TrayApp
             PostToUi(() =>
             {
                 if (!win.IsDisposed)
+                {
                     win.OnScanComplete(results.Count);
+                }
             });
         }
 

@@ -22,7 +22,9 @@ internal sealed class ClassicBluetoothDeviceEnumerator
             SetupApiNative.DIGCF_ALLCLASSES | SetupApiNative.DIGCF_PRESENT);
 
         if (devList == SetupApiNative.INVALID_HANDLE_VALUE)
+        {
             return results;
+        }
 
         try
         {
@@ -35,14 +37,20 @@ internal sealed class ClassicBluetoothDeviceEnumerator
             {
                 string? instanceId = GetInstanceId(devList, ref devData);
                 if (instanceId is null)
+                {
                     continue;
+                }
 
                 if (!instanceId.Contains(HfagPattern, StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
+                }
 
                 Match match = MacRegex.Match(instanceId);
                 if (!match.Success)
+                {
                     continue;
+                }
 
                 ulong address = Convert.ToUInt64(match.Groups[1].Value, 16);
 

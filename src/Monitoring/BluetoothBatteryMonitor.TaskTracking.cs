@@ -5,7 +5,9 @@ public partial class BluetoothBatteryMonitor
     private void StartTrackedTask(Func<CancellationToken, Task> work)
     {
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
+        {
             return;
+        }
 
         Task task;
         try
@@ -20,7 +22,9 @@ public partial class BluetoothBatteryMonitor
         lock (_taskGate)
         {
             if (_disposeStarted || _isDisposed)
+            {
                 return;
+            }
 
             _activeTasks.Add(task);
         }
@@ -33,7 +37,9 @@ public partial class BluetoothBatteryMonitor
             }
 
             if (t.IsFaulted && t.Exception is not null)
+            {
                 System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Background task fault: {t.Exception}");
+            }
         }, TaskScheduler.Default);
     }
 

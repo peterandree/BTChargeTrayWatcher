@@ -21,7 +21,7 @@ public class DeviceDumper
                 "SELECT Name, DeviceID, Status FROM Win32_PnPEntity " +
                 "WHERE DeviceID LIKE 'BTHENUM%'");
 
-            foreach (ManagementObject obj in searcher.Get())
+            foreach (ManagementObject obj in searcher.Get().Cast<ManagementObject>())
             {
                 devices.Add((
                     obj["Name"]?.ToString(),
