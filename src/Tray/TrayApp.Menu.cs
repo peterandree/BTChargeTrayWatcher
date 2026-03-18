@@ -30,10 +30,6 @@ public partial class TrayApp
         };
         menu.Items.Add(autostartItem);
 
-        var dumpMenu = new ToolStripMenuItem("Dump device properties…");
-        dumpMenu.Click += async (_, _) => await RunUiActionAsync(() => _dumper.DumpToDesktopAsync(), "Dump properties");
-        menu.Items.Add(dumpMenu);
-
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitApp());
 
@@ -54,7 +50,6 @@ public partial class TrayApp
         var menu = new ToolStripMenuItem("Connected devices");
         menu.DropDownItems.Add(new ToolStripMenuItem("⏳ Initializing…") { Enabled = false });
 
-        // Dynamically build the menu ONLY when the user hovers over it to prevent cross-thread WinForms crashes
         menu.DropDownOpening += (_, _) => PopulateDevicesMenu(menu, _monitor.LastKnownDevices);
 
         return menu;
@@ -62,7 +57,6 @@ public partial class TrayApp
 
     private void PopulateDevicesMenu(ToolStripMenuItem parent, IReadOnlyList<(string Name, int Battery)> results)
     {
-        // Safely dispose old items to prevent GDI leak
         while (parent.DropDownItems.Count > 0)
         {
             var item = parent.DropDownItems[0];

@@ -14,7 +14,6 @@ public partial class TrayApp : IDisposable
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
     private readonly NotificationService _notifier;
-    private readonly DeviceDumper _dumper = new();
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _lowMenu;
     private readonly ToolStripMenuItem _highMenu;
@@ -64,7 +63,6 @@ public partial class TrayApp : IDisposable
 
     private void UpdateTrayIcon(bool hasAlert)
     {
-        // Render at a fixed high resolution for supreme crispness on all High-DPI scales
         int size = 128;
         using Bitmap bmp = new(size, size);
         using Graphics g = Graphics.FromImage(bmp);
@@ -74,7 +72,6 @@ public partial class TrayApp : IDisposable
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        // Base Bluetooth Blue
         Color btBlue = Color.FromArgb(0, 120, 215);
 
         using (SolidBrush bgBrush = new(btBlue))
@@ -82,7 +79,7 @@ public partial class TrayApp : IDisposable
             g.FillEllipse(bgBrush, 4, 4, size - 8, size - 8);
         }
 
-        using (Pen whitePen = new(Color.White, size / 10f)) // Thick, scalable pen
+        using (Pen whitePen = new(Color.White, size / 10f))
         {
             whitePen.LineJoin = LineJoin.Round;
             whitePen.StartCap = LineCap.Round;
