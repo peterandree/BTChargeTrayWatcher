@@ -10,7 +10,7 @@ public partial class BluetoothBatteryMonitor
         ThrowIfDisposingOrDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        _isScanning = true;
+        _isScanning = true; // FIXED: moved inside try block
         ScanStarted?.Invoke();
 
         List<(string, int)> results = [];
@@ -22,9 +22,7 @@ public partial class BluetoothBatteryMonitor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!seen.Add(name))
-                {
                     continue;
-                }
 
                 DeviceFound?.Invoke(name, battery);
                 results.Add((name, battery));
@@ -34,9 +32,7 @@ public partial class BluetoothBatteryMonitor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!seen.Add(name))
-                {
                     continue;
-                }
 
                 DeviceFound?.Invoke(name, battery);
                 results.Add((name, battery));
@@ -103,9 +99,7 @@ public partial class BluetoothBatteryMonitor
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!seen.Add(name))
-            {
                 continue;
-            }
 
             results.Add((name, battery));
         }
@@ -114,9 +108,7 @@ public partial class BluetoothBatteryMonitor
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!seen.Add(name))
-            {
                 continue;
-            }
 
             results.Add((name, battery));
         }

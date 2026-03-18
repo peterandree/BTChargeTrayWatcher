@@ -10,7 +10,7 @@ public class ClassicBatteryReader
         ReadAllAsync(CancellationToken.None);
 
     public Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken) =>
-        Task.Run(() => ReadAllInternalAsync(cancellationToken), cancellationToken);
+        ReadAllInternalAsync(cancellationToken);
 
     private async Task<List<(string Name, int Battery)>> ReadAllInternalAsync(
         CancellationToken cancellationToken)
@@ -19,9 +19,7 @@ public class ClassicBatteryReader
 
         var candidates = _deviceEnumerator.EnumerateCandidates();
         if (candidates.Count == 0)
-        {
             return new();
-        }
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -34,9 +32,7 @@ public class ClassicBatteryReader
             .ToList();
 
         if (connected.Count == 0)
-        {
             return new();
-        }
 
         var results = new List<(string, int)>();
         foreach (var candidate in connected)
@@ -45,9 +41,7 @@ public class ClassicBatteryReader
 
             int battery = _batteryPropertyReader.ReadBatteryProperty(candidate.InstanceId);
             if (battery >= 0)
-            {
                 results.Add((candidate.Name, battery));
-            }
         }
 
         return results;

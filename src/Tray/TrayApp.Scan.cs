@@ -1,19 +1,25 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+﻿using System.Diagnostics;
 
 namespace BTChargeTrayWatcher;
 
 public partial class TrayApp
 {
+    // Helper to await UI marshaling
+    private Task PostToUiAsync(Action action)
+    {
+        var tcs = new TaskCompletionSource<object?>();
+        PostToUi(() =>
+        {
+            try { action(); }
+            finally { tcs.TrySetResult(null); }
+        });
+        return tcs.Task;
+    }
+
     private async Task RunStartupScanAsync()
     {
         if (_disposed || _exitStarted)
-        {
             return;
-        }
 
         try
         {
@@ -35,9 +41,7 @@ public partial class TrayApp
         }
     }
 
-    private void Monitor_ScanStarted() =>
-        PostToUi(OnScanStarted);
-
+    private void Monitor_ScanStarted() => PostToUi(OnScanStarted);
     private void Monitor_ScanCompleted(IReadOnlyList<(string, int)> results) =>
         PostToUi(() =>
         {
@@ -74,16 +78,14 @@ public partial class TrayApp
     public Task OpenScanWindowAsync()
     {
         if (_disposed || _exitStarted)
-        {
             return Task.CompletedTask;
-        }
-
         return OpenScanWindowCoreAsync();
     }
 
     private async Task OpenScanWindowCoreAsync()
     {
-        PostToUi(() =>
+        // Create and show window on UI thread FIRST, then subscribe
+        await PostToUiAsync(() =>
         {
             if (_scanWindow is not null && !_scanWindow.IsDisposed)
             {
@@ -96,29 +98,24 @@ public partial class TrayApp
             window.FormClosed += (_, _) =>
             {
                 if (ReferenceEquals(_scanWindow, window))
-                {
                     _scanWindow = null;
-                }
             };
 
             _scanWindow = window;
             window.Show();
         });
 
+        // Now we have a valid window reference on the UI thread
         ScanWindow? win = _scanWindow;
         if (win is null || win.IsDisposed)
-        {
             return;
-        }
 
         void OnFound(string name, int battery)
         {
             PostToUi(() =>
             {
                 if (!win.IsDisposed)
-                {
                     win.OnDeviceFound(name, battery);
-                }
             });
         }
 
@@ -127,9 +124,7 @@ public partial class TrayApp
             PostToUi(() =>
             {
                 if (!win.IsDisposed)
-                {
                     win.OnScanComplete(results.Count);
-                }
             });
         }
 
@@ -138,9 +133,11 @@ public partial class TrayApp
 
         try
         {
+            // Only start a new scan if none is in progress
             if (_monitor.IsScanning)
             {
                 Debug.WriteLine("[TrayApp] Scan window opened while scan already in progress.");
+                // Subscriptions remain; window will receive updates from ongoing scan
                 return;
             }
 

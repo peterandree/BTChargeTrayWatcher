@@ -98,8 +98,11 @@ public class ScanWindow : Form
 
         _closeBtn.Enabled = true;
 
+        // Snappy completion: overshoot then settle to avoid animation lag
         _progress.Style = ProgressBarStyle.Continuous;
+        _progress.Value = 101; // forces immediate repaint
         _progress.Value = 100;
+
         _status.Text = count == 0
             ? "Scan complete — no devices with Battery Service found."
             : $"Scan complete — {count} device(s) found.";
