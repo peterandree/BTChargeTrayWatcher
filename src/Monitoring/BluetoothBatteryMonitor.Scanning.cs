@@ -36,7 +36,14 @@ public partial class BluetoothBatteryMonitor
                 if (battery < 0) continue;
 
                 _lastKnown[name] = battery;
-                _alertStates[name] = ClassifyBatteryState(name, battery);
+
+                // Fetch the existing state to feed into the hysteresis logic
+                BatteryAlertState existingState = _alertStates.TryGetValue(name, out var s)
+                    ? s
+                    : BatteryAlertState.Normal;
+
+                _alertStates[name] = ClassifyBatteryState(name, battery, existingState);
+
                 DeviceBatteryRead?.Invoke(name, battery);
             }
 

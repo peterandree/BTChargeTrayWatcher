@@ -16,7 +16,10 @@ public partial class TrayApp
         try
         {
             Debug.WriteLine("[TrayApp] Startup scan started.");
-            var results = await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+
+            // Push off the UI thread to prevent blocking during boot
+            var results = await Task.Run(() => _monitor.StartTrackedScanAsync()).ConfigureAwait(false);
+
             Debug.WriteLine($"[TrayApp] Startup scan completed. Devices found: {results.Count}.");
         }
         catch (OperationCanceledException)
@@ -54,11 +57,11 @@ public partial class TrayApp
             UpdateTrayIcon(hasAlert);
         });
 
-    private async void ScanMenuItem_Click(object? sender, EventArgs e) =>
-        await RunUiActionAsync(OpenScanWindowAsync, "Scan menu");
+    private void ScanMenuItem_Click(object? sender, EventArgs e) =>
+        OpenScanWindowAndTriggerScan();
 
-    private async void TrayIcon_DoubleClick(object? sender, EventArgs e) =>
-        await RunUiActionAsync(OpenScanWindowAsync, "Tray double-click");
+    private void TrayIcon_DoubleClick(object? sender, EventArgs e) =>
+        OpenScanWindowAndTriggerScan();
 
     private void OnScanStarted()
     {
@@ -72,109 +75,104 @@ public partial class TrayApp
         _scanMenuItem.Enabled = true;
     }
 
-    public Task OpenScanWindowAsync()
+    public void OpenScanWindowAndTriggerScan()
     {
         if (_disposed || _exitStarted)
-            return Task.CompletedTask;
+            return;
 
-        return OpenScanWindowCoreAsync();
-    }
+        // 1. Ensure window is open and listening
+        OpenScanWindowCore();
 
-    private async Task OpenScanWindowCoreAsync()
-    {
-        bool isAlreadyScanning = _monitor.IsScanning;
-        ScanWindow? currentWindow = null;
-        var windowReadyCompletionSource = new TaskCompletionSource<bool>();
-
-        PostToUi(() =>
+        // 2. If already scanning, the window will just pick up the events.
+        if (_monitor.IsScanning)
         {
-            if (_scanWindow is not null && !_scanWindow.IsDisposed)
-            {
-                _scanWindow.BringToFront();
-                _scanWindow.Activate();
-                currentWindow = _scanWindow;
-                windowReadyCompletionSource.SetResult(true);
-                return;
-            }
-
-            var window = new ScanWindow();
-
-            void OnFound(string name, int battery)
-            {
-                PostToUi(() =>
-                {
-                    if (!window.IsDisposed)
-                        window.OnDeviceFound(name, battery);
-                });
-            }
-
-            void OnCompleted(IReadOnlyList<(string, int)> results)
-            {
-                PostToUi(() =>
-                {
-                    if (!window.IsDisposed)
-                        window.OnScanComplete(results.Count);
-                });
-            }
-
-            _monitor.DeviceFound += OnFound;
-            _monitor.ScanCompleted += OnCompleted;
-
-            window.FormClosed += (_, _) =>
-            {
-                _monitor.DeviceFound -= OnFound;
-                _monitor.ScanCompleted -= OnCompleted;
-
-                if (ReferenceEquals(_scanWindow, window))
-                    _scanWindow = null;
-            };
-
-            // Ensure window paints before doing work
-            window.Shown += (_, _) =>
-            {
-                window.Refresh(); // Force synchronous paint
-                windowReadyCompletionSource.TrySetResult(true);
-            };
-
-            _scanWindow = window;
-            currentWindow = window;
-            window.Show(); // Show non-modal so it pumps messages
-        });
-
-        // Wait until the UI thread has completely shown and painted the window
-        await windowReadyCompletionSource.Task.ConfigureAwait(false);
-
-        if (isAlreadyScanning)
-        {
-            Debug.WriteLine("[TrayApp] Scan window opened while scan already in progress. Listening to ongoing scan.");
+            Debug.WriteLine("[TrayApp] Scan already in progress. Window attached to events.");
             return;
         }
 
-        try
+        // 3. Launch background scan asynchronously with zero UI thread blocking
+        FireAndForget(Task.Run(async () =>
         {
-            Debug.WriteLine("[TrayApp] Manual scan started.");
-            var results = await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
-            Debug.WriteLine($"[TrayApp] Manual scan completed. Devices found: {results.Count}.");
-
-            PostToUi(() =>
+            try
             {
-                if (currentWindow is not null && !currentWindow.IsDisposed)
+                Debug.WriteLine("[TrayApp] Manual scan started.");
+                await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+                Debug.WriteLine("[TrayApp] Manual scan completed.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayApp] Manual scan background fault: {ex}");
+            }
+        }), "Manual scan");
+    }
+
+    public Task OpenScanWindowAsync()
+    {
+        OpenScanWindowAndTriggerScan();
+        return Task.CompletedTask;
+    }
+
+    private void OpenScanWindowCore()
+    {
+        if (_scanWindow is not null && !_scanWindow.IsDisposed)
+        {
+            _scanWindow.BringToFront();
+            _scanWindow.Activate();
+            return;
+        }
+
+        var window = new ScanWindow();
+
+        void OnFound(string name, int battery)
+        {
+            if (window.IsDisposed) return;
+
+            // Use the control's own native Invoke marshaling to guarantee safety
+            if (window.InvokeRequired)
+            {
+                window.BeginInvoke(new Action(() =>
                 {
-                    currentWindow.OnScanComplete(results.Count);
-                }
-            });
+                    if (!window.IsDisposed) window.OnDeviceFound(name, battery);
+                }));
+            }
+            else
+            {
+                window.OnDeviceFound(name, battery);
+            }
         }
-        catch (OperationCanceledException)
+
+        void OnCompleted(IReadOnlyList<(string, int)> results)
         {
-            Debug.WriteLine("[TrayApp] Manual scan cancelled.");
+            if (window.IsDisposed) return;
+
+            if (window.InvokeRequired)
+            {
+                window.BeginInvoke(new Action(() =>
+                {
+                    if (!window.IsDisposed) window.OnScanComplete(results.Count);
+                }));
+            }
+            else
+            {
+                window.OnScanComplete(results.Count);
+            }
         }
-        catch (ObjectDisposedException)
+
+        _monitor.DeviceFound += OnFound;
+        _monitor.ScanCompleted += OnCompleted;
+
+        window.FormClosed += (_, _) =>
         {
-            Debug.WriteLine("[TrayApp] Manual scan aborted because monitor was disposed.");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[TrayApp] Manual scan fault: {ex}");
-        }
+            _monitor.DeviceFound -= OnFound;
+            _monitor.ScanCompleted -= OnCompleted;
+
+            if (ReferenceEquals(_scanWindow, window))
+                _scanWindow = null;
+        };
+
+        _scanWindow = window;
+
+        // Let WinForms naturally show the window and pump messages
+        window.Show();
     }
 }
