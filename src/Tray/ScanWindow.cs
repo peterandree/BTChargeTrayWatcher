@@ -18,51 +18,75 @@ public partial class ScanWindow : Form
         _settings = settings;
 
         Text = "BT Battery Scan";
-        Size = new Size(400, 300);
+        ClientSize = new Size(900, 600);
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        MinimizeBox = true;
+        SizeGripStyle = SizeGripStyle.Show;
+        MinimumSize = new Size(700, 450);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(12),
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _status = new Label
         {
             Text = "Scanning for Bluetooth devices...",
-            Location = new Point(10, 10),
-            AutoSize = true
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, 0, 8)
         };
 
         _list = new ListView
         {
             View = View.Details,
-            Location = new Point(10, 35),
-            Size = new Size(360, 180),
+            Dock = DockStyle.Fill,
             FullRowSelect = true,
-            GridLines = true
+            GridLines = true,
+            Margin = new Padding(0, 0, 0, 8)
         };
 
-        _list.Columns.Add("Device", 200);
-        _list.Columns.Add("Battery", 60);
-        _list.Columns.Add("Level", 90);
+        _list.Columns.Add("Device", 500);
+        _list.Columns.Add("Battery", 120);
+        _list.Columns.Add("Level", 160);
 
         _progress = new ProgressBar
         {
-            Location = new Point(10, 225),
-            Size = new Size(270, 25),
-            Style = ProgressBarStyle.Marquee
+            Dock = DockStyle.Fill,
+            Style = ProgressBarStyle.Marquee,
+            Margin = new Padding(0, 0, 0, 8)
         };
 
         _closeBtn = new Button
         {
             Text = "Close",
-            Location = new Point(290, 225),
-            Size = new Size(80, 25)
+            Dock = DockStyle.Right
         };
         _closeBtn.Click += (_, _) => Close();
 
-        Controls.Add(_status);
-        Controls.Add(_list);
-        Controls.Add(_progress);
-        Controls.Add(_closeBtn);
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true
+        };
+        buttonPanel.Controls.Add(_closeBtn);
+
+        layout.Controls.Add(_status, 0, 0);
+        layout.Controls.Add(_list, 0, 1);
+        layout.Controls.Add(buttonPanel, 0, 2);
+
+        Controls.Add(layout);
+
+        Resize += (_, _) => AdjustColumns();
     }
 
     public void OnDeviceFound(string name, int battery)
@@ -91,7 +115,6 @@ public partial class ScanWindow : Form
 
         string pct = isIgnored ? "-" : (battery >= 0 ? $"{battery}%" : "N/A");
         string bar = isIgnored ? "[Ignored]" : (battery >= 0 ? BatteryDisplay.Bar(battery) : "");
-
         var newItem = new ListViewItem(name);
         newItem.SubItems.Add(pct);
         newItem.SubItems.Add(bar);
@@ -112,5 +135,16 @@ public partial class ScanWindow : Form
         _status.Text = $"Scan complete. {count} device{(count == 1 ? "" : "s")} found.";
         _progress.Style = ProgressBarStyle.Blocks;
         _progress.Value = 100;
+    }
+
+    private void AdjustColumns()
+    {
+        if (_list.Columns.Count < 3) return;
+
+        int padding = SystemInformation.VerticalScrollBarWidth + 16;
+        int available = _list.ClientSize.Width - _list.Columns[1].Width - _list.Columns[2].Width - padding;
+        if (available < 400) available = 400;
+
+        _list.Columns[0].Width = available;
     }
 }
