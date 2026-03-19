@@ -17,7 +17,6 @@ public partial class TrayApp
         {
             Debug.WriteLine("[TrayApp] Startup scan started.");
 
-            // Push off the UI thread to prevent blocking during boot
             var results = await Task.Run(() => _monitor.StartTrackedScanAsync()).ConfigureAwait(false);
 
             Debug.WriteLine($"[TrayApp] Startup scan completed. Devices found: {results.Count}.");
@@ -83,17 +82,14 @@ public partial class TrayApp
         if (_disposed || _exitStarted)
             return;
 
-        // 1. Ensure window is open and listening
         OpenScanWindowCore();
 
-        // 2. If already scanning, the window will just pick up the events.
         if (_monitor.IsScanning)
         {
             Debug.WriteLine("[TrayApp] Scan already in progress. Window attached to events.");
             return;
         }
 
-        // 3. Launch background scan asynchronously with zero UI thread blocking
         FireAndForget(Task.Run(async () =>
         {
             try
@@ -111,7 +107,7 @@ public partial class TrayApp
 
     public Task OpenScanWindowAsync()
     {
-        OpenScanWindowAndTriggerScan();
+        PostToUi(OpenScanWindowAndTriggerScan);
         return Task.CompletedTask;
     }
 
@@ -119,8 +115,7 @@ public partial class TrayApp
     {
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
         {
-            _scanWindow.BringToFront();
-            _scanWindow.Activate();
+            BringExistingWindowToFront(_scanWindow);
             return;
         }
 
@@ -130,12 +125,12 @@ public partial class TrayApp
         {
             if (window.IsDisposed) return;
 
-            // Use the control's own native Invoke marshaling to guarantee safety
             if (window.InvokeRequired)
             {
                 window.BeginInvoke(new Action(() =>
                 {
-                    if (!window.IsDisposed) window.OnDeviceFound(name, battery);
+                    if (!window.IsDisposed)
+                        window.OnDeviceFound(name, battery);
                 }));
             }
             else
@@ -152,7 +147,8 @@ public partial class TrayApp
             {
                 window.BeginInvoke(new Action(() =>
                 {
-                    if (!window.IsDisposed) window.OnScanComplete(results.Count);
+                    if (!window.IsDisposed)
+                        window.OnScanComplete(results.Count);
                 }));
             }
             else
@@ -176,5 +172,42 @@ public partial class TrayApp
         _scanWindow = window;
 
         window.Show();
+        window.BringToFront();
+        window.Activate();
+    }
+
+    private static void BringExistingWindowToFront(ScanWindow window)
+    {
+        if (window.IsDisposed)
+            return;
+
+        if (window.InvokeRequired)
+        {
+            window.BeginInvoke(new Action(() =>
+            {
+                if (window.IsDisposed)
+                    return;
+
+                if (!window.Visible)
+                    window.Show();
+
+                if (window.WindowState == FormWindowState.Minimized)
+                    window.WindowState = FormWindowState.Normal;
+
+                window.BringToFront();
+                window.Activate();
+            }));
+        }
+        else
+        {
+            if (!window.Visible)
+                window.Show();
+
+            if (window.WindowState == FormWindowState.Minimized)
+                window.WindowState = FormWindowState.Normal;
+
+            window.BringToFront();
+            window.Activate();
+        }
     }
 }
