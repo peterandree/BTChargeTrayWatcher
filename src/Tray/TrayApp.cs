@@ -75,14 +75,14 @@ public sealed class TrayApp : IDisposable
 
     private void UpdateTrayIcon(bool hasAlert)
     {
+        Icon? newIcon = _iconRenderer.Render(hasAlert);
         Icon? oldIcon = _trayIcon.Icon;
-        _trayIcon.Icon = _iconRenderer.Render(hasAlert);
 
-        if (oldIcon != null)
-        {
-            NativeMethods.DestroyIcon(oldIcon.Handle);
-            oldIcon.Dispose();
-        }
+        _trayIcon.Icon = newIcon;
+
+        // The old Icon owns the handle; let it dispose it.
+        // If oldIcon is null, the default system icon is gone, and no managed handle.
+        oldIcon?.Dispose();
     }
 
     private void UpdateTooltip() =>
