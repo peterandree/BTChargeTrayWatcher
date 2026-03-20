@@ -26,19 +26,28 @@ public partial class BluetoothBatteryMonitor
 
             results = MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: true);
 
-            foreach (var (name, battery) in results)
+            // Move alert state update under _pollLock to match PollAsync semantics
+            await _pollLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                if (battery < 0) continue;
+                foreach (var (name, battery) in results)
+                {
+                    if (battery < 0) continue;
 
-                _lastKnown[name] = battery;
+                    _lastKnown[name] = battery;
 
-                BatteryAlertState existingState = _alertStates.TryGetValue(name, out var s)
-                    ? s
-                    : BatteryAlertState.Normal;
+                    BatteryAlertState existingState = _alertStates.TryGetValue(name, out var s)
+                        ? s
+                        : BatteryAlertState.Normal;
 
-                _alertStates[name] = ClassifyBatteryState(name, battery, existingState);
+                    _alertStates[name] = ClassifyBatteryState(name, battery, existingState);
 
-                DeviceBatteryRead?.Invoke(name, battery);
+                    DeviceBatteryRead?.Invoke(name, battery);
+                }
+            }
+            finally
+            {
+                _pollLock.Release();
             }
 
             return results;
