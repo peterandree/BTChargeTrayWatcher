@@ -1,22 +1,34 @@
-﻿using System;
+﻿// src/Tray/TrayMenuBuilder.cs
+using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Diagnostics;
 using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
 
-public partial class TrayApp
+internal sealed class TrayMenuBuilder
 {
-    private ContextMenuStrip BuildContextMenu()
+    private readonly ThresholdSettings _settings;
+
+    public TrayMenuBuilder(ThresholdSettings settings)
+    {
+        _settings = settings;
+    }
+
+    public ContextMenuStrip Build(
+        ToolStripMenuItem devicesMenu,
+        ToolStripMenuItem scanMenuItem,
+        ToolStripMenuItem lowMenu,
+        ToolStripMenuItem highMenu,
+        Action onExit)
     {
         var menu = new ContextMenuStrip();
 
-        menu.Items.Add(_devicesMenu);
-        menu.Items.Add(_scanMenuItem);
+        menu.Items.Add(devicesMenu);
+        menu.Items.Add(scanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
-
-        menu.Items.Add(_lowMenu);
-        menu.Items.Add(_highMenu);
+        menu.Items.Add(lowMenu);
+        menu.Items.Add(highMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         var autostartItem = new ToolStripMenuItem("Run on startup")
@@ -31,31 +43,37 @@ public partial class TrayApp
         menu.Items.Add(autostartItem);
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitApp());
+        menu.Items.Add("Exit", null, (_, _) => onExit());
 
         return menu;
     }
 
-    private void ExitApp()
-    {
-        if (_exitStarted) return;
-        _exitStarted = true;
-
-        _trayIcon.Visible = false;
-        Application.Exit();
-    }
-
-    private ToolStripMenuItem BuildDevicesMenu()
+    public ToolStripMenuItem BuildDevicesMenu(
+        Func<IReadOnlyList<(string Name, int Battery)>> getDevices)
     {
         var menu = new ToolStripMenuItem("Connected devices");
         menu.DropDownItems.Add(new ToolStripMenuItem("⏳ Initializing…") { Enabled = false });
-
-        menu.DropDownOpening += (_, _) => PopulateDevicesMenu(menu, _monitor.LastKnownDevices);
-
+        menu.DropDownOpening += (_, _) => PopulateDevicesMenu(menu, getDevices());
         return menu;
     }
 
-    private void PopulateDevicesMenu(ToolStripMenuItem parent, IReadOnlyList<(string Name, int Battery)> results)
+    public ToolStripMenuItem BuildLowMenu() =>
+        BuildGlobalThresholdMenu(
+            "Global Low threshold",
+            _settings.Low,
+            new[] { 10, 15, 20, 25, 30 },
+            val => _settings.Low = val);
+
+    public ToolStripMenuItem BuildHighMenu() =>
+        BuildGlobalThresholdMenu(
+            "Global High threshold",
+            _settings.High,
+            new[] { 70, 75, 80, 85, 90 },
+            val => _settings.High = val);
+
+    private void PopulateDevicesMenu(
+        ToolStripMenuItem parent,
+        IReadOnlyList<(string Name, int Battery)> results)
     {
         while (parent.DropDownItems.Count > 0)
         {
@@ -74,17 +92,11 @@ public partial class TrayApp
         {
             bool isIgnored = _settings.IgnoredDevices.Contains(name);
 
-            string label;
-            if (isIgnored)
-            {
-                label = $"{name}   [Ignored]";
-            }
-            else
-            {
-                label = battery >= 0
+            string label = isIgnored
+                ? $"{name}   [Ignored]"
+                : battery >= 0
                     ? $"{name}   {battery}%  {BatteryDisplay.Bar(battery)}"
                     : $"{name}   N/A";
-            }
 
             var item = new ToolStripMenuItem(label);
 
@@ -109,22 +121,16 @@ public partial class TrayApp
                 item.DropDownItems.Add(new ToolStripSeparator());
             }
 
-            var ignoreItem = new ToolStripMenuItem(isIgnored ? "Stop ignoring device" : "Ignore device");
+            var ignoreItem = new ToolStripMenuItem(
+                isIgnored ? "Stop ignoring device" : "Ignore device");
             ignoreItem.Click += (_, _) => _settings.ToggleIgnoreDevice(name);
-
             item.DropDownItems.Add(ignoreItem);
 
             parent.DropDownItems.Add(item);
         }
     }
 
-    private ToolStripMenuItem BuildLowMenu() =>
-        BuildGlobalThresholdMenu("Global Low threshold", _settings.Low, new[] { 10, 15, 20, 25, 30 }, val => _settings.Low = val);
-
-    private ToolStripMenuItem BuildHighMenu() =>
-        BuildGlobalThresholdMenu("Global High threshold", _settings.High, new[] { 70, 75, 80, 85, 90 }, val => _settings.High = val);
-
-    private ToolStripMenuItem BuildGlobalThresholdMenu(
+    private static ToolStripMenuItem BuildGlobalThresholdMenu(
         string baseText,
         int currentValue,
         int[] candidates,
@@ -145,27 +151,32 @@ public partial class TrayApp
                     root.Text = $"{baseText}: {val}%";
                     foreach (ToolStripItem child in root.DropDownItems)
                     {
-                        if (child is ToolStripMenuItem mi) mi.Checked = (mi.Text == $"{val}%");
+                        if (child is ToolStripMenuItem mi)
+                            mi.Checked = (mi.Text == $"{val}%");
                     }
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[TrayApp] Global threshold update fault: {ex}");
+                    Debug.WriteLine($"[TrayMenuBuilder] Global threshold update fault: {ex}");
                 }
             };
             root.DropDownItems.Add(item);
         }
+
         return root;
     }
 
-    private ToolStripMenuItem BuildDeviceThresholdMenu(
+    private static ToolStripMenuItem BuildDeviceThresholdMenu(
         string baseText,
         int globalValue,
         int? customValue,
         int[] candidates,
         Action<int?> setter)
     {
-        string displayValue = customValue.HasValue ? $"{customValue.Value}%" : $"Global ({globalValue}%)";
+        string displayValue = customValue.HasValue
+            ? $"{customValue.Value}%"
+            : $"Global ({globalValue}%)";
+
         var root = new ToolStripMenuItem($"{baseText}: {displayValue}");
 
         var globalItem = new ToolStripMenuItem($"Global ({globalValue}%)");
@@ -178,16 +189,10 @@ public partial class TrayApp
         {
             var item = new ToolStripMenuItem($"{val}%");
             item.Checked = customValue.HasValue && customValue.Value == val;
-
             item.Click += (_, _) => setter(val);
             root.DropDownItems.Add(item);
         }
 
         return root;
-    }
-
-    private void UpdateTooltip()
-    {
-        _trayIcon.Text = $"BT Battery Alert  ▼{_settings.Low}%  ▲{_settings.High}%";
     }
 }

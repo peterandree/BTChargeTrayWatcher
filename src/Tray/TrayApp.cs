@@ -1,125 +1,80 @@
-﻿using System;
+﻿// src/Tray/TrayApp.cs
+using System;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
 
-public partial class TrayApp : IDisposable
+public sealed class TrayApp : IDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
     private readonly NotificationService _notifier;
     private readonly NotifyIcon _trayIcon;
+    private readonly TrayIconRenderer _iconRenderer;
+    private readonly ScanCoordinator _scanner;
+
+    private readonly ToolStripMenuItem _scanMenuItem;
     private readonly ToolStripMenuItem _lowMenu;
     private readonly ToolStripMenuItem _highMenu;
-    private readonly ToolStripMenuItem _devicesMenu;
-    private readonly ToolStripMenuItem _scanMenuItem;
-    private readonly SynchronizationContext _uiContext;
 
-    private ScanWindow? _scanWindow;
     private bool _disposed;
-    private bool _exitStarted;
 
     public TrayApp(
         ThresholdSettings settings,
         BluetoothBatteryMonitor monitor,
         NotificationService notifier)
     {
-        _uiContext = SynchronizationContext.Current
+        var uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
 
         _settings = settings;
         _monitor = monitor;
         _notifier = notifier;
+        _iconRenderer = new TrayIconRenderer();
+        _scanner = new ScanCoordinator(monitor, settings, uiContext);
 
-        _trayIcon = new NotifyIcon
-        {
-            Visible = true
-        };
+        _trayIcon = new NotifyIcon { Visible = true };
 
-        _lowMenu = BuildLowMenu();
-        _highMenu = BuildHighMenu();
-        _devicesMenu = BuildDevicesMenu();
+        var menuBuilder = new TrayMenuBuilder(settings);
+        _lowMenu = menuBuilder.BuildLowMenu();
+        _highMenu = menuBuilder.BuildHighMenu();
+
         _scanMenuItem = new ToolStripMenuItem("Scan devices…");
-        _scanMenuItem.Click += ScanMenuItem_Click;
+        _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        _trayIcon.ContextMenuStrip = BuildContextMenu();
-        _trayIcon.DoubleClick += TrayIcon_DoubleClick;
+        var devicesMenu = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
 
-        _monitor.ScanStarted += Monitor_ScanStarted;
-        _monitor.ScanCompleted += Monitor_ScanCompleted;
+        _trayIcon.ContextMenuStrip = menuBuilder.Build(
+            devicesMenu,
+            _scanMenuItem,
+            _lowMenu,
+            _highMenu,
+            onExit: () => _ = ExitAsync());
+
+        _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
+
+        _scanner.ScanStarted += OnScanStarted;
+        _scanner.ScanCompleted += OnScanCompleted;
+        _scanner.AlertStateChanged += hasAlert => UpdateTrayIcon(hasAlert);
+
+        _notifier.OnNotificationClicked += () => _ = _scanner.OpenScanWindowAsync();
 
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
         UpdateTrayIcon(false);
-
-        _notifier.OnNotificationClicked += () => PostToUi(() => _ = OpenScanWindowAsync());
     }
+
+    public void Run() => Application.Run();
+
+    public void StartBackgroundScan() => _scanner.StartBackgroundScan();
 
     private void UpdateTrayIcon(bool hasAlert)
     {
-        int size = 128;
-        using Bitmap bmp = new(size, size);
-        using Graphics g = Graphics.FromImage(bmp);
-
-        g.SmoothingMode = SmoothingMode.HighQuality;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-
-        Color btBlue = Color.FromArgb(0, 120, 215);
-
-        using (SolidBrush bgBrush = new(btBlue))
-        {
-            g.FillEllipse(bgBrush, 4, 4, size - 8, size - 8);
-        }
-
-        using (Pen whitePen = new(Color.White, size / 10f))
-        {
-            whitePen.LineJoin = LineJoin.Round;
-            whitePen.StartCap = LineCap.Round;
-            whitePen.EndCap = LineCap.Round;
-
-            float midX = size / 2f;
-            float top = size * 0.22f;
-            float btm = size * 0.78f;
-            float right = size * 0.68f;
-            float left = size * 0.32f;
-
-            g.DrawLine(whitePen, midX, top, midX, btm);
-            g.DrawLine(whitePen, left, size * 0.35f, midX, btm);
-            g.DrawLine(whitePen, midX, btm, right, size * 0.62f);
-            g.DrawLine(whitePen, right, size * 0.62f, left, size * 0.38f);
-
-            g.DrawLine(whitePen, left, size * 0.65f, midX, top);
-            g.DrawLine(whitePen, midX, top, right, size * 0.38f);
-            g.DrawLine(whitePen, right, size * 0.38f, left, size * 0.62f);
-        }
-
-        if (hasAlert)
-        {
-            float badgeSize = size * 0.45f;
-            float badgeX = size - badgeSize;
-            float badgeY = size - badgeSize;
-
-            using SolidBrush badgeBg = new(Color.FromArgb(255, 193, 7));
-            g.FillEllipse(badgeBg, badgeX, badgeY, badgeSize, badgeSize);
-
-            using Pen darkEdge = new(Color.Black, size * 0.02f);
-            g.DrawEllipse(darkEdge, badgeX, badgeY, badgeSize, badgeSize);
-
-            using StringFormat sf = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            using Font f = new("Tahoma", badgeSize * 0.75f, FontStyle.Bold);
-            g.DrawString("!", f, Brushes.Black, new RectangleF(badgeX, badgeY + (size * 0.05f), badgeSize, badgeSize), sf);
-        }
-
         Icon? oldIcon = _trayIcon.Icon;
-        _trayIcon.Icon = Icon.FromHandle(bmp.GetHicon());
+        _trayIcon.Icon = _iconRenderer.Render(hasAlert);
 
         if (oldIcon != null)
         {
@@ -128,36 +83,61 @@ public partial class TrayApp : IDisposable
         }
     }
 
-    public void Run() => Application.Run();
+    private void UpdateTooltip() =>
+        _trayIcon.Text = $"BT Battery Alert  ▼{_settings.Low}%  ▲{_settings.High}%";
 
-    public Task StartBackgroundScanAsync() => RunStartupScanAsync();
+    private void OnScanStarted()
+    {
+        _scanMenuItem.Text = "⏳ Scanning…";
+        _scanMenuItem.Enabled = false;
+    }
 
-    public void StartBackgroundScan() =>
-        FireAndForget(RunStartupScanAsync(), "Startup scan");
+    private void OnScanCompleted()
+    {
+        _scanMenuItem.Text = "Scan devices…";
+        _scanMenuItem.Enabled = true;
+    }
 
-    private void PostToUi(Action action)
+    private async Task ExitAsync()
+    {
+        _scanMenuItem.Enabled = false;
+        _lowMenu.Enabled = false;
+        _highMenu.Enabled = false;
+
+        try
+        {
+            Debug.WriteLine("[TrayApp] Exit started.");
+            _trayIcon.Visible = false;
+            await _monitor.DisposeAsync().ConfigureAwait(true);
+            Debug.WriteLine("[TrayApp] Monitor disposed.");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[TrayApp] Exit fault: {ex}");
+        }
+        finally
+        {
+            Application.Exit();
+        }
+    }
+
+    public void Dispose()
     {
         if (_disposed) return;
-        _uiContext.Post(_ =>
-        {
-            if (_disposed) return;
-            try { action(); }
-            catch (Exception ex) { Debug.WriteLine($"[TrayApp] UI dispatch fault: {ex}"); }
-        }, null);
-    }
+        _disposed = true;
 
-    private void FireAndForget(Task task, string operationName)
-    {
-        _ = task.ContinueWith(t =>
-        {
-            if (t.IsFaulted && t.Exception is not null)
-                Debug.WriteLine($"[TrayApp] {operationName} fault: {t.Exception}");
-        }, TaskScheduler.Default);
-    }
+        Debug.WriteLine("[TrayApp] Disposing.");
 
-    private async Task RunUiActionAsync(Func<Task> action, string operationName)
-    {
-        try { await action().ConfigureAwait(false); }
-        catch (Exception ex) { Debug.WriteLine($"[TrayApp] {operationName} fault: {ex}"); }
+        _scanner.ScanStarted -= OnScanStarted;
+        _scanner.ScanCompleted -= OnScanCompleted;
+        _scanner.AlertStateChanged -= UpdateTrayIcon;
+        _settings.Changed -= UpdateTooltip;
+
+        _scanner.Dispose();
+
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
+
+        GC.SuppressFinalize(this);
     }
 }
