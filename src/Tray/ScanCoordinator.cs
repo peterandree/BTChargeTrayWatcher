@@ -19,7 +19,7 @@ internal sealed class ScanCoordinator : IDisposable
 
     public event Action<bool>? AlertStateChanged;
     public event Action? ScanStarted;
-    public event Action? ScanCompleted;
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
 
     public ScanCoordinator(
         BluetoothBatteryMonitor monitor,
@@ -97,26 +97,28 @@ internal sealed class ScanCoordinator : IDisposable
     private void Monitor_ScanStarted() =>
         PostToUi(() => ScanStarted?.Invoke());
 
-    private void Monitor_ScanCompleted(IReadOnlyList<(string, int)> results) =>
+    private void Monitor_ScanCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
         PostToUi(() =>
         {
-            ScanCompleted?.Invoke();
-
-            bool hasAlert = false;
-            foreach (var (name, battery) in results)
-            {
-                if (_settings.IgnoredDevices.Contains(name)) continue;
-
-                if (battery >= 0 &&
-                    (battery <= _settings.GetLow(name) || battery >= _settings.GetHigh(name)))
-                {
-                    hasAlert = true;
-                    break;
-                }
-            }
-
-            AlertStateChanged?.Invoke(hasAlert);
+            ScanCompleted?.Invoke(results);
+            AlertStateChanged?.Invoke(EvaluateAlert(results));
         });
+
+    private bool EvaluateAlert(IReadOnlyList<DeviceBatteryInfo> results)
+    {
+        foreach (var device in results)
+        {
+            if (_settings.IgnoredDevices.Contains(device.Name)) continue;
+
+            if (device.Battery >= 0 &&
+                (device.Battery <= _settings.GetLow(device.Name) ||
+                 device.Battery >= _settings.GetHigh(device.Name)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private void OpenScanWindowCore()
     {
@@ -137,7 +139,7 @@ internal sealed class ScanCoordinator : IDisposable
                 window.OnDeviceFound(name, battery);
         }
 
-        void OnCompleted(IReadOnlyList<(string, int)> results)
+        void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results)
         {
             if (window.IsDisposed) return;
             if (window.InvokeRequired)

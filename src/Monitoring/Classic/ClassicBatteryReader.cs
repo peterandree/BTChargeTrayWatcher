@@ -15,10 +15,10 @@ public sealed class ClassicBatteryReader : IBatteryReader
     private readonly ClassicBluetoothConnectionChecker _connectionChecker = new();
     private readonly ClassicBatteryPropertyReader _batteryPropertyReader = new();
 
-    public Task<List<(string Name, int Battery)>> ReadAllAsync() =>
+    public Task<List<DeviceBatteryInfo>> ReadAllAsync() =>
         ReadAllAsync(CancellationToken.None);
 
-    public async Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken)
+    public async Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -55,7 +55,6 @@ public sealed class ClassicBatteryReader : IBatteryReader
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Batch read all batteries in a single SetupAPI pass on a background thread
         Dictionary<string, int> batteryMap = await Task.Run(() =>
         {
             var instanceIds = connected.Select(c => c.InstanceId);
@@ -63,8 +62,10 @@ public sealed class ClassicBatteryReader : IBatteryReader
         }, cancellationToken).ConfigureAwait(false);
 
         return connected
-            .Select(c => (c.Name, Battery: batteryMap.TryGetValue(c.InstanceId, out int b) ? b : -1))
-            .Where(r => !string.IsNullOrWhiteSpace(r.Name) && r.Battery >= 0)
+            .Select(c => new DeviceBatteryInfo(
+                c.Name,
+                batteryMap.TryGetValue(c.InstanceId, out int b) ? b : -1))
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery >= 0)
             .ToList();
     }
 

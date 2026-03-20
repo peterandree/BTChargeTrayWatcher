@@ -1,48 +1,52 @@
-﻿namespace BTChargeTrayWatcher;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace BTChargeTrayWatcher;
 
 public partial class BluetoothBatteryMonitor
 {
-    public Task<List<(string Name, int Battery)>> ScanNowAsync() =>
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
         ScanNowAsync(_shutdownCts.Token);
 
-    public async Task<List<(string Name, int Battery)>> ScanNowAsync(CancellationToken cancellationToken)
+    public async Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposingOrDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
         await _scanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-        List<(string, int)> results = [];
+        List<DeviceBatteryInfo> results = [];
 
         try
         {
             _isScanning = true;
             ScanStarted?.Invoke();
 
-            Task<List<(string Name, int Battery)>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
-            Task<List<(string Name, int Battery)>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
+            Task<List<DeviceBatteryInfo>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
+            Task<List<DeviceBatteryInfo>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
 
             await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
             results = MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: true);
 
-            // Move alert state update under _pollLock to match PollAsync semantics
             await _pollLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                foreach (var (name, battery) in results)
+                foreach (var device in results)
                 {
-                    if (battery < 0) continue;
+                    if (device.Battery < 0) continue;
 
-                    _lastKnown[name] = battery;
+                    _lastKnown[device.Name] = device.Battery;
 
-                    BatteryAlertState existingState = _alertStates.TryGetValue(name, out var s)
+                    BatteryAlertState existingState = _alertStates.TryGetValue(device.Name, out var s)
                         ? s
                         : BatteryAlertState.Normal;
 
-                    _alertStates[name] = ClassifyBatteryState(name, battery, existingState);
+                    _alertStates[device.Name] = ClassifyBatteryState(device.Name, device.Battery, existingState);
 
-                    DeviceBatteryRead?.Invoke(name, battery);
+                    DeviceBatteryRead?.Invoke(device.Name, device.Battery);
                 }
             }
             finally
@@ -60,17 +64,17 @@ public partial class BluetoothBatteryMonitor
         }
     }
 
-    public Task<List<(string Name, int Battery)>> StartTrackedScanAsync() =>
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
         StartTrackedScanAsync(_shutdownCts.Token);
 
-    public Task<List<(string Name, int Battery)>> StartTrackedScanAsync(CancellationToken cancellationToken)
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposingOrDisposed();
 
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, cancellationToken);
         CancellationToken token = linkedCts.Token;
 
-        Task<List<(string Name, int Battery)>> task = ScanNowAsync(token);
+        Task<List<DeviceBatteryInfo>> task = ScanNowAsync(token);
 
         lock (_taskGate)
         {
@@ -99,42 +103,42 @@ public partial class BluetoothBatteryMonitor
         return task;
     }
 
-    private async Task<List<(string Name, int Battery)>> QuietReadAsync(CancellationToken cancellationToken)
+    private async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        Task<List<(string Name, int Battery)>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
-        Task<List<(string Name, int Battery)>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
+        Task<List<DeviceBatteryInfo>> gattTask = _gattReader.ReadAllAsync(cancellationToken);
+        Task<List<DeviceBatteryInfo>> classicTask = _classicReader.ReadAllAsync(cancellationToken);
 
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
         return MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: false);
     }
 
-    private List<(string Name, int Battery)> MergeResults(
-        IReadOnlyList<(string Name, int Battery)> first,
-        IReadOnlyList<(string Name, int Battery)> second,
+    private List<DeviceBatteryInfo> MergeResults(
+        IReadOnlyList<DeviceBatteryInfo> first,
+        IReadOnlyList<DeviceBatteryInfo> second,
         bool raiseDeviceFound)
     {
-        List<(string Name, int Battery)> results = [];
+        List<DeviceBatteryInfo> results = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (name, battery) in first)
+        foreach (var device in first)
         {
-            if (!seen.Add(name)) continue;
+            if (!seen.Add(device.Name)) continue;
 
             if (raiseDeviceFound)
-                DeviceFound?.Invoke(name, battery);
-            results.Add((name, battery));
+                DeviceFound?.Invoke(device.Name, device.Battery);
+            results.Add(device);
         }
 
-        foreach (var (name, battery) in second)
+        foreach (var device in second)
         {
-            if (!seen.Add(name)) continue;
+            if (!seen.Add(device.Name)) continue;
 
             if (raiseDeviceFound)
-                DeviceFound?.Invoke(name, battery);
-            results.Add((name, battery));
+                DeviceFound?.Invoke(device.Name, device.Battery);
+            results.Add(device);
         }
 
         return results;

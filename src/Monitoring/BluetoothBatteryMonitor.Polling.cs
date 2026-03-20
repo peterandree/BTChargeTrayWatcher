@@ -66,56 +66,55 @@ public partial class BluetoothBatteryMonitor
 
             var currentValid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var (name, battery) in devices)
+            foreach (var device in devices)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (battery < 0) continue;
+                if (device.Battery < 0) continue;
 
-                currentValid.Add(name);
+                currentValid.Add(device.Name);
 
-                snapshot.TryGetValue(name, out int prev);
-                bool isNew = !snapshot.ContainsKey(name);
+                snapshot.TryGetValue(device.Name, out int prev);
+                bool isNew = !snapshot.ContainsKey(device.Name);
 
-                _lastKnown[name] = battery;
-                DeviceBatteryRead?.Invoke(name, battery);
+                _lastKnown[device.Name] = device.Battery;
+                DeviceBatteryRead?.Invoke(device.Name, device.Battery);
 
-                BatteryAlertState previousState = _alertStates.TryGetValue(name, out var existingState)
+                BatteryAlertState previousState = _alertStates.TryGetValue(device.Name, out var existingState)
                     ? existingState
-                    : ClassifyBatteryState(name, prev, BatteryAlertState.Normal);
+                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal);
 
-                BatteryAlertState currentState = ClassifyBatteryState(name, battery, previousState);
+                BatteryAlertState currentState = ClassifyBatteryState(device.Name, device.Battery, previousState);
 
-                // Silently skip any alerts if device is ignored
-                if (_settings.IgnoredDevices.Contains(name))
+                if (_settings.IgnoredDevices.Contains(device.Name))
                 {
-                    _alertStates[name] = BatteryAlertState.Normal;
+                    _alertStates[device.Name] = BatteryAlertState.Normal;
                     continue;
                 }
 
-                if (isNew || thresholdsChanged || !_alertStates.ContainsKey(name))
+                if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.Name))
                 {
                     if (currentState == BatteryAlertState.Low)
-                        _notifier.NotifyLow(name, battery);
+                        _notifier.NotifyLow(device.Name, device.Battery);
                     else if (currentState == BatteryAlertState.High)
-                        _notifier.NotifyHigh(name, battery);
+                        _notifier.NotifyHigh(device.Name, device.Battery);
 
-                    _alertStates[name] = currentState;
+                    _alertStates[device.Name] = currentState;
                     continue;
                 }
 
-                if (prev == battery)
+                if (prev == device.Battery)
                     continue;
 
                 if (previousState != currentState)
                 {
                     if (currentState == BatteryAlertState.Low)
-                        _notifier.NotifyLow(name, battery);
+                        _notifier.NotifyLow(device.Name, device.Battery);
                     else if (currentState == BatteryAlertState.High)
-                        _notifier.NotifyHigh(name, battery);
+                        _notifier.NotifyHigh(device.Name, device.Battery);
                 }
 
-                _alertStates[name] = currentState;
+                _alertStates[device.Name] = currentState;
             }
 
             foreach (var name in snapshot.Keys)
@@ -127,11 +126,10 @@ public partial class BluetoothBatteryMonitor
                 }
             }
 
-            var activeList = new List<(string, int)>();
+            var activeList = new List<DeviceBatteryInfo>();
             foreach (var kvp in _lastKnown)
-            {
-                activeList.Add((kvp.Key, kvp.Value));
-            }
+                activeList.Add(new DeviceBatteryInfo(kvp.Key, kvp.Value));
+
             ScanCompleted?.Invoke(activeList);
         }
         finally

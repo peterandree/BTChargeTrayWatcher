@@ -1,5 +1,6 @@
 ﻿// src/Tray/TrayApp.cs
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,7 +93,7 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem.Enabled = false;
     }
 
-    private void OnScanCompleted()
+    private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> _)
     {
         _scanMenuItem.Text = "Scan devices…";
         _scanMenuItem.Enabled = true;

@@ -31,13 +31,13 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
 
     public event Action<string, int>? DeviceBatteryRead;
     public event Action<string, int>? DeviceFound;
-    public event Action<IReadOnlyList<(string, int)>>? ScanCompleted;
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
     public event Action? ScanStarted;
 
     public bool IsScanning => _isScanning;
 
-    public IReadOnlyList<(string Name, int Battery)> LastKnownDevices =>
-        _lastKnown.Select(kv => (kv.Key, kv.Value)).ToList();
+    public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
+        _lastKnown.Select(kv => new DeviceBatteryInfo(kv.Key, kv.Value)).ToList();
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
@@ -86,8 +86,6 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
             return;
 
-        // Any setting change flags a wipe of alert memory.
-        // This flag is intentionally written from the UI thread and read under _pollLock.
         _thresholdsChanged = true;
         StartTrackedTask(ct => SafePollAsync(ct));
     }
@@ -103,7 +101,6 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
         if (_isDisposed) return;
         if (_disposeStarted)
         {
-            // Wait for ongoing dispose if already started
             try { await Task.Delay(1000, _shutdownCts.Token).ConfigureAwait(false); } catch { }
             return;
         }
@@ -144,7 +141,6 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
-        // Fire-and-forget async dispose from sync path
         _ = DisposeAsync();
     }
 }

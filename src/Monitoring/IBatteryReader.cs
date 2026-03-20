@@ -1,6 +1,10 @@
-﻿namespace BTChargeTrayWatcher;
+﻿using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace BTChargeTrayWatcher;
 
 public interface IBatteryReader
 {
-    Task<List<(string Name, int Battery)>> ReadAllAsync(CancellationToken cancellationToken);
+    Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken cancellationToken);
 }

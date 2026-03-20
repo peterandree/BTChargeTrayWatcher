@@ -49,7 +49,7 @@ internal sealed class TrayMenuBuilder
     }
 
     public ToolStripMenuItem BuildDevicesMenu(
-        Func<IReadOnlyList<(string Name, int Battery)>> getDevices)
+        Func<IReadOnlyList<DeviceBatteryInfo>> getDevices)
     {
         var menu = new ToolStripMenuItem("Connected devices");
         menu.DropDownItems.Add(new ToolStripMenuItem("⏳ Initializing…") { Enabled = false });
@@ -71,9 +71,9 @@ internal sealed class TrayMenuBuilder
             new[] { 70, 75, 80, 85, 90 },
             val => _settings.High = val);
 
-    private void PopulateDevicesMenu(
+    public void PopulateDevicesMenu(
         ToolStripMenuItem parent,
-        IReadOnlyList<(string Name, int Battery)> results)
+        IReadOnlyList<DeviceBatteryInfo> results)
     {
         while (parent.DropDownItems.Count > 0)
         {
@@ -88,15 +88,15 @@ internal sealed class TrayMenuBuilder
             return;
         }
 
-        foreach (var (name, battery) in results)
+        foreach (var device in results)
         {
-            bool isIgnored = _settings.IgnoredDevices.Contains(name);
+            bool isIgnored = _settings.IgnoredDevices.Contains(device.Name);
 
             string label = isIgnored
-                ? $"{name}   [Ignored]"
-                : battery >= 0
-                    ? $"{name}   {battery}%  {BatteryDisplay.Bar(battery)}"
-                    : $"{name}   N/A";
+                ? $"{device.Name}   [Ignored]"
+                : device.Battery >= 0
+                    ? $"{device.Name}   {device.Battery}%  {BatteryDisplay.Bar(device.Battery)}"
+                    : $"{device.Name}   N/A";
 
             var item = new ToolStripMenuItem(label);
 
@@ -105,16 +105,16 @@ internal sealed class TrayMenuBuilder
                 var lowMenu = BuildDeviceThresholdMenu(
                     "Low limit",
                     _settings.Low,
-                    _settings.HasCustomLow(name) ? _settings.GetLow(name) : null,
+                    _settings.HasCustomLow(device.Name) ? _settings.GetLow(device.Name) : null,
                     new[] { 10, 15, 20, 25, 30 },
-                    val => _settings.SetLow(name, val));
+                    val => _settings.SetLow(device.Name, val));
 
                 var highMenu = BuildDeviceThresholdMenu(
                     "High limit",
                     _settings.High,
-                    _settings.HasCustomHigh(name) ? _settings.GetHigh(name) : null,
+                    _settings.HasCustomHigh(device.Name) ? _settings.GetHigh(device.Name) : null,
                     new[] { 70, 75, 80, 85, 90 },
-                    val => _settings.SetHigh(name, val));
+                    val => _settings.SetHigh(device.Name, val));
 
                 item.DropDownItems.Add(lowMenu);
                 item.DropDownItems.Add(highMenu);
@@ -123,7 +123,7 @@ internal sealed class TrayMenuBuilder
 
             var ignoreItem = new ToolStripMenuItem(
                 isIgnored ? "Stop ignoring device" : "Ignore device");
-            ignoreItem.Click += (_, _) => _settings.ToggleIgnoreDevice(name);
+            ignoreItem.Click += (_, _) => _settings.ToggleIgnoreDevice(device.Name);
             item.DropDownItems.Add(ignoreItem);
 
             parent.DropDownItems.Add(item);

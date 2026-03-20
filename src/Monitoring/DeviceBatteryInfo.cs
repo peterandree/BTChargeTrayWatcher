@@ -1,5 +1,5 @@
 ﻿namespace BTChargeTrayWatcher;
 
-internal sealed record DeviceBatteryInfo(
+public sealed record DeviceBatteryInfo(
     string Name,
-    int Battery); // -1 for “no value”
+    int Battery); // -1 for "no value"
