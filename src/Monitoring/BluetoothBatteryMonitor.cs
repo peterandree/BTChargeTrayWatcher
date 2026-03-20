@@ -101,7 +101,12 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_isDisposed) return;
-        if (_disposeStarted) return;
+        if (_disposeStarted)
+        {
+            // Wait for ongoing dispose if already started
+            try { await Task.Delay(1000, _shutdownCts.Token).ConfigureAwait(false); } catch { }
+            return;
+        }
 
         _disposeStarted = true;
 
@@ -139,46 +144,7 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
-        if (_disposeStarted) return;
-
-        _disposeStarted = true;
-
-        _settings.Changed -= Settings_Changed;
-        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
-
-        _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-        _shutdownCts.Cancel();
-
-        // Drain active tasks similarly to DisposeAsync, but with a bounded wait
-        Task[] tasks = SnapshotActiveTasks();
-        if (tasks.Length > 0)
-        {
-            try
-            {
-                Task.WaitAll(tasks, TimeSpan.FromSeconds(5));
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during shutdown; ignore
-            }
-            catch (AggregateException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault (sync): {ex}");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait unexpected fault (sync): {ex}");
-            }
-        }
-
-        _timer.Dispose();
-        _shutdownCts.Dispose();
-        _pollLock.Dispose();
-        _scanLock.Dispose();
-
-        if (_gattReader is IDisposable gd) gd.Dispose();
-
-        _isDisposed = true;
-        GC.SuppressFinalize(this);
+        // Fire-and-forget async dispose from sync path
+        _ = DisposeAsync();
     }
 }
