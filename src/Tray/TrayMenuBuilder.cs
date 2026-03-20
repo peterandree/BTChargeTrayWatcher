@@ -10,6 +10,12 @@ internal sealed class TrayMenuBuilder
 {
     private readonly ThresholdSettings _settings;
 
+    // Centralized policy: low thresholds (10–30)
+    private static readonly int[] LowThresholdCandidates = { 10, 15, 20, 25, 30 };
+
+    // Centralized policy: high thresholds (70–90)
+    private static readonly int[] HighThresholdCandidates = { 70, 75, 80, 85, 90 };
+
     public TrayMenuBuilder(ThresholdSettings settings)
     {
         _settings = settings;
@@ -61,14 +67,14 @@ internal sealed class TrayMenuBuilder
         BuildGlobalThresholdMenu(
             "Global Low threshold",
             _settings.Low,
-            new[] { 10, 15, 20, 25, 30 },
+            LowThresholdCandidates,
             val => _settings.Low = val);
 
     public ToolStripMenuItem BuildHighMenu() =>
         BuildGlobalThresholdMenu(
             "Global High threshold",
             _settings.High,
-            new[] { 70, 75, 80, 85, 90 },
+            HighThresholdCandidates,
             val => _settings.High = val);
 
     public void PopulateDevicesMenu(
@@ -106,14 +112,14 @@ internal sealed class TrayMenuBuilder
                     "Low limit",
                     _settings.Low,
                     _settings.HasCustomLow(device.Name) ? _settings.GetLow(device.Name) : null,
-                    new[] { 10, 15, 20, 25, 30 },
+                    LowThresholdCandidates,
                     val => _settings.SetLow(device.Name, val));
 
                 var highMenu = BuildDeviceThresholdMenu(
                     "High limit",
                     _settings.High,
                     _settings.HasCustomHigh(device.Name) ? _settings.GetHigh(device.Name) : null,
-                    new[] { 70, 75, 80, 85, 90 },
+                    HighThresholdCandidates,
                     val => _settings.SetHigh(device.Name, val));
 
                 item.DropDownItems.Add(lowMenu);
