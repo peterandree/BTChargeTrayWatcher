@@ -59,9 +59,10 @@ public sealed class TrayApp : IDisposable
 
         _scanner.ScanStarted += OnScanStarted;
         _scanner.ScanCompleted += OnScanCompleted;
-        _scanner.AlertStateChanged += hasAlert => UpdateTrayIcon(hasAlert);
+        _scanner.AlertStateChanged += UpdateTrayIcon;
+        _scanner.ScanFaulted += OnScanFaulted;
 
-        _notifier.OnNotificationClicked += () => _ = _scanner.OpenScanWindowAsync();
+        _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
 
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
@@ -99,6 +100,13 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem.Enabled = true;
     }
 
+    private static void OnScanFaulted(string operationName, Exception ex)
+    {
+        // Trace.TraceError is visible in both Debug and Release builds.
+        // Extend here to show a balloon tip or write to an app log if required.
+        Trace.TraceError($"[TrayApp] Background operation '{operationName}' faulted: {ex}");
+    }
+
     private async Task ExitAsync()
     {
         _scanMenuItem.Enabled = false;
@@ -132,6 +140,7 @@ public sealed class TrayApp : IDisposable
         _scanner.ScanStarted -= OnScanStarted;
         _scanner.ScanCompleted -= OnScanCompleted;
         _scanner.AlertStateChanged -= UpdateTrayIcon;
+        _scanner.ScanFaulted -= OnScanFaulted;
         _settings.Changed -= UpdateTooltip;
 
         _scanner.Dispose();

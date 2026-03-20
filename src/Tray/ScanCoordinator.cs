@@ -21,6 +21,10 @@ internal sealed class ScanCoordinator : IDisposable
     public event Action? ScanStarted;
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
 
+    // Raised on the thread-pool when a background scan task faults.
+    // operationName identifies which operation faulted; the exception is the unwrapped cause.
+    public event Action<string, Exception>? ScanFaulted;
+
     public ScanCoordinator(
         BluetoothBatteryMonitor monitor,
         ThresholdSettings settings,
@@ -37,11 +41,10 @@ internal sealed class ScanCoordinator : IDisposable
     public void StartBackgroundScan() =>
         FireAndForget(RunStartupScanAsync(), "Startup scan");
 
-    public Task OpenScanWindowAsync()
-    {
+    // Posts a request to the UI thread to open the scan window and trigger a scan.
+    // Returns immediately; does not represent completion of either action.
+    public void RequestOpenScanWindow() =>
         PostToUi(OpenScanWindowAndTriggerScan);
-        return Task.CompletedTask;
-    }
 
     public void OpenScanWindowAndTriggerScan()
     {
@@ -55,43 +58,23 @@ internal sealed class ScanCoordinator : IDisposable
             return;
         }
 
-        FireAndForget(Task.Run(async () =>
-        {
-            try
-            {
-                Debug.WriteLine("[ScanCoordinator] Manual scan started.");
-                await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
-                Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[ScanCoordinator] Manual scan fault: {ex}");
-            }
-        }), "Manual scan");
+        FireAndForget(RunManualScanAsync(), "Manual scan");
     }
 
     private async Task RunStartupScanAsync()
     {
         if (_disposed) return;
 
-        try
-        {
-            Debug.WriteLine("[ScanCoordinator] Startup scan started.");
-            await Task.Run(() => _monitor.StartTrackedScanAsync()).ConfigureAwait(false);
-            Debug.WriteLine("[ScanCoordinator] Startup scan completed.");
-        }
-        catch (OperationCanceledException)
-        {
-            Debug.WriteLine("[ScanCoordinator] Startup scan cancelled.");
-        }
-        catch (ObjectDisposedException)
-        {
-            Debug.WriteLine("[ScanCoordinator] Startup scan aborted — monitor disposed.");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[ScanCoordinator] Startup scan fault: {ex}");
-        }
+        Debug.WriteLine("[ScanCoordinator] Startup scan started.");
+        await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+        Debug.WriteLine("[ScanCoordinator] Startup scan completed.");
+    }
+
+    private async Task RunManualScanAsync()
+    {
+        Debug.WriteLine("[ScanCoordinator] Manual scan started.");
+        await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+        Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
     }
 
     private void Monitor_ScanStarted() =>
@@ -196,12 +179,20 @@ internal sealed class ScanCoordinator : IDisposable
         }, null);
     }
 
-    private static void FireAndForget(Task task, string operationName)
+    // Instance method — needs access to ScanFaulted event.
+    // Expected cancellation and disposal are not faults; they are swallowed silently.
+    private void FireAndForget(Task task, string operationName)
     {
         _ = task.ContinueWith(t =>
         {
-            if (t.IsFaulted && t.Exception is not null)
-                Debug.WriteLine($"[ScanCoordinator] {operationName} fault: {t.Exception}");
+            if (!t.IsFaulted || t.Exception is null) return;
+
+            Exception cause = t.Exception.Flatten().InnerException ?? t.Exception;
+
+            if (cause is OperationCanceledException || cause is ObjectDisposedException) return;
+
+            Trace.TraceError($"[ScanCoordinator] {operationName} fault: {cause}");
+            ScanFaulted?.Invoke(operationName, cause);
         }, TaskScheduler.Default);
     }
 
