@@ -72,6 +72,14 @@ public class ThresholdSettings
             _deviceOverrides[deviceName] = t;
         }
 
+        if (value.HasValue)
+        {
+            int effectiveHigh = GetHigh(deviceName);
+            if (value.Value >= effectiveHigh)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
+        }
+
         t.Low = value;
         CleanupEmptyOverrides(deviceName);
         Save();
@@ -87,11 +95,20 @@ public class ThresholdSettings
             _deviceOverrides[deviceName] = t;
         }
 
+        if (value.HasValue)
+        {
+            int effectiveLow = GetLow(deviceName);
+            if (value.Value <= effectiveLow)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
+        }
+
         t.High = value;
         CleanupEmptyOverrides(deviceName);
         Save();
         Changed?.Invoke();
     }
+
 
     private void CleanupEmptyOverrides(string deviceName)
     {
