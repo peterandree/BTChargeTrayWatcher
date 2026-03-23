@@ -11,13 +11,13 @@ internal static class Program
     [STAThread]
     static void Main()
     {
-        // Enforce single instance globally across the user session
         const string appGuid = "BTChargeTrayWatcher-8A3F109C-4B9A-412E-921A-1D8A9F30C4D9";
-        _mutex = new Mutex(true, appGuid, out bool createdNew);
+        bool createdNew = false;
+        _mutex = new Mutex(true, appGuid, out createdNew);
 
         if (!createdNew)
         {
-            // Another instance is already running. Exit silently.
+            _mutex.Dispose();
             return;
         }
 
@@ -33,18 +33,17 @@ internal static class Program
 
             using var app = new TrayApp(settings, monitor, notifier);
 
-            // Launch silent background scan on startup to warm up the cache
             app.StartBackgroundScan();
 
             app.Run();
         }
         finally
         {
-            if (_mutex is not null)
+            if (createdNew)
             {
                 _mutex.ReleaseMutex();
-                _mutex.Dispose();
             }
+            _mutex.Dispose();
         }
     }
 }
