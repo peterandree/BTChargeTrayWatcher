@@ -30,6 +30,8 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
     public event Action? ScanStarted;
 
+    private readonly TaskCompletionSource _disposalComplete = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public bool IsScanning => _isScanning;
 
     public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
@@ -97,7 +99,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         if (_isDisposed) return;
         if (_disposeStarted)
         {
-            try { await Task.Delay(1000, _shutdownCts.Token).ConfigureAwait(false); } catch { }
+            await _disposalComplete.Task.ConfigureAwait(false);
             return;
         }
 
@@ -133,5 +135,6 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
 
         _isDisposed = true;
         GC.SuppressFinalize(this);
+        _disposalComplete.TrySetResult();
     }
 }
