@@ -8,6 +8,8 @@ public class ThresholdSettings
     private const string AppName = "BTChargeTrayWatcher";
     private readonly string _settingsFilePath;
 
+    private readonly object _thresholdLock = new();
+
     private int _low;
     private int _high;
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
@@ -24,15 +26,17 @@ public class ThresholdSettings
 
         Load();
     }
-
     public int Low
     {
-        get => _low;
+        get { lock (_thresholdLock) return _low; }
         set
         {
-            if (_low == value) return;
-            if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
-            _low = value;
+            lock (_thresholdLock)
+            {
+                if (_low == value) return;
+                if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
+                _low = value;
+            }
             Save();
             Changed?.Invoke();
         }
@@ -40,28 +44,44 @@ public class ThresholdSettings
 
     public int High
     {
-        get => _high;
+        get { lock (_thresholdLock) return _high; }
         set
         {
-            if (_high == value) return;
-            if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
-            _high = value;
+            lock (_thresholdLock)
+            {
+                if (_high == value) return;
+                if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
+                _high = value;
+            }
             Save();
             Changed?.Invoke();
         }
     }
 
-    public int GetLow(string deviceName) =>
-        _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
+    public int GetLow(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
+    }
 
-    public int GetHigh(string deviceName) =>
-        _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
+    public int GetHigh(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
+    }
 
-    public bool HasCustomLow(string deviceName) =>
-        _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
+    public bool HasCustomLow(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
+    }
 
-    public bool HasCustomHigh(string deviceName) =>
-        _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
+    public bool HasCustomHigh(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
+    }
+
 
     public void SetLow(string deviceName, int? value)
     {
@@ -186,6 +206,14 @@ public class ThresholdSettings
                 {
                     _low = dto.Low;
                     _high = dto.High;
+
+                    // ADD: reset to safe defaults if persisted values are invalid
+                    if (_low >= _high)
+                    {
+                        _low = 20;
+                        _high = 80;
+                    }
+
                     if (dto.IgnoredDevices != null)
                         _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
 
