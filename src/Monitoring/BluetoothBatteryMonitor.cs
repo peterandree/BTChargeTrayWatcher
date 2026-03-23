@@ -1,14 +1,9 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
-public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
+public partial class BluetoothBatteryMonitor : IAsyncDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly NotificationService _notifier;
@@ -136,11 +131,5 @@ public partial class BluetoothBatteryMonitor : IDisposable, IAsyncDisposable
 
         _isDisposed = true;
         GC.SuppressFinalize(this);
-    }
-
-    public void Dispose()
-    {
-        if (_isDisposed) return;
-        _ = DisposeAsync();
     }
 }
