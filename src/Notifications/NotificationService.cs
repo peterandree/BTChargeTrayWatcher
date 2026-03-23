@@ -18,8 +18,14 @@ public class NotificationService
 
         if (_toastsSupported)
         {
-            // Fire and forget registry registration to keep constructor fast
-            Task.Run(RegisterAumidAsync);
+            try
+            {
+                RegisterAumid();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[NotificationService] RegisterAumid fault: {ex}");
+            }
         }
         else
         {
@@ -48,7 +54,6 @@ public class NotificationService
 
         try
         {
-            // Create a modern Windows 11 compatible toast XML template
             string toastXmlString = $@"
                 <toast>
                     <visual>
@@ -86,7 +91,6 @@ public class NotificationService
         }
         catch (Exception ex)
         {
-            // Previously silent. Now logged for diagnostic tracing.
             Debug.WriteLine($"[NotificationService] ShowToast critical fault: {ex}");
         }
     }
@@ -95,7 +99,6 @@ public class NotificationService
     {
         try
         {
-            // Check if Windows.UI.Notifications namespace is available (Win10+)
             return ToastNotificationManager.History != null;
         }
         catch
@@ -104,27 +107,16 @@ public class NotificationService
         }
     }
 
-    private static void RegisterAumidAsync()
+    private static void RegisterAumid()
     {
-        try
-        {
-            string exePath = System.Windows.Forms.Application.ExecutablePath;
-            string keyPath = $@"Software\Classes\AppUserModelId\{AppId}";
+        string exePath = System.Windows.Forms.Application.ExecutablePath;
+        string keyPath = $@"Software\Classes\AppUserModelId\{AppId}";
 
-            using RegistryKey? key = Registry.CurrentUser.CreateSubKey(keyPath);
-            if (key != null)
-            {
-                key.SetValue("DisplayName", "BTChargeTrayWatcher");
-                key.SetValue("IconUri", exePath);
-            }
-        }
-        catch (UnauthorizedAccessException ex)
+        using RegistryKey? key = Registry.CurrentUser.CreateSubKey(keyPath);
+        if (key != null)
         {
-            Debug.WriteLine($"[NotificationService] Access denied writing AUMID to registry: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[NotificationService] RegisterAumid fault: {ex}");
+            key.SetValue("DisplayName", "BTChargeTrayWatcher");
+            key.SetValue("IconUri", exePath);
         }
     }
 }
