@@ -128,6 +128,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         _scanLock.Dispose();
 
         if (_gattReader is IDisposable gd) gd.Dispose();
+        if (_classicReader is IDisposable cd) cd.Dispose();
 
         _isDisposed = true;
         GC.SuppressFinalize(this);
