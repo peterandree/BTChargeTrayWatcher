@@ -74,7 +74,7 @@ public partial class BluetoothBatteryMonitor
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, cancellationToken);
         CancellationToken token = linkedCts.Token;
 
-        Task<List<DeviceBatteryInfo>> task = ScanNowAsync(token);
+        var tcs = new TaskCompletionSource<List<DeviceBatteryInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         lock (_taskGate)
         {
@@ -84,23 +84,30 @@ public partial class BluetoothBatteryMonitor
                 throw new ObjectDisposedException(nameof(BluetoothBatteryMonitor));
             }
 
-            _activeTasks.Add(task);
+            _activeTasks.Add(tcs.Task);
         }
 
-        _ = task.ContinueWith(t =>
+        _ = ScanNowAsync(token).ContinueWith(t =>
         {
             lock (_taskGate)
             {
-                _activeTasks.Remove(t);
+                _activeTasks.Remove(tcs.Task);
             }
 
             linkedCts.Dispose();
 
             if (t.IsFaulted && t.Exception is not null)
                 System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Scan task fault: {t.Exception}");
+
+            if (t.IsFaulted)
+                tcs.TrySetException(t.Exception!.InnerExceptions);
+            else if (t.IsCanceled)
+                tcs.TrySetCanceled(token);
+            else
+                tcs.TrySetResult(t.Result);
         }, TaskScheduler.Default);
 
-        return task;
+        return tcs.Task;
     }
 
     private async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken cancellationToken)
