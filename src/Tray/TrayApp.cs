@@ -142,6 +142,7 @@ public sealed class TrayApp : IDisposable
         _scanner.AlertStateChanged -= UpdateTrayIcon;
         _scanner.ScanFaulted -= OnScanFaulted;
         _settings.Changed -= UpdateTooltip;
+        _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
 
         _scanner.Dispose();
 
