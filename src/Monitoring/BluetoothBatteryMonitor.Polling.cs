@@ -67,6 +67,10 @@ public partial class BluetoothBatteryMonitor
 
                 if (device.Battery < 0) continue;
 
+                // Skip ignored devices entirely — no cache update, no alert state, no notification.
+                if (_settings.IgnoredDevices.Contains(device.Name))
+                    continue;
+
                 currentValid.Add(device.DeviceId);
 
                 snapshot.TryGetValue(device.DeviceId, out var prevInfo);
@@ -81,12 +85,6 @@ public partial class BluetoothBatteryMonitor
                     : ClassifyBatteryState(device.DeviceId, device.Name, prev, BatteryAlertState.Normal);
 
                 BatteryAlertState currentState = ClassifyBatteryState(device.DeviceId, device.Name, device.Battery, previousState);
-
-                if (_settings.IgnoredDevices.Contains(device.Name))
-                {
-                    _alertStates[device.DeviceId] = BatteryAlertState.Normal;
-                    continue;
-                }
 
                 if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.DeviceId))
                 {
@@ -133,7 +131,7 @@ public partial class BluetoothBatteryMonitor
     // name is passed separately since ThresholdSettings and IgnoredDevices are keyed by display name
     private BatteryAlertState ClassifyBatteryState(string deviceId, string name, int battery, BatteryAlertState previousState)
     {
-        if (battery < 0 || _settings.IgnoredDevices.Contains(name))
+        if (battery < 0)
             return BatteryAlertState.Normal;
 
         int low = _settings.GetLow(name);
