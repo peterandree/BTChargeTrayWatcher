@@ -55,7 +55,8 @@ public partial class BluetoothBatteryMonitor
                 _alertStates.Clear();
             }
 
-            var snapshot = new Dictionary<string, int>(_lastKnown, StringComparer.OrdinalIgnoreCase);
+            // Snapshot keyed by DeviceId
+            var snapshot = new Dictionary<string, DeviceBatteryInfo>(_lastKnown, StringComparer.OrdinalIgnoreCase);
             var devices = await QuietReadAsync(cancellationToken).ConfigureAwait(false);
 
             var currentValid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -66,34 +67,35 @@ public partial class BluetoothBatteryMonitor
 
                 if (device.Battery < 0) continue;
 
-                currentValid.Add(device.Name);
+                currentValid.Add(device.DeviceId);
 
-                snapshot.TryGetValue(device.Name, out int prev);
-                bool isNew = !snapshot.ContainsKey(device.Name);
+                snapshot.TryGetValue(device.DeviceId, out var prevInfo);
+                int prev = prevInfo?.Battery ?? 0;
+                bool isNew = prevInfo is null;
 
-                _lastKnown[device.Name] = device.Battery;
+                _lastKnown[device.DeviceId] = device;
                 DeviceBatteryRead?.Invoke(device.Name, device.Battery);
 
-                BatteryAlertState previousState = _alertStates.TryGetValue(device.Name, out var existingState)
+                BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var existingState)
                     ? existingState
-                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal);
+                    : ClassifyBatteryState(device.DeviceId, device.Name, prev, BatteryAlertState.Normal);
 
-                BatteryAlertState currentState = ClassifyBatteryState(device.Name, device.Battery, previousState);
+                BatteryAlertState currentState = ClassifyBatteryState(device.DeviceId, device.Name, device.Battery, previousState);
 
                 if (_settings.IgnoredDevices.Contains(device.Name))
                 {
-                    _alertStates[device.Name] = BatteryAlertState.Normal;
+                    _alertStates[device.DeviceId] = BatteryAlertState.Normal;
                     continue;
                 }
 
-                if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.Name))
+                if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.DeviceId))
                 {
                     if (currentState == BatteryAlertState.Low)
                         _notifier.NotifyLow(device.Name, device.Battery);
                     else if (currentState == BatteryAlertState.High)
                         _notifier.NotifyHigh(device.Name, device.Battery);
 
-                    _alertStates[device.Name] = currentState;
+                    _alertStates[device.DeviceId] = currentState;
                     continue;
                 }
 
@@ -108,23 +110,19 @@ public partial class BluetoothBatteryMonitor
                         _notifier.NotifyHigh(device.Name, device.Battery);
                 }
 
-                _alertStates[device.Name] = currentState;
+                _alertStates[device.DeviceId] = currentState;
             }
 
-            foreach (var name in snapshot.Keys)
+            foreach (var id in snapshot.Keys)
             {
-                if (!currentValid.Contains(name))
+                if (!currentValid.Contains(id))
                 {
-                    _lastKnown.TryRemove(name, out _);
-                    _alertStates.TryRemove(name, out _);
+                    _lastKnown.TryRemove(id, out _);
+                    _alertStates.TryRemove(id, out _);
                 }
             }
 
-            var activeList = new List<DeviceBatteryInfo>();
-            foreach (var kvp in _lastKnown)
-                activeList.Add(new DeviceBatteryInfo(kvp.Key, kvp.Value));
-
-            ScanCompleted?.Invoke(activeList);
+            ScanCompleted?.Invoke(_lastKnown.Values.ToList());
         }
         finally
         {
@@ -132,7 +130,8 @@ public partial class BluetoothBatteryMonitor
         }
     }
 
-    private BatteryAlertState ClassifyBatteryState(string name, int battery, BatteryAlertState previousState)
+    // name is passed separately since ThresholdSettings and IgnoredDevices are keyed by display name
+    private BatteryAlertState ClassifyBatteryState(string deviceId, string name, int battery, BatteryAlertState previousState)
     {
         if (battery < 0 || _settings.IgnoredDevices.Contains(name))
             return BatteryAlertState.Normal;

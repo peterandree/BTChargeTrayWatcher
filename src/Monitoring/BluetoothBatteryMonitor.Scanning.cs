@@ -38,13 +38,13 @@ public partial class BluetoothBatteryMonitor
                 {
                     if (device.Battery < 0) continue;
 
-                    _lastKnown[device.Name] = device.Battery;
+                    _lastKnown[device.DeviceId] = device;
 
-                    BatteryAlertState existingState = _alertStates.TryGetValue(device.Name, out var s)
+                    BatteryAlertState existingState = _alertStates.TryGetValue(device.DeviceId, out var s)
                         ? s
                         : BatteryAlertState.Normal;
 
-                    _alertStates[device.Name] = ClassifyBatteryState(device.Name, device.Battery, existingState);
+                    _alertStates[device.DeviceId] = ClassifyBatteryState(device.DeviceId, device.Name, device.Battery, existingState);
 
                     DeviceBatteryRead?.Invoke(device.Name, device.Battery);
                 }
@@ -128,11 +128,12 @@ public partial class BluetoothBatteryMonitor
         bool raiseDeviceFound)
     {
         List<DeviceBatteryInfo> results = [];
+        // Deduplicate by stable DeviceId — resolves issue #14 for cross-reader merge
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (var device in first)
         {
-            if (!seen.Add(device.Name)) continue;
+            if (!seen.Add(device.DeviceId)) continue;
 
             if (raiseDeviceFound)
                 DeviceFound?.Invoke(device.Name, device.Battery);
@@ -141,7 +142,7 @@ public partial class BluetoothBatteryMonitor
 
         foreach (var device in second)
         {
-            if (!seen.Add(device.Name)) continue;
+            if (!seen.Add(device.DeviceId)) continue;
 
             if (raiseDeviceFound)
                 DeviceFound?.Invoke(device.Name, device.Battery);

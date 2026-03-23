@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
@@ -61,8 +56,10 @@ public sealed class ClassicBatteryReader : IBatteryReader
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
         }, cancellationToken).ConfigureAwait(false);
 
+        // DeviceId = InstanceId (stable SetupAPI identity); Name is display-only
         return connected
             .Select(c => new DeviceBatteryInfo(
+                c.InstanceId,
                 c.Name,
                 batteryMap.TryGetValue(c.InstanceId, out int b) ? b : -1))
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery >= 0 && d.Battery <= 100)

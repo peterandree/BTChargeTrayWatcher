@@ -10,7 +10,10 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
     private readonly NotificationService _notifier;
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
-    private readonly ConcurrentDictionary<string, int> _lastKnown = new(StringComparer.OrdinalIgnoreCase);
+
+    // Keyed by stable DeviceId; value holds both display name and last battery level.
+    private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly System.Threading.Timer _timer;
@@ -35,7 +38,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
     public bool IsScanning => _isScanning;
 
     public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
-        _lastKnown.Select(kv => new DeviceBatteryInfo(kv.Key, kv.Value)).ToList();
+        _lastKnown.Values.ToList();
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
