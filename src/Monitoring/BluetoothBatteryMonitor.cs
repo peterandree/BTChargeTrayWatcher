@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Win32;
+using System.Threading;
 
 namespace BTChargeTrayWatcher;
 
@@ -22,7 +23,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
     private volatile bool _isScanning;
     private volatile bool _disposeStarted;
     private volatile bool _isDisposed;
-    private volatile bool _thresholdsChanged;
+    private volatile int _thresholdsChanged;
 
     public event Action<string, int>? DeviceBatteryRead;
     public event Action<string, int>? DeviceFound;
@@ -81,7 +82,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
             return;
 
-        _thresholdsChanged = true;
+        Interlocked.Exchange(ref _thresholdsChanged, 1);
         StartTrackedTask(ct => SafePollAsync(ct));
     }
 

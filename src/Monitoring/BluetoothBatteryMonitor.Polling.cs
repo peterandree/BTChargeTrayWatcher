@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace BTChargeTrayWatcher;
 
@@ -52,12 +49,9 @@ public partial class BluetoothBatteryMonitor
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            bool thresholdsChanged = false;
-
-            if (_thresholdsChanged)
+            bool thresholdsChanged = Interlocked.Exchange(ref _thresholdsChanged, 0) == 1;
+            if (thresholdsChanged)
             {
-                _thresholdsChanged = false;
-                thresholdsChanged = true;
                 _alertStates.Clear();
             }
 
