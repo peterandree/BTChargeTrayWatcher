@@ -119,6 +119,9 @@ internal sealed class GattBatteryProcessor
         if (readResult.Status != GattCommunicationStatus.Success)
             return -1;
 
+        if (readResult.Value.Length == 0)
+            return -1;
+
         using DataReader reader = DataReader.FromBuffer(readResult.Value);
         byte value = reader.ReadByte();
 
