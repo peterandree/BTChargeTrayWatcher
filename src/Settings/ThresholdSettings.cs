@@ -206,7 +206,9 @@ public class ThresholdSettings
                 DeviceOverrides = _deviceOverrides
             };
             string json = JsonSerializer.Serialize(dto);
-            File.WriteAllText(_settingsFilePath, json);
+            string tmp = _settingsFilePath + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, _settingsFilePath, overwrite: true);
         }
         catch (Exception ex)
         {
