@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
-using System.Windows.Forms;
+﻿using System.Text.Json;
 using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
@@ -106,15 +102,13 @@ public class ThresholdSettings
         }
     }
 
-    public HashSet<string> IgnoredDevices
+    public IReadOnlyCollection<string> IgnoredDevices => _ignoredDevices;
+
+    public void SetIgnoredDevices(IEnumerable<string> devices)
     {
-        get => _ignoredDevices;
-        set
-        {
-            _ignoredDevices = new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
-            Save();
-            Changed?.Invoke();
-        }
+        _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        Save();
+        Changed?.Invoke();
     }
 
     public void ToggleIgnoreDevice(string deviceName)
