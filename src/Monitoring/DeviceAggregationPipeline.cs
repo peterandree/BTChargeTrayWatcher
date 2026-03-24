@@ -4,12 +4,12 @@ internal sealed class DeviceAggregationPipeline
 {
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
-    private readonly Action<string, int>? _onDeviceFound;
+    private readonly Action<string, string, int>? _onDeviceFound;
 
     public DeviceAggregationPipeline(
         IBatteryReader gattReader,
         IBatteryReader classicReader,
-        Action<string, int>? onDeviceFound)
+        Action<string, string, int>? onDeviceFound)
     {
         _gattReader = gattReader;
         _classicReader = classicReader;
@@ -72,14 +72,14 @@ internal sealed class DeviceAggregationPipeline
         foreach (var device in first)
         {
             if (!seen.Add(device.DeviceId)) continue;
-            if (raiseDeviceFound) _onDeviceFound?.Invoke(device.Name, device.Battery);
+            if (raiseDeviceFound) _onDeviceFound?.Invoke(device.DeviceId, device.Name, device.Battery);
             results.Add(device);
         }
 
         foreach (var device in second)
         {
             if (!seen.Add(device.DeviceId)) continue;
-            if (raiseDeviceFound) _onDeviceFound?.Invoke(device.Name, device.Battery);
+            if (raiseDeviceFound) _onDeviceFound?.Invoke(device.DeviceId, device.Name, device.Battery);
             results.Add(device);
         }
 

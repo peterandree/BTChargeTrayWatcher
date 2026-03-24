@@ -26,7 +26,7 @@ internal sealed class Scanner
         PollingOrchestrator poller,
         TaskTracker tracker,
         CancellationToken shutdownToken,
-        Action<string, int> onDeviceFound,
+        Action<string, string, int> onDeviceFound,
         Action<string, int> onBatteryRead,
         Action onScanStarted,
         Action<IReadOnlyList<DeviceBatteryInfo>> onScanCompleted)

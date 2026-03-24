@@ -89,13 +89,13 @@ public partial class ScanWindow : Form
         Resize += (_, _) => AdjustColumns();
     }
 
-    public void OnDeviceFound(string name, int battery)
+    public void OnDeviceFound(string deviceId, string name, int battery)
     {
         bool isIgnored = _settings.IgnoredDevices.Contains(name);
 
         foreach (ListViewItem item in _list.Items)
         {
-            if (item.Text == name)
+            if (item.Tag is string id && string.Equals(id, deviceId, StringComparison.OrdinalIgnoreCase))
             {
                 if (isIgnored)
                 {
@@ -116,6 +116,7 @@ public partial class ScanWindow : Form
         string pct = isIgnored ? "-" : (battery >= 0 ? $"{battery}%" : "N/A");
         string bar = isIgnored ? "[Ignored]" : (battery >= 0 ? BatteryDisplay.Bar(battery) : "");
         var newItem = new ListViewItem(name);
+        newItem.Tag = deviceId;
         newItem.SubItems.Add(pct);
         newItem.SubItems.Add(bar);
 
