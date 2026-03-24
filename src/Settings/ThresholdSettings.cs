@@ -3,7 +3,7 @@ using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
-public class ThresholdSettings
+public sealed class ThresholdSettings
 {
     private const string AppName = "BTChargeTrayWatcher";
     private readonly string _settingsFilePath;

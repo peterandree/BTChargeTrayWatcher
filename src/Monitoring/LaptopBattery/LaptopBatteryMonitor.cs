@@ -10,8 +10,6 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
 {
     private enum AlertState { Normal = 0, Low = 1, High = 2 }
 
-    private const int Hysteresis = 2;
-
     private readonly ILaptopBatteryReader _reader;
     private readonly ThresholdSettings? _settings;
     private readonly NotificationService? _notifier;
@@ -62,8 +60,8 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
             null,
-            TimeSpan.Zero,
-            TimeSpan.FromSeconds(60));
+            PollingDefaults.StartupDelay,
+            PollingDefaults.PollingInterval);
 
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
     }
@@ -90,7 +88,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
         else if (e.Mode == PowerModes.Resume)
         {
-            _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+            _timer.Change(PollingDefaults.ResumeDelay, PollingDefaults.PollingInterval);
             StartTrackedTask(ct => SafeRefreshAsync(ct));
         }
     }
@@ -212,10 +210,10 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
             return AlertState.High;
 
         // Hysteresis — stay in current state near the boundary to prevent rapid toggling
-        if (previous == AlertState.Low && !info.IsOnAcPower && pct <= low + Hysteresis)
+        if (previous == AlertState.Low && !info.IsOnAcPower && pct <= low + PollingDefaults.Hysteresis)
             return AlertState.Low;
 
-        if (previous == AlertState.High && info.IsCharging && pct >= high - Hysteresis)
+        if (previous == AlertState.High && info.IsCharging && pct >= high - PollingDefaults.Hysteresis)
             return AlertState.High;
 
         return AlertState.Normal;
