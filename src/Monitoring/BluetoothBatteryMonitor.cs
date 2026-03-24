@@ -1,7 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
@@ -87,13 +84,44 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
     }
 
-    // Public API — forwards to components
-    public Task PollAsync() => _poller.PollAsync();
-    public Task PollAsync(CancellationToken ct) => _poller.PollAsync(ct);
-    public Task<List<DeviceBatteryInfo>> ScanNowAsync() => _scanner.ScanNowAsync();
-    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) => _scanner.ScanNowAsync(ct);
-    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() => _scanner.StartTrackedScanAsync();
-    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) => _scanner.StartTrackedScanAsync(ct);
+    // Public API — all external-token paths are linked to shutdown and tracked
+    public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
+    public Task PollAsync(CancellationToken ct) => StartTrackedPollAsync(ct);
+
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
+        _scanner.StartTrackedScanAsync(_shutdownCts.Token);
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) =>
+        _scanner.StartTrackedScanAsync(ct);
+
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
+        _scanner.StartTrackedScanAsync(_shutdownCts.Token);
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) =>
+        _scanner.StartTrackedScanAsync(ct);
+
+    private Task StartTrackedPollAsync(CancellationToken ct)
+    {
+        ThrowIfDisposingOrDisposed();
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, ct);
+        CancellationToken token = linkedCts.Token;
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _taskTracker.Start(_ =>
+        {
+            return _poller.PollAsync(token).ContinueWith(t =>
+            {
+                linkedCts.Dispose();
+                if (t.IsFaulted)
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BTChargeTrayWatcher] PollAsync fault: {t.Exception}");
+                if (t.IsFaulted) tcs.TrySetException(t.Exception!.InnerExceptions);
+                else if (t.IsCanceled) tcs.TrySetCanceled(token);
+                else tcs.TrySetResult();
+            }, TaskScheduler.Default);
+        }, _shutdownCts.Token);
+
+        return tcs.Task;
+    }
 
     private void OnTimerTick()
     {
