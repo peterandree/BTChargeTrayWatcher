@@ -1,41 +1,39 @@
 ﻿using System.Collections.Concurrent;
-using Microsoft.Win32;
+using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
-public partial class BluetoothBatteryMonitor : IAsyncDisposable
+public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 {
     private readonly ThresholdSettings _settings;
-    private readonly NotificationService _notifier;
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
 
-    // Keyed by stable DeviceId; value holds both display name and last battery level.
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown =
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly System.Threading.Timer _timer;
-    private readonly SemaphoreSlim _pollLock = new(1, 1);
-    private readonly SemaphoreSlim _scanLock = new(1, 1);
 
-    private readonly object _taskGate = new();
-    private readonly HashSet<Task> _activeTasks = [];
+    private readonly TaskTracker _taskTracker;
+    private readonly PollingOrchestrator _poller;
+    private readonly Scanner _scanner;
 
-    private volatile bool _isScanning;
     private volatile bool _disposeStarted;
     private volatile bool _isDisposed;
-    private volatile int _thresholdsChanged;
+
+    private readonly TaskCompletionSource _disposalComplete =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public event Action<string, int>? DeviceBatteryRead;
     public event Action<string, int>? DeviceFound;
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
     public event Action? ScanStarted;
 
-    private readonly TaskCompletionSource _disposalComplete = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    public bool IsScanning => _isScanning;
+    public bool IsScanning => _scanner.IsScanning;
 
     public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
         _lastKnown.Values.ToList();
@@ -43,9 +41,7 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
     public BluetoothBatteryMonitor(ThresholdSettings settings, NotificationService notifier)
-        : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader())
-    {
-    }
+        : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
     public BluetoothBatteryMonitor(
         ThresholdSettings settings,
@@ -54,9 +50,32 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         IBatteryReader classicReader)
     {
         _settings = settings;
-        _notifier = notifier;
         _gattReader = gattReader;
         _classicReader = classicReader;
+
+        _taskTracker = new TaskTracker();
+
+        _poller = new PollingOrchestrator(
+            settings: settings,
+            notifier: notifier,
+            lastKnown: _lastKnown,
+            tracker: _taskTracker,
+            readDevices: ct => _scanner.QuietReadAsync(ct),
+            shutdownToken: _shutdownCts.Token,
+            onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            onScanCompleted: list => ScanCompleted?.Invoke(list));
+
+        _scanner = new Scanner(
+            gattReader: gattReader,
+            classicReader: classicReader,
+            lastKnown: _lastKnown,
+            poller: _poller,
+            tracker: _taskTracker,
+            shutdownToken: _shutdownCts.Token,
+            onDeviceFound: (name, lvl) => DeviceFound?.Invoke(name, lvl),
+            onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            onScanStarted: () => ScanStarted?.Invoke(),
+            onScanCompleted: list => ScanCompleted?.Invoke(list));
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
@@ -68,27 +87,34 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
     }
 
+    // Public API — forwards to components
+    public Task PollAsync() => _poller.PollAsync();
+    public Task PollAsync(CancellationToken ct) => _poller.PollAsync(ct);
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync() => _scanner.ScanNowAsync();
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) => _scanner.ScanNowAsync(ct);
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() => _scanner.StartTrackedScanAsync();
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) => _scanner.StartTrackedScanAsync(ct);
+
+    private void OnTimerTick()
+    {
+        if (_disposeStarted || _isDisposed) return;
+        _poller.OnTimerTick();
+    }
+
     private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
         if (_disposeStarted || _isDisposed) return;
 
         if (e.Mode == PowerModes.Suspend)
-        {
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
-        }
         else if (e.Mode == PowerModes.Resume)
-        {
             _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
-        }
     }
 
     private void Settings_Changed()
     {
-        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested)
-            return;
-
-        Interlocked.Exchange(ref _thresholdsChanged, 1);
-        StartTrackedTask(ct => SafePollAsync(ct));
+        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
+        _poller.SignalThresholdsChanged();
     }
 
     private void ThrowIfDisposingOrDisposed()
@@ -112,26 +138,25 @@ public partial class BluetoothBatteryMonitor : IAsyncDisposable
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _taskTracker.Stop();
         _shutdownCts.Cancel();
 
-        Task[] tasks = SnapshotActiveTasks();
+        Task[] tasks = _taskTracker.Snapshot();
         if (tasks.Length > 0)
         {
-            try
-            {
-                await Task.WhenAll(tasks).ConfigureAwait(false);
-            }
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
+                System.Diagnostics.Debug.WriteLine(
+                    $"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
             }
         }
 
         _timer.Dispose();
         _shutdownCts.Dispose();
-        _pollLock.Dispose();
-        _scanLock.Dispose();
+        _poller.Dispose();
+        _scanner.Dispose();
 
         if (_gattReader is IDisposable gd) gd.Dispose();
         if (_classicReader is IDisposable cd) cd.Dispose();
