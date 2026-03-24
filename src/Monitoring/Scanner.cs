@@ -4,13 +4,11 @@ namespace BTChargeTrayWatcher;
 
 internal sealed class Scanner
 {
-    private readonly IBatteryReader _gattReader;
-    private readonly IBatteryReader _classicReader;
+    private readonly DeviceAggregationPipeline _aggregationPipeline;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
     private readonly TaskTracker _tracker;
     private readonly CancellationToken _shutdownToken;
-    private readonly Action<string, int> _onDeviceFound;
     private readonly Action<string, int> _onBatteryRead;
     private readonly Action _onScanStarted;
     private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
@@ -33,13 +31,14 @@ internal sealed class Scanner
         Action onScanStarted,
         Action<IReadOnlyList<DeviceBatteryInfo>> onScanCompleted)
     {
-        _gattReader = gattReader;
-        _classicReader = classicReader;
+        _aggregationPipeline = new DeviceAggregationPipeline(
+            gattReader,
+            classicReader,
+            onDeviceFound);
         _lastKnown = lastKnown;
         _poller = poller;
         _tracker = tracker;
         _shutdownToken = shutdownToken;
-        _onDeviceFound = onDeviceFound;
         _onBatteryRead = onBatteryRead;
         _onScanStarted = onScanStarted;
         _onScanCompleted = onScanCompleted;
@@ -61,15 +60,9 @@ internal sealed class Scanner
             _isScanning = true;
             _onScanStarted();
 
-            var gattTask = SafeReadAsync(_gattReader, ct);
-            var classicTask = SafeReadAsync(_classicReader, ct);
-            await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
-
-            var (gattResults, gattError) = gattTask.Result;
-            var (classicResults, classicError) = classicTask.Result;
-
-            ReportReaderErrors(gattError, classicError);
-            results = MergeResults(gattResults, classicResults, raiseDeviceFound: true);
+            results = await _aggregationPipeline
+                .ReadMergedAsync(ct, raiseDeviceFound: true)
+                .ConfigureAwait(false);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -132,67 +125,9 @@ internal sealed class Scanner
 
     internal async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        var gattTask = SafeReadAsync(_gattReader, ct);
-        var classicTask = SafeReadAsync(_classicReader, ct);
-        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
-
-        var (gattResults, gattError) = gattTask.Result;
-        var (classicResults, classicError) = classicTask.Result;
-
-        ReportReaderErrors(gattError, classicError);
-        return MergeResults(gattResults, classicResults, raiseDeviceFound: false);
-    }
-
-    private static async Task<(IReadOnlyList<DeviceBatteryInfo> Results, Exception? Error)>
-        SafeReadAsync(IBatteryReader reader, CancellationToken ct)
-    {
-        try
-        {
-            var results = await reader.ReadAllAsync(ct).ConfigureAwait(false);
-            return (results, null);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return (Array.Empty<DeviceBatteryInfo>(), ex);
-        }
-    }
-
-    private static void ReportReaderErrors(Exception? gattError, Exception? classicError)
-    {
-        if (gattError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] GATT reader failed (partial results used): {gattError}");
-        if (classicError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] Classic reader failed (partial results used): {classicError}");
-    }
-
-    private List<DeviceBatteryInfo> MergeResults(
-        IReadOnlyList<DeviceBatteryInfo> first,
-        IReadOnlyList<DeviceBatteryInfo> second,
-        bool raiseDeviceFound)
-    {
-        List<DeviceBatteryInfo> results = [];
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var device in first)
-        {
-            if (!seen.Add(device.DeviceId)) continue;
-            if (raiseDeviceFound) _onDeviceFound(device.Name, device.Battery);
-            results.Add(device);
-        }
-        foreach (var device in second)
-        {
-            if (!seen.Add(device.DeviceId)) continue;
-            if (raiseDeviceFound) _onDeviceFound(device.Name, device.Battery);
-            results.Add(device);
-        }
-        return results;
+        return await _aggregationPipeline
+            .ReadMergedAsync(ct, raiseDeviceFound: false)
+            .ConfigureAwait(false);
     }
 
     public void Dispose()

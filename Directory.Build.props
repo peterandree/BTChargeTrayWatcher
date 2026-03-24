@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <!-- Work around missing AppxPackage tools in some .NET SDK installs by using VS MSBuild tools when present. -->
+    <_Vs18CommunityAppxToolsPath>C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</_Vs18CommunityAppxToolsPath>
+    <_Vs18BuildToolsAppxToolsPath>C:\Program Files\Microsoft Visual Studio\18\BuildTools\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</_Vs18BuildToolsAppxToolsPath>
+    <_Vs17BuildToolsAppxToolsPath>C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</_Vs17BuildToolsAppxToolsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == '' and Exists('$(_Vs18CommunityAppxToolsPath)Microsoft.Build.Packaging.Pri.Tasks.dll')">
+    <AppxMSBuildToolsPath>$(_Vs18CommunityAppxToolsPath)</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == '' and Exists('$(_Vs18BuildToolsAppxToolsPath)Microsoft.Build.Packaging.Pri.Tasks.dll')">
+    <AppxMSBuildToolsPath>$(_Vs18BuildToolsAppxToolsPath)</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == '' and Exists('$(_Vs17BuildToolsAppxToolsPath)Microsoft.Build.Packaging.Pri.Tasks.dll')">
+    <AppxMSBuildToolsPath>$(_Vs17BuildToolsAppxToolsPath)</AppxMSBuildToolsPath>
+  </PropertyGroup>
+</Project>
