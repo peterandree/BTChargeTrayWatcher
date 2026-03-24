@@ -97,8 +97,21 @@ internal sealed class TrayMenuBuilder
             HighThresholdCandidates,
             val => _settings.LaptopHigh = val);
 
+        var overlayItem = new ToolStripMenuItem(
+            _settings.ExcludeLaptopFromTrayIconOverlay
+                ? "Include in tray icon alert"
+                : "Exclude from tray icon alert");
+        overlayItem.Click += (_, _) =>
+        {
+            _settings.ExcludeLaptopFromTrayIconOverlay = !_settings.ExcludeLaptopFromTrayIconOverlay;
+            overlayItem.Text = _settings.ExcludeLaptopFromTrayIconOverlay
+                ? "Include in tray icon alert"
+                : "Exclude from tray icon alert";
+        };
+
         root.DropDownItems.Add(lowMenu);
         root.DropDownItems.Add(highMenu);
+        root.DropDownItems.Add(overlayItem);
 
         return root;
     }
@@ -123,12 +136,17 @@ internal sealed class TrayMenuBuilder
         foreach (var device in results)
         {
             bool isIgnored = _settings.IgnoredDevices.Contains(device.Name);
+            bool isOverlayExcluded = _settings.TrayIconOverlayExcludedDevices.Contains(device.Name);
 
-            string label = isIgnored
-                ? $"{device.Name}   [Ignored]"
-                : device.Battery >= 0
-                    ? $"{device.Name}   {device.Battery}%  {BatteryDisplay.Bar(device.Battery)}"
-                    : $"{device.Name}   N/A";
+            string statusTag = isIgnored
+                ? " [Ignored]"
+                : isOverlayExcluded
+                    ? " [No icon alert]"
+                    : string.Empty;
+
+            string label = device.Battery >= 0
+                ? $"{device.Name}   {device.Battery}%  {BatteryDisplay.Bar(device.Battery)}{statusTag}"
+                : $"{device.Name}   N/A{statusTag}";
 
             var item = new ToolStripMenuItem(label);
 
@@ -152,6 +170,13 @@ internal sealed class TrayMenuBuilder
                 item.DropDownItems.Add(highMenu);
                 item.DropDownItems.Add(new ToolStripSeparator());
             }
+
+            var overlayItem = new ToolStripMenuItem(
+                isOverlayExcluded
+                    ? "Include in tray icon alert"
+                    : "Exclude from tray icon alert");
+            overlayItem.Click += (_, _) => _settings.ToggleExcludeFromTrayIconOverlay(device.Name);
+            item.DropDownItems.Add(overlayItem);
 
             var ignoreItem = new ToolStripMenuItem(
                 isIgnored ? "Stop ignoring device" : "Ignore device");

@@ -15,6 +15,8 @@ public class ThresholdSettings
     private int _laptopLow;
     private int _laptopHigh;
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _trayIconOverlayExcludedDevices = new(StringComparer.OrdinalIgnoreCase);
+    private bool _excludeLaptopFromTrayIconOverlay;
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? Changed;
@@ -174,6 +176,23 @@ public class ThresholdSettings
 
     public IReadOnlyCollection<string> IgnoredDevices => _ignoredDevices;
 
+    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices => _trayIconOverlayExcludedDevices;
+
+    public bool ExcludeLaptopFromTrayIconOverlay
+    {
+        get { lock (_thresholdLock) return _excludeLaptopFromTrayIconOverlay; }
+        set
+        {
+            lock (_thresholdLock)
+            {
+                if (_excludeLaptopFromTrayIconOverlay == value) return;
+                _excludeLaptopFromTrayIconOverlay = value;
+            }
+            Save();
+            Changed?.Invoke();
+        }
+    }
+
     public void SetIgnoredDevices(IEnumerable<string> devices)
     {
         _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
@@ -187,6 +206,17 @@ public class ThresholdSettings
             _ignoredDevices.Remove(deviceName);
         else
             _ignoredDevices.Add(deviceName);
+
+        Save();
+        Changed?.Invoke();
+    }
+
+    public void ToggleExcludeFromTrayIconOverlay(string deviceName)
+    {
+        if (_trayIconOverlayExcludedDevices.Contains(deviceName))
+            _trayIconOverlayExcludedDevices.Remove(deviceName);
+        else
+            _trayIconOverlayExcludedDevices.Add(deviceName);
 
         Save();
         Changed?.Invoke();
@@ -250,6 +280,11 @@ public class ThresholdSettings
                     if (dto.IgnoredDevices != null)
                         _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
 
+                    if (dto.TrayIconOverlayExcludedDevices != null)
+                        _trayIconOverlayExcludedDevices = new HashSet<string>(dto.TrayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase);
+
+                    _excludeLaptopFromTrayIconOverlay = dto.ExcludeLaptopFromTrayIconOverlay;
+
                     if (dto.DeviceOverrides != null)
                         _deviceOverrides = new Dictionary<string, DeviceThresholds>(dto.DeviceOverrides, StringComparer.OrdinalIgnoreCase);
 
@@ -279,6 +314,8 @@ public class ThresholdSettings
                 LaptopLow = _laptopLow,
                 LaptopHigh = _laptopHigh,
                 IgnoredDevices = new List<string>(_ignoredDevices),
+                TrayIconOverlayExcludedDevices = new List<string>(_trayIconOverlayExcludedDevices),
+                ExcludeLaptopFromTrayIconOverlay = _excludeLaptopFromTrayIconOverlay,
                 DeviceOverrides = _deviceOverrides
             };
             string json = JsonSerializer.Serialize(dto);
@@ -305,6 +342,8 @@ public class ThresholdSettings
         public int LaptopLow { get; set; }
         public int LaptopHigh { get; set; }
         public List<string>? IgnoredDevices { get; set; }
+        public List<string>? TrayIconOverlayExcludedDevices { get; set; }
+        public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
         public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
     }
 }

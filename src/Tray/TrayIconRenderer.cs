@@ -17,31 +17,29 @@ internal sealed class TrayIconRenderer
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        Color btBlue = Color.FromArgb(0, 120, 215);
+        Color batteryBlue = Color.FromArgb(0, 120, 215);
 
-        using (SolidBrush bgBrush = new(btBlue))
+        using (SolidBrush bgBrush = new(batteryBlue))
             g.FillEllipse(bgBrush, 4, 4, size - 8, size - 8);
 
-        using (Pen whitePen = new(Color.White, size / 10f))
+        RectangleF body = new(size * 0.24f, size * 0.34f, size * 0.52f, size * 0.34f);
+        RectangleF terminal = new(size * 0.76f, size * 0.43f, size * 0.08f, size * 0.16f);
+
+        using (Pen borderPen = new(Color.White, size * 0.05f))
         {
-            whitePen.LineJoin = LineJoin.Round;
-            whitePen.StartCap = LineCap.Round;
-            whitePen.EndCap = LineCap.Round;
-
-            float midX = size / 2f;
-            float top = size * 0.22f;
-            float btm = size * 0.78f;
-            float right = size * 0.68f;
-            float left = size * 0.32f;
-
-            g.DrawLine(whitePen, midX, top, midX, btm);
-            g.DrawLine(whitePen, left, size * 0.35f, midX, btm);
-            g.DrawLine(whitePen, midX, btm, right, size * 0.62f);
-            g.DrawLine(whitePen, right, size * 0.62f, left, size * 0.38f);
-            g.DrawLine(whitePen, left, size * 0.65f, midX, top);
-            g.DrawLine(whitePen, midX, top, right, size * 0.38f);
-            g.DrawLine(whitePen, right, size * 0.38f, left, size * 0.62f);
+            borderPen.LineJoin = LineJoin.Round;
+            g.DrawRectangle(borderPen, body.X, body.Y, body.Width, body.Height);
+            g.DrawRectangle(borderPen, terminal.X, terminal.Y, terminal.Width, terminal.Height);
         }
+
+        RectangleF charge = new(
+            body.X + size * 0.04f,
+            body.Y + size * 0.04f,
+            body.Width * 0.62f,
+            body.Height - size * 0.08f);
+
+        using (SolidBrush chargeBrush = new(Color.White))
+            g.FillRectangle(chargeBrush, charge);
 
         if (hasAlert)
         {

@@ -72,12 +72,11 @@ public sealed class TrayApp : IDisposable
         _scanner.ScanFaulted += OnScanFaulted;
 
         _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
-        _laptopMonitor.AlertStateChanged += OnLaptopAlertStateChanged;
 
         _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
 
         InitializeLaptopUiFromCachedState();
-        _settings.Changed += UpdateTooltip;
+        _settings.Changed += OnSettingsChanged;
         UpdateTooltip();
         RefreshTrayIcon();
     }
@@ -85,7 +84,10 @@ public sealed class TrayApp : IDisposable
     private void InitializeLaptopUiFromCachedState()
     {
         if (_laptopMonitor.LastKnownBattery is { } info)
+        {
             UpdateLaptopMenuItem(info);
+            UpdateLaptopAlertState(info);
+        }
     }
 
     public void Run() => Application.Run();
@@ -106,9 +108,23 @@ public sealed class TrayApp : IDisposable
         RefreshTrayIcon();
     }
 
-    private void OnLaptopAlertStateChanged(bool hasAlert)
+    private void OnSettingsChanged()
     {
-        _hasLaptopAlert = hasAlert;
+        UpdateLaptopAlertState();
+        UpdateTooltip();
+    }
+
+    private void UpdateLaptopAlertState(LaptopBatteryInfo? info = null)
+    {
+        info ??= _laptopMonitor.LastKnownBattery;
+        bool alert = false;
+        if (!_settings.ExcludeLaptopFromTrayIconOverlay
+            && info is { HasBattery: true, BatteryPercent: >= 0 })
+        {
+            alert = info.BatteryPercent <= _settings.LaptopLow
+                 || info.BatteryPercent >= _settings.LaptopHigh;
+        }
+        _hasLaptopAlert = alert;
         RefreshTrayIcon();
     }
 
@@ -138,6 +154,7 @@ public sealed class TrayApp : IDisposable
             {
                 UpdateLaptopMenuItem(info);
                 UpdateTooltip();
+                UpdateLaptopAlertState(info);
             }
             catch (Exception ex)
             {
@@ -215,8 +232,7 @@ public sealed class TrayApp : IDisposable
         _scanner.AlertStateChanged -= OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted -= OnScanFaulted;
         _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
-        _laptopMonitor.AlertStateChanged -= OnLaptopAlertStateChanged;
-        _settings.Changed -= UpdateTooltip;
+        _settings.Changed -= OnSettingsChanged;
         _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
 
         _scanner.Dispose();

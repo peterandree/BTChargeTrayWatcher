@@ -96,6 +96,7 @@ internal sealed class ScanCoordinator : IDisposable
         foreach (var device in results)
         {
             if (_settings.IgnoredDevices.Contains(device.Name)) continue;
+            if (_settings.TrayIconOverlayExcludedDevices.Contains(device.Name)) continue;
 
             if (device.Battery >= 0 &&
                 (device.Battery <= _settings.GetLow(device.Name) ||

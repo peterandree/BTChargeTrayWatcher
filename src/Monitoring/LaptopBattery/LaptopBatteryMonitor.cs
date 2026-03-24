@@ -36,6 +36,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     public event Action<bool>? AlertStateChanged;
 
     public bool HasCachedResult => _lastKnown is not null;
+    public bool IsInAlertState => _hasAlert;
     public LaptopBatteryInfo? LastKnownBattery => _lastKnown;
 
     // Used by Program.cs — full integration with settings and notifications
