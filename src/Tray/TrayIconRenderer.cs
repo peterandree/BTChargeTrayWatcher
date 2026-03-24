@@ -63,6 +63,14 @@ internal sealed class TrayIconRenderer
                 new RectangleF(badgeX, badgeY + (size * 0.05f), badgeSize, badgeSize), sf);
         }
 
-        return Icon.FromHandle(bmp.GetHicon());
+        IntPtr hicon = bmp.GetHicon();
+        try
+        {
+            return (Icon)Icon.FromHandle(hicon).Clone();
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(hicon);
+        }
     }
 }
