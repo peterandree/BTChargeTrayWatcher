@@ -55,6 +55,7 @@ internal sealed class Scanner
         await _scanLock.WaitAsync(ct).ConfigureAwait(false);
 
         List<DeviceBatteryInfo> results = [];
+        bool scanSucceeded = false;
         try
         {
             _isScanning = true;
@@ -86,13 +87,15 @@ internal sealed class Scanner
                 _poller.PollLock.Release();
             }
 
+            scanSucceeded = true;
             return results;
         }
         finally
         {
             _isScanning = false;
             _scanLock.Release();
-            _onScanCompleted(results);
+            if (scanSucceeded)
+                _onScanCompleted(results);
         }
     }
 
@@ -151,7 +154,7 @@ internal sealed class Scanner
         }
         catch (OperationCanceledException)
         {
-            throw; // cancellation must propagate
+            throw;
         }
         catch (Exception ex)
         {
