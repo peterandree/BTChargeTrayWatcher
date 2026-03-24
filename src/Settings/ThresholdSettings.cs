@@ -121,46 +121,52 @@ public class ThresholdSettings
 
     public void SetLow(string deviceName, int? value)
     {
-        if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+        lock (_thresholdLock)
         {
-            if (value == null) return;
-            t = new DeviceThresholds();
-            _deviceOverrides[deviceName] = t;
-        }
+            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+            {
+                if (value == null) return;
+                t = new DeviceThresholds();
+                _deviceOverrides[deviceName] = t;
+            }
 
-        if (value.HasValue)
-        {
-            int effectiveHigh = GetHigh(deviceName);
-            if (value.Value >= effectiveHigh)
-                throw new ArgumentOutOfRangeException(nameof(value),
-                    $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
-        }
+            if (value.HasValue)
+            {
+                int effectiveHigh = GetHigh(deviceName);
+                if (value.Value >= effectiveHigh)
+                    throw new ArgumentOutOfRangeException(nameof(value),
+                        $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
+            }
 
-        t.Low = value;
-        CleanupEmptyOverrides(deviceName);
+            t.Low = value;
+            CleanupEmptyOverrides(deviceName);
+        }
         Save();
         Changed?.Invoke();
     }
 
     public void SetHigh(string deviceName, int? value)
     {
-        if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+        lock (_thresholdLock)
         {
-            if (value == null) return;
-            t = new DeviceThresholds();
-            _deviceOverrides[deviceName] = t;
-        }
+            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+            {
+                if (value == null) return;
+                t = new DeviceThresholds();
+                _deviceOverrides[deviceName] = t;
+            }
 
-        if (value.HasValue)
-        {
-            int effectiveLow = GetLow(deviceName);
-            if (value.Value <= effectiveLow)
-                throw new ArgumentOutOfRangeException(nameof(value),
-                    $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
-        }
+            if (value.HasValue)
+            {
+                int effectiveLow = GetLow(deviceName);
+                if (value.Value <= effectiveLow)
+                    throw new ArgumentOutOfRangeException(nameof(value),
+                        $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
+            }
 
-        t.High = value;
-        CleanupEmptyOverrides(deviceName);
+            t.High = value;
+            CleanupEmptyOverrides(deviceName);
+        }
         Save();
         Changed?.Invoke();
     }
@@ -195,29 +201,34 @@ public class ThresholdSettings
 
     public void SetIgnoredDevices(IEnumerable<string> devices)
     {
-        _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        lock (_thresholdLock)
+            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
         Save();
         Changed?.Invoke();
     }
 
     public void ToggleIgnoreDevice(string deviceName)
     {
-        if (_ignoredDevices.Contains(deviceName))
-            _ignoredDevices.Remove(deviceName);
-        else
-            _ignoredDevices.Add(deviceName);
-
+        lock (_thresholdLock)
+        {
+            if (_ignoredDevices.Contains(deviceName))
+                _ignoredDevices.Remove(deviceName);
+            else
+                _ignoredDevices.Add(deviceName);
+        }
         Save();
         Changed?.Invoke();
     }
 
     public void ToggleExcludeFromTrayIconOverlay(string deviceName)
     {
-        if (_trayIconOverlayExcludedDevices.Contains(deviceName))
-            _trayIconOverlayExcludedDevices.Remove(deviceName);
-        else
-            _trayIconOverlayExcludedDevices.Add(deviceName);
-
+        lock (_thresholdLock)
+        {
+            if (_trayIconOverlayExcludedDevices.Contains(deviceName))
+                _trayIconOverlayExcludedDevices.Remove(deviceName);
+            else
+                _trayIconOverlayExcludedDevices.Add(deviceName);
+        }
         Save();
         Changed?.Invoke();
     }
@@ -308,9 +319,10 @@ public class ThresholdSettings
 
     private void Save()
     {
-        try
+        SettingsDto dto;
+        lock (_thresholdLock)
         {
-            var dto = new SettingsDto
+            dto = new SettingsDto
             {
                 Low = _low,
                 High = _high,
@@ -319,8 +331,11 @@ public class ThresholdSettings
                 IgnoredDevices = new List<string>(_ignoredDevices),
                 TrayIconOverlayExcludedDevices = new List<string>(_trayIconOverlayExcludedDevices),
                 ExcludeLaptopFromTrayIconOverlay = _excludeLaptopFromTrayIconOverlay,
-                DeviceOverrides = _deviceOverrides
+                DeviceOverrides = new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase)
             };
+        }
+        try
+        {
             string json = JsonSerializer.Serialize(dto);
             string tmp = _settingsFilePath + ".tmp";
             File.WriteAllText(tmp, json);
