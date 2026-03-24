@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 
 namespace BTChargeTrayWatcher;
 
@@ -64,11 +60,15 @@ internal sealed class Scanner
             _isScanning = true;
             _onScanStarted();
 
-            var gattTask = _gattReader.ReadAllAsync(ct);
-            var classicTask = _classicReader.ReadAllAsync(ct);
+            var gattTask = SafeReadAsync(_gattReader, ct);
+            var classicTask = SafeReadAsync(_classicReader, ct);
             await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
-            results = MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: true);
+            var (gattResults, gattError) = gattTask.Result;
+            var (classicResults, classicError) = classicTask.Result;
+
+            ReportReaderErrors(gattError, classicError);
+            results = MergeResults(gattResults, classicResults, raiseDeviceFound: true);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -101,14 +101,13 @@ internal sealed class Scanner
 
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this); 
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken, ct);
         CancellationToken token = linkedCts.Token;
 
         var tcs = new TaskCompletionSource<List<DeviceBatteryInfo>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Register tcs.Task as a tracked task so DisposeAsync waits for it
         _tracker.Start(_ =>
         {
             return ScanNowAsync(token).ContinueWith(t =>
@@ -131,10 +130,43 @@ internal sealed class Scanner
     internal async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var gattTask = _gattReader.ReadAllAsync(ct);
-        var classicTask = _classicReader.ReadAllAsync(ct);
+        var gattTask = SafeReadAsync(_gattReader, ct);
+        var classicTask = SafeReadAsync(_classicReader, ct);
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
-        return MergeResults(gattTask.Result, classicTask.Result, raiseDeviceFound: false);
+
+        var (gattResults, gattError) = gattTask.Result;
+        var (classicResults, classicError) = classicTask.Result;
+
+        ReportReaderErrors(gattError, classicError);
+        return MergeResults(gattResults, classicResults, raiseDeviceFound: false);
+    }
+
+    private static async Task<(IReadOnlyList<DeviceBatteryInfo> Results, Exception? Error)>
+        SafeReadAsync(IBatteryReader reader, CancellationToken ct)
+    {
+        try
+        {
+            var results = await reader.ReadAllAsync(ct).ConfigureAwait(false);
+            return (results, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // cancellation must propagate
+        }
+        catch (Exception ex)
+        {
+            return (Array.Empty<DeviceBatteryInfo>(), ex);
+        }
+    }
+
+    private static void ReportReaderErrors(Exception? gattError, Exception? classicError)
+    {
+        if (gattError is not null)
+            System.Diagnostics.Debug.WriteLine(
+                $"[BTChargeTrayWatcher] GATT reader failed (partial results used): {gattError}");
+        if (classicError is not null)
+            System.Diagnostics.Debug.WriteLine(
+                $"[BTChargeTrayWatcher] Classic reader failed (partial results used): {classicError}");
     }
 
     private List<DeviceBatteryInfo> MergeResults(
