@@ -54,6 +54,7 @@ internal sealed class Scanner
 
     public async Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ct.ThrowIfCancellationRequested();
         await _scanLock.WaitAsync(ct).ConfigureAwait(false);
 
@@ -100,6 +101,7 @@ internal sealed class Scanner
 
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this); 
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken, ct);
         CancellationToken token = linkedCts.Token;
 

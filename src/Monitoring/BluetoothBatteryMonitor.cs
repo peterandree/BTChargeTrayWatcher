@@ -60,7 +60,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             notifier: notifier,
             lastKnown: _lastKnown,
             tracker: _taskTracker,
-            readDevices: ct => _scanner.QuietReadAsync(ct),
+            readDevices: ct => _scanner!.QuietReadAsync(ct),
             shutdownToken: _shutdownCts.Token,
             onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
             onScanCompleted: list => ScanCompleted?.Invoke(list));
