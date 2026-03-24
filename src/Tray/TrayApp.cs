@@ -76,9 +76,16 @@ public sealed class TrayApp : IDisposable
 
         _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
 
+        InitializeLaptopUiFromCachedState();
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
         RefreshTrayIcon();
+    }
+
+    private void InitializeLaptopUiFromCachedState()
+    {
+        if (_laptopMonitor.LastKnownBattery is { } info)
+            UpdateLaptopMenuItem(info);
     }
 
     public void Run() => Application.Run();

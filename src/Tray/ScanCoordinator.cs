@@ -35,7 +35,8 @@ internal sealed class ScanCoordinator : IDisposable
         _uiContext = uiContext;
 
         _monitor.ScanStarted += Monitor_ScanStarted;
-        _monitor.ScanCompleted += Monitor_ScanCompleted;
+        _monitor.ManualScanCompleted += Monitor_ManualScanCompleted;
+        _monitor.BackgroundRefreshCompleted += Monitor_BackgroundRefreshCompleted;
     }
 
     public void StartBackgroundScan() =>
@@ -80,12 +81,15 @@ internal sealed class ScanCoordinator : IDisposable
     private void Monitor_ScanStarted() =>
         PostToUi(() => ScanStarted?.Invoke());
 
-    private void Monitor_ScanCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
+    private void Monitor_ManualScanCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
         PostToUi(() =>
         {
             ScanCompleted?.Invoke(results);
             AlertStateChanged?.Invoke(EvaluateAlert(results));
         });
+
+    private void Monitor_BackgroundRefreshCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
+        PostToUi(() => AlertStateChanged?.Invoke(EvaluateAlert(results)));
 
     private bool EvaluateAlert(IReadOnlyList<DeviceBatteryInfo> results)
     {
@@ -132,12 +136,12 @@ internal sealed class ScanCoordinator : IDisposable
         }
 
         _monitor.DeviceFound += OnFound;
-        _monitor.ScanCompleted += OnCompleted;
+        _monitor.ManualScanCompleted += OnCompleted;
 
         window.FormClosed += (_, _) =>
         {
             _monitor.DeviceFound -= OnFound;
-            _monitor.ScanCompleted -= OnCompleted;
+            _monitor.ManualScanCompleted -= OnCompleted;
             if (ReferenceEquals(_scanWindow, window))
                 _scanWindow = null;
         };
@@ -202,7 +206,8 @@ internal sealed class ScanCoordinator : IDisposable
         _disposed = true;
 
         _monitor.ScanStarted -= Monitor_ScanStarted;
-        _monitor.ScanCompleted -= Monitor_ScanCompleted;
+        _monitor.ManualScanCompleted -= Monitor_ManualScanCompleted;
+        _monitor.BackgroundRefreshCompleted -= Monitor_BackgroundRefreshCompleted;
 
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
             _scanWindow.Dispose();

@@ -27,7 +27,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     public event Action<string, int>? DeviceBatteryRead;
     public event Action<string, int>? DeviceFound;
-    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ManualScanCompleted;
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
     public event Action? ScanStarted;
 
     public bool IsScanning => _scanner.IsScanning;
@@ -60,7 +61,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             readDevices: ct => _scanner!.QuietReadAsync(ct),
             shutdownToken: _shutdownCts.Token,
             onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            onScanCompleted: list => ScanCompleted?.Invoke(list));
+            onScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list));
 
         _scanner = new Scanner(
             gattReader: gattReader,
@@ -72,7 +73,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             onDeviceFound: (name, lvl) => DeviceFound?.Invoke(name, lvl),
             onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
             onScanStarted: () => ScanStarted?.Invoke(),
-            onScanCompleted: list => ScanCompleted?.Invoke(list));
+            onScanCompleted: list => ManualScanCompleted?.Invoke(list));
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
