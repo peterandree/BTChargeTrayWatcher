@@ -31,11 +31,12 @@ public partial class ScanWindow : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 4
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _status = new Label
@@ -82,7 +83,8 @@ public partial class ScanWindow : Form
 
         layout.Controls.Add(_status, 0, 0);
         layout.Controls.Add(_list, 0, 1);
-        layout.Controls.Add(buttonPanel, 0, 2);
+        layout.Controls.Add(_progress, 0, 2);
+        layout.Controls.Add(buttonPanel, 0, 3);
 
         Controls.Add(layout);
 
