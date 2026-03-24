@@ -1,5 +1,4 @@
 ﻿using System.Text.Json;
-using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
@@ -238,39 +237,11 @@ public sealed class ThresholdSettings
 
     public bool RunOnStartup
     {
-        get
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
-                var stored = key?.GetValue(AppName) as string;
-                if (string.IsNullOrWhiteSpace(stored)) return false;
-                string expected = $"\"{Application.ExecutablePath}\"";
-                return string.Equals(stored, expected, StringComparison.OrdinalIgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        get => StartupRegistration.IsEnabled;
         set
         {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                if (key == null) return;
-
-                if (value)
-                    key.SetValue(AppName, $"\"{Application.ExecutablePath}\"");
-                else
-                    key.DeleteValue(AppName, false);
-
-                Changed?.Invoke();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] RunOnStartup fault: {ex}");
-            }
+            StartupRegistration.IsEnabled = value;
+            Changed?.Invoke();
         }
     }
 
