@@ -57,7 +57,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         _notifier = notifier;
 
         if (_settings is not null)
-            _settings.Changed += OnSettingsChanged;
+            _settings.LaptopSettingsChanged += OnSettingsChanged;
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
@@ -233,7 +233,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         _disposeStarted = true;
 
         if (_settings is not null)
-            _settings.Changed -= OnSettingsChanged;
+            _settings.LaptopSettingsChanged -= OnSettingsChanged;
 
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 

@@ -20,6 +20,7 @@ public class ThresholdSettings
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? Changed;
+    public event Action? LaptopSettingsChanged;
 
     public ThresholdSettings()
     {
@@ -76,6 +77,7 @@ public class ThresholdSettings
             }
             Save();
             Changed?.Invoke();
+            LaptopSettingsChanged?.Invoke();
         }
     }
 
@@ -92,6 +94,7 @@ public class ThresholdSettings
             }
             Save();
             Changed?.Invoke();
+            LaptopSettingsChanged?.Invoke();
         }
     }
 
