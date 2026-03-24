@@ -229,7 +229,10 @@ public class ThresholdSettings
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
-                return key?.GetValue(AppName) != null;
+                var stored = key?.GetValue(AppName) as string;
+                if (string.IsNullOrWhiteSpace(stored)) return false;
+                string expected = $"\"{Application.ExecutablePath}\"";
+                return string.Equals(stored, expected, StringComparison.OrdinalIgnoreCase);
             }
             catch
             {
@@ -244,7 +247,7 @@ public class ThresholdSettings
                 if (key == null) return;
 
                 if (value)
-                    key.SetValue(AppName, Application.ExecutablePath);
+                    key.SetValue(AppName, $"\"{Application.ExecutablePath}\"");
                 else
                     key.DeleteValue(AppName, false);
 
