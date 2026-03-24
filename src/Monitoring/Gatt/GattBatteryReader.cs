@@ -43,7 +43,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
 
         _cache.PruneStaleDevices(currentDeviceIds);
 
-        var readTasks = new List<Task<(string DeviceId, string Name, int Battery)>>(dis.Count);
+        var readTasks = new List<Task<GattDeviceReadResult>>(dis.Count);
         foreach (var info in dis)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -53,16 +53,16 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         var perDeviceResults = await Task.WhenAll(readTasks).ConfigureAwait(false);
 
         var results = new List<DeviceBatteryInfo>(dis.Count);
-        foreach (var (deviceId, name, battery) in perDeviceResults)
+        foreach (GattDeviceReadResult r in perDeviceResults)
         {
-            if (!string.IsNullOrWhiteSpace(name))
-                results.Add(new DeviceBatteryInfo(deviceId, name, battery));
+            if (!string.IsNullOrWhiteSpace(r.Name))
+                results.Add(new DeviceBatteryInfo(r.DeviceId, r.Name, r.Battery));
         }
 
         return results;
     }
 
-    private async Task<(string DeviceId, string Name, int Battery)> ProcessDeviceBoundedAsync(
+    private async Task<GattDeviceReadResult> ProcessDeviceBoundedAsync(
         string deviceId, string fallbackName, CancellationToken cancellationToken)
     {
         await _deviceReadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -79,12 +79,12 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 Debug.WriteLine($"[GattBatteryReader] Timeout while reading '{deviceId}'.");
-                return (deviceId, fallbackName, -1);
+                return new GattDeviceReadResult(deviceId, fallbackName, -1);
             }
             catch (Exception ex) when (GattBatteryProcessor.IsExpectedBluetoothException(ex))
             {
                 Debug.WriteLine($"[GattBatteryReader] Device unavailable '{deviceId}': {ex.Message}");
-                return (deviceId, fallbackName, -1);
+                return new GattDeviceReadResult(deviceId, fallbackName, -1);
             }
         }
         finally

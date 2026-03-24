@@ -33,11 +33,11 @@ public sealed class ClassicBatteryReader : IBatteryReader
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        Task<(ClassicBluetoothCandidate Candidate, bool Connected)>[] connectionTasks = candidates
+        Task<ConnectionCheckResult>[] connectionTasks = candidates
             .Select(candidate => CheckConnectedAsync(candidate, cancellationToken))
             .ToArray();
 
-        (ClassicBluetoothCandidate Candidate, bool Connected)[] connectionResults =
+        ConnectionCheckResult[] connectionResults =
             await Task.WhenAll(connectionTasks).ConfigureAwait(false);
 
         List<ClassicBluetoothCandidate> connected = connectionResults
@@ -66,7 +66,7 @@ public sealed class ClassicBatteryReader : IBatteryReader
             .ToList();
     }
 
-    private async Task<(ClassicBluetoothCandidate Candidate, bool Connected)> CheckConnectedAsync(
+    private async Task<ConnectionCheckResult> CheckConnectedAsync(
         ClassicBluetoothCandidate candidate,
         CancellationToken cancellationToken)
     {
@@ -79,23 +79,25 @@ public sealed class ClassicBatteryReader : IBatteryReader
                 .IsConnectedAsync(candidate.Address, timeoutCts.Token)
                 .ConfigureAwait(false);
 
-            return (candidate, connected);
+            return new ConnectionCheckResult(candidate, connected);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return (candidate, false);
+            return new ConnectionCheckResult(candidate, false);
         }
         catch (Exception ex) when (IsExpectedBluetoothException(ex))
         {
             System.Diagnostics.Debug.WriteLine($"[ClassicBatteryReader] Connection check failed for '{candidate.Name}': {ex.Message}");
-            return (candidate, false);
+            return new ConnectionCheckResult(candidate, false);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[ClassicBatteryReader] Unexpected connection check fault for '{candidate.Name}': {ex}");
-            return (candidate, false);
+            return new ConnectionCheckResult(candidate, false);
         }
     }
+
+    private sealed record ConnectionCheckResult(ClassicBluetoothCandidate Candidate, bool Connected);
 
     private static bool IsExpectedBluetoothException(Exception ex)
     {

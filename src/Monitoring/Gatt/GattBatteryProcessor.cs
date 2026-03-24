@@ -18,17 +18,17 @@ internal sealed class GattBatteryProcessor
         _cache = cache;
     }
 
-    public async Task<(string DeviceId, string Name, int Battery)> ProcessDeviceAsync(
+    public async Task<GattDeviceReadResult> ProcessDeviceAsync(
         string deviceId, string fallbackName, CancellationToken cancellationToken)
     {
         var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
         if (device is null)
-            return (deviceId, fallbackName, -1);
+            return new GattDeviceReadResult(deviceId, fallbackName, -1);
 
         string deviceName = GetDeviceName(device) ?? fallbackName;
 
         if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-            return (deviceId, deviceName, -1);
+            return new GattDeviceReadResult(deviceId, deviceName, -1);
 
         var cachedEndpoint = _cache.GetEndpoint(deviceId);
         if (cachedEndpoint is not null)
@@ -37,7 +37,7 @@ internal sealed class GattBatteryProcessor
             {
                 int battery = await ReadCharacteristicValueAsync(cachedEndpoint.Characteristic, cancellationToken).ConfigureAwait(false);
                 if (battery >= 0)
-                    return (deviceId, deviceName, battery);
+                    return new GattDeviceReadResult(deviceId, deviceName, battery);
             }
             catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
             {
@@ -52,20 +52,20 @@ internal sealed class GattBatteryProcessor
                 .AsTask(cancellationToken).ConfigureAwait(false);
 
             if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
-                return (deviceId, deviceName, -1);
+                return new GattDeviceReadResult(deviceId, deviceName, -1);
 
             var service = servicesResult.Services[0];
             var charsResult = await service.GetCharacteristicsForUuidAsync(BatteryLevelUuid, BluetoothCacheMode.Cached)
                 .AsTask(cancellationToken).ConfigureAwait(false);
 
             if (charsResult.Status != GattCommunicationStatus.Success || charsResult.Characteristics.Count == 0)
-                return (deviceId, deviceName, -1);
+                return new GattDeviceReadResult(deviceId, deviceName, -1);
 
             var characteristic = charsResult.Characteristics[0];
             _cache.SetEndpoint(deviceId, new CachedGattEndpoint(service, characteristic));
 
             int battery = await ReadCharacteristicValueAsync(characteristic, cancellationToken).ConfigureAwait(false);
-            return (deviceId, deviceName, battery >= 0 ? battery : -1);
+            return new GattDeviceReadResult(deviceId, deviceName, battery >= 0 ? battery : -1);
         }
         catch (OperationCanceledException)
         {
@@ -74,7 +74,7 @@ internal sealed class GattBatteryProcessor
         catch (Exception ex)
         {
             Debug.WriteLine($"[GattBatteryProcessor] ProcessDeviceAsync failed for '{deviceId}': {ex}");
-            return (deviceId, deviceName, -1);
+            return new GattDeviceReadResult(deviceId, deviceName, -1);
         }
     }
 
@@ -136,3 +136,5 @@ internal sealed class GattBatteryProcessor
         return ex is COMException || ex is UnauthorizedAccessException || ex is InvalidOperationException;
     }
 }
+
+internal sealed record GattDeviceReadResult(string DeviceId, string Name, int Battery);

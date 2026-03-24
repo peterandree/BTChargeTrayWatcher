@@ -26,20 +26,19 @@ internal sealed class DeviceAggregationPipeline
         var classicTask = SafeReadAsync(_classicReader, ct);
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
-        var (gattResults, gattError) = gattTask.Result;
-        var (classicResults, classicError) = classicTask.Result;
+        ReaderOutcome gattOutcome = gattTask.Result;
+        ReaderOutcome classicOutcome = classicTask.Result;
 
-        ReportReaderErrors(gattError, classicError);
-        return MergeResults(gattResults, classicResults, raiseDeviceFound);
+        ReportReaderErrors(gattOutcome.Error, classicOutcome.Error);
+        return MergeResults(gattOutcome.Results, classicOutcome.Results, raiseDeviceFound);
     }
 
-    private static async Task<(IReadOnlyList<DeviceBatteryInfo> Results, Exception? Error)>
-        SafeReadAsync(IBatteryReader reader, CancellationToken ct)
+    private static async Task<ReaderOutcome> SafeReadAsync(IBatteryReader reader, CancellationToken ct)
     {
         try
         {
             var results = await reader.ReadAllAsync(ct).ConfigureAwait(false);
-            return (results, null);
+            return new ReaderOutcome(results, null);
         }
         catch (OperationCanceledException)
         {
@@ -47,9 +46,11 @@ internal sealed class DeviceAggregationPipeline
         }
         catch (Exception ex)
         {
-            return (Array.Empty<DeviceBatteryInfo>(), ex);
+            return new ReaderOutcome(Array.Empty<DeviceBatteryInfo>(), ex);
         }
     }
+
+    private sealed record ReaderOutcome(IReadOnlyList<DeviceBatteryInfo> Results, Exception? Error);
 
     private static void ReportReaderErrors(Exception? gattError, Exception? classicError)
     {
