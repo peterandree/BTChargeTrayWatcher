@@ -350,13 +350,13 @@ public sealed class ThresholdSettings
         }
     }
 
-    public class DeviceThresholds
+    public sealed record DeviceThresholds
     {
         public int? Low { get; set; }
         public int? High { get; set; }
     }
 
-    private class SettingsDto
+    private sealed record SettingsDto
     {
         public int Low { get; set; }
         public int High { get; set; }
