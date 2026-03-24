@@ -23,6 +23,10 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private const int MissCountThreshold = 3;
+    private readonly ConcurrentDictionary<string, int> _missCount =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private volatile int _thresholdsChanged;
     private volatile bool _disposed;
 
@@ -83,7 +87,11 @@ internal sealed class PollingOrchestrator : IDisposable
             ct.ThrowIfCancellationRequested();
 
             bool thresholdsChanged = Interlocked.Exchange(ref _thresholdsChanged, 0) == 1;
-            if (thresholdsChanged) _alertStates.Clear();
+            if (thresholdsChanged)
+            {
+                _alertStates.Clear();
+                _missCount.Clear();
+            }
 
             var snapshot = new Dictionary<string, DeviceBatteryInfo>(
                 _lastKnown, StringComparer.OrdinalIgnoreCase);
@@ -102,6 +110,7 @@ internal sealed class PollingOrchestrator : IDisposable
                 bool isNew = prevInfo is null;
 
                 _lastKnown[device.DeviceId] = device;
+                _missCount[device.DeviceId] = 0;
                 _onBatteryRead(device.Name, device.Battery);
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
@@ -145,8 +154,13 @@ internal sealed class PollingOrchestrator : IDisposable
             {
                 if (!currentValid.Contains(id))
                 {
-                    _lastKnown.TryRemove(id, out _);
-                    _alertStates.TryRemove(id, out _);
+                    int misses = _missCount.AddOrUpdate(id, 1, (_, prev) => prev + 1);
+                    if (misses >= MissCountThreshold)
+                    {
+                        _lastKnown.TryRemove(id, out _);
+                        _alertStates.TryRemove(id, out _);
+                        _missCount.TryRemove(id, out _);
+                    }
                 }
             }
 
