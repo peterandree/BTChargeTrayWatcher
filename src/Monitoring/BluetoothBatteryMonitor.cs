@@ -34,7 +34,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     public bool IsScanning => _scanner.IsScanning;
 
     public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
-        _lastKnown.Values.ToList();
+        [.. _lastKnown.Values];
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
@@ -147,8 +147,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     private void ThrowIfDisposingOrDisposed()
     {
-        if (_disposeStarted || _isDisposed)
-            throw new ObjectDisposedException(nameof(BluetoothBatteryMonitor));
+        ObjectDisposedException.ThrowIf(_disposeStarted || _isDisposed, this);
     }
 
     public async ValueTask DisposeAsync()

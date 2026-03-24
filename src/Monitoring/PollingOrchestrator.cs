@@ -146,7 +146,7 @@ internal sealed class PollingOrchestrator : IDisposable
                 }
             }
 
-            _onScanCompleted(_lastKnown.Values.ToList());
+            _onScanCompleted([.. _lastKnown.Values]);
         }
         finally
         {
@@ -162,7 +162,7 @@ internal sealed class PollingOrchestrator : IDisposable
     }
 
     internal BatteryAlertState ClassifyBatteryState(
-        string deviceId, string name, int battery, BatteryAlertState previousState)
+        string _, string name, int battery, BatteryAlertState previousState)
     {
         if (battery < 0 || _settings.IgnoredDevices.Contains(name))
             return BatteryAlertState.Normal;
@@ -203,6 +203,6 @@ internal sealed record PollingOrchestratorOptions(
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     TaskTracker Tracker,
     Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
-    CancellationToken ShutdownToken,
     Action<string, int> OnBatteryRead,
-    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    CancellationToken ShutdownToken);

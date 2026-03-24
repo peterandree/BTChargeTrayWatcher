@@ -17,8 +17,8 @@ internal sealed class DeviceAggregationPipeline
     }
 
     public async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
-        CancellationToken ct,
-        bool raiseDeviceFound)
+        bool raiseDeviceFound,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -46,7 +46,7 @@ internal sealed class DeviceAggregationPipeline
         }
         catch (Exception ex)
         {
-            return new ReaderOutcome(Array.Empty<DeviceBatteryInfo>(), ex);
+            return new ReaderOutcome([], ex);
         }
     }
 

@@ -90,7 +90,7 @@ public sealed class TrayApp : IDisposable
         }
     }
 
-    public void Run() => Application.Run();
+    public static void Run() => Application.Run();
 
     public void StartBackgroundScan() => _scanner.StartBackgroundScan();
 

@@ -17,7 +17,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private readonly System.Threading.Timer _timer;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
-    private readonly object _taskGate = new();
+    private readonly Lock _taskGate = new();
     private readonly HashSet<Task> _activeTasks = [];
 
     private volatile bool _disposeStarted;
@@ -95,8 +95,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
 
     private void ThrowIfDisposingOrDisposed()
     {
-        if (_disposeStarted || _isDisposed)
-            throw new ObjectDisposedException(nameof(LaptopBatteryMonitor));
+        ObjectDisposedException.ThrowIf(_disposeStarted || _isDisposed, this);
     }
 
     private void StartTrackedTask(Func<CancellationToken, Task> work)

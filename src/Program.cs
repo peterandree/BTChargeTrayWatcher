@@ -36,7 +36,7 @@ internal static class Program
 
             app.StartBackgroundScan();
 
-            app.Run();
+            TrayApp.Run();
         }
         finally
         {

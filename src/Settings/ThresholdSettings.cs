@@ -7,7 +7,7 @@ public sealed class ThresholdSettings
     private const string AppName = "BTChargeTrayWatcher";
     private readonly string _settingsFilePath;
 
-    private readonly object _thresholdLock = new();
+    private readonly Lock _thresholdLock = new();
 
     private int _low;
     private int _high;
@@ -213,9 +213,7 @@ public sealed class ThresholdSettings
     {
         lock (_thresholdLock)
         {
-            if (_ignoredDevices.Contains(deviceName))
-                _ignoredDevices.Remove(deviceName);
-            else
+            if (!_ignoredDevices.Remove(deviceName))
                 _ignoredDevices.Add(deviceName);
         }
         Save();
@@ -226,9 +224,7 @@ public sealed class ThresholdSettings
     {
         lock (_thresholdLock)
         {
-            if (_trayIconOverlayExcludedDevices.Contains(deviceName))
-                _trayIconOverlayExcludedDevices.Remove(deviceName);
-            else
+            if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
                 _trayIconOverlayExcludedDevices.Add(deviceName);
         }
         Save();
@@ -302,8 +298,8 @@ public sealed class ThresholdSettings
                 High = _high,
                 LaptopLow = _laptopLow,
                 LaptopHigh = _laptopHigh,
-                IgnoredDevices = new List<string>(_ignoredDevices),
-                TrayIconOverlayExcludedDevices = new List<string>(_trayIconOverlayExcludedDevices),
+                IgnoredDevices = [.. _ignoredDevices],
+                TrayIconOverlayExcludedDevices = [.. _trayIconOverlayExcludedDevices],
                 ExcludeLaptopFromTrayIconOverlay = _excludeLaptopFromTrayIconOverlay,
                 DeviceOverrides = new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase)
             };

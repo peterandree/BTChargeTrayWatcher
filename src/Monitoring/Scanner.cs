@@ -51,7 +51,7 @@ internal sealed class Scanner
             _onScanStarted();
 
             results = await _aggregationPipeline
-                .ReadMergedAsync(ct, raiseDeviceFound: true)
+                .ReadMergedAsync(raiseDeviceFound: true, ct)
                 .ConfigureAwait(false);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -116,7 +116,7 @@ internal sealed class Scanner
     internal async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct)
     {
         return await _aggregationPipeline
-            .ReadMergedAsync(ct, raiseDeviceFound: false)
+            .ReadMergedAsync(raiseDeviceFound: false, ct)
             .ConfigureAwait(false);
     }
 
@@ -133,8 +133,8 @@ internal sealed record ScannerOptions(
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
-    CancellationToken ShutdownToken,
     Action<string, string, int> OnDeviceFound,
     Action<string, int> OnBatteryRead,
     Action OnScanStarted,
-    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    CancellationToken ShutdownToken);
