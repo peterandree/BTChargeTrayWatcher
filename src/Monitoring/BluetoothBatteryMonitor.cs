@@ -53,27 +53,27 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
         _taskTracker = new TaskTracker();
 
-        _poller = new PollingOrchestrator(
-            settings: settings,
-            notifier: notifier,
-            lastKnown: _lastKnown,
-            tracker: _taskTracker,
-            readDevices: ct => _scanner!.QuietReadAsync(ct),
-            shutdownToken: _shutdownCts.Token,
-            onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            onScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list));
+        _poller = new PollingOrchestrator(new PollingOrchestratorOptions(
+            Settings: settings,
+            Notifier: notifier,
+            LastKnown: _lastKnown,
+            Tracker: _taskTracker,
+            ReadDevices: ct => _scanner!.QuietReadAsync(ct),
+            ShutdownToken: _shutdownCts.Token,
+            OnBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            OnScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list)));
 
-        _scanner = new Scanner(
-            gattReader: gattReader,
-            classicReader: classicReader,
-            lastKnown: _lastKnown,
-            poller: _poller,
-            tracker: _taskTracker,
-            shutdownToken: _shutdownCts.Token,
-            onDeviceFound: (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
-            onBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            onScanStarted: () => ScanStarted?.Invoke(),
-            onScanCompleted: list => ManualScanCompleted?.Invoke(list));
+        _scanner = new Scanner(new ScannerOptions(
+            GattReader: gattReader,
+            ClassicReader: classicReader,
+            LastKnown: _lastKnown,
+            Poller: _poller,
+            Tracker: _taskTracker,
+            ShutdownToken: _shutdownCts.Token,
+            OnDeviceFound: (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
+            OnBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            OnScanStarted: () => ScanStarted?.Invoke(),
+            OnScanCompleted: list => ManualScanCompleted?.Invoke(list)));
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),

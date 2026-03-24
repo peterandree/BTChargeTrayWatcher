@@ -31,24 +31,16 @@ internal sealed class PollingOrchestrator : IDisposable
 
     internal SemaphoreSlim PollLock => _pollLock;
 
-    public PollingOrchestrator(
-        ThresholdSettings settings,
-        NotificationService notifier,
-        ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown,
-        TaskTracker tracker,
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices,
-        CancellationToken shutdownToken,
-        Action<string, int> onBatteryRead,
-        Action<IReadOnlyList<DeviceBatteryInfo>> onScanCompleted)
+    public PollingOrchestrator(PollingOrchestratorOptions options)
     {
-        _settings = settings;
-        _notifier = notifier;
-        _lastKnown = lastKnown;
-        _tracker = tracker;
-        _readDevices = readDevices;
-        _shutdownToken = shutdownToken;
-        _onBatteryRead = onBatteryRead;
-        _onScanCompleted = onScanCompleted;
+        _settings = options.Settings;
+        _notifier = options.Notifier;
+        _lastKnown = options.LastKnown;
+        _tracker = options.Tracker;
+        _readDevices = options.ReadDevices;
+        _shutdownToken = options.ShutdownToken;
+        _onBatteryRead = options.OnBatteryRead;
+        _onScanCompleted = options.OnScanCompleted;
     }
 
     public void OnTimerTick()
@@ -127,11 +119,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
                 if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.DeviceId))
                 {
-                    if (currentState == BatteryAlertState.Low)
-                        _notifier.NotifyLow(device.Name, device.Battery);
-                    else if (currentState == BatteryAlertState.High)
-                        _notifier.NotifyHigh(device.Name, device.Battery);
-
+                    SendAlertIfNeeded(device, currentState);
                     _alertStates[device.DeviceId] = currentState;
                     continue;
                 }
@@ -139,12 +127,7 @@ internal sealed class PollingOrchestrator : IDisposable
                 if (prev == device.Battery) continue;
 
                 if (previousState != currentState)
-                {
-                    if (currentState == BatteryAlertState.Low)
-                        _notifier.NotifyLow(device.Name, device.Battery);
-                    else if (currentState == BatteryAlertState.High)
-                        _notifier.NotifyHigh(device.Name, device.Battery);
-                }
+                    SendAlertIfNeeded(device, currentState);
 
                 _alertStates[device.DeviceId] = currentState;
             }
@@ -199,9 +182,27 @@ internal sealed class PollingOrchestrator : IDisposable
         return BatteryAlertState.Normal;
     }
 
+    private void SendAlertIfNeeded(DeviceBatteryInfo device, BatteryAlertState state)
+    {
+        if (state == BatteryAlertState.Low)
+            _notifier.NotifyLow(device.Name, device.Battery);
+        else if (state == BatteryAlertState.High)
+            _notifier.NotifyHigh(device.Name, device.Battery);
+    }
+
     public void Dispose()
     {
         _disposed = true;
         _pollLock.Dispose();
     }
 }
+
+internal sealed record PollingOrchestratorOptions(
+    ThresholdSettings Settings,
+    NotificationService Notifier,
+    ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
+    TaskTracker Tracker,
+    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
+    CancellationToken ShutdownToken,
+    Action<string, int> OnBatteryRead,
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);

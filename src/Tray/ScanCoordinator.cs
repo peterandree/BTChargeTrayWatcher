@@ -118,23 +118,20 @@ internal sealed class ScanCoordinator : IDisposable
 
         var window = new ScanWindow(_settings);
 
-        void OnFound(string deviceId, string name, int battery)
+        static void MarshalToWindow(ScanWindow w, Action action)
         {
-            if (window.IsDisposed) return;
-            if (window.InvokeRequired)
-                window.BeginInvoke(new Action(() => { if (!window.IsDisposed) window.OnDeviceFound(deviceId, name, battery); }));
+            if (w.IsDisposed) return;
+            if (w.InvokeRequired)
+                w.BeginInvoke(new Action(() => { if (!w.IsDisposed) action(); }));
             else
-                window.OnDeviceFound(deviceId, name, battery);
+                action();
         }
 
-        void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results)
-        {
-            if (window.IsDisposed) return;
-            if (window.InvokeRequired)
-                window.BeginInvoke(new Action(() => { if (!window.IsDisposed) window.OnScanComplete(results.Count); }));
-            else
-                window.OnScanComplete(results.Count);
-        }
+        void OnFound(string deviceId, string name, int battery) =>
+            MarshalToWindow(window, () => window.OnDeviceFound(deviceId, name, battery));
+
+        void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
+            MarshalToWindow(window, () => window.OnScanComplete(results.Count));
 
         _monitor.DeviceFound += OnFound;
         _monitor.ManualScanCompleted += OnCompleted;

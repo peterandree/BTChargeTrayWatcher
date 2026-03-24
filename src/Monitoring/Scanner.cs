@@ -19,29 +19,19 @@ internal sealed class Scanner
 
     public bool IsScanning => _isScanning;
 
-    public Scanner(
-        IBatteryReader gattReader,
-        IBatteryReader classicReader,
-        ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown,
-        PollingOrchestrator poller,
-        TaskTracker tracker,
-        CancellationToken shutdownToken,
-        Action<string, string, int> onDeviceFound,
-        Action<string, int> onBatteryRead,
-        Action onScanStarted,
-        Action<IReadOnlyList<DeviceBatteryInfo>> onScanCompleted)
+    public Scanner(ScannerOptions options)
     {
         _aggregationPipeline = new DeviceAggregationPipeline(
-            gattReader,
-            classicReader,
-            onDeviceFound);
-        _lastKnown = lastKnown;
-        _poller = poller;
-        _tracker = tracker;
-        _shutdownToken = shutdownToken;
-        _onBatteryRead = onBatteryRead;
-        _onScanStarted = onScanStarted;
-        _onScanCompleted = onScanCompleted;
+            options.GattReader,
+            options.ClassicReader,
+            options.OnDeviceFound);
+        _lastKnown = options.LastKnown;
+        _poller = options.Poller;
+        _tracker = options.Tracker;
+        _shutdownToken = options.ShutdownToken;
+        _onBatteryRead = options.OnBatteryRead;
+        _onScanStarted = options.OnScanStarted;
+        _onScanCompleted = options.OnScanCompleted;
     }
 
     public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
@@ -136,3 +126,15 @@ internal sealed class Scanner
         _scanLock.Dispose();
     }
 }
+
+internal sealed record ScannerOptions(
+    IBatteryReader GattReader,
+    IBatteryReader ClassicReader,
+    ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
+    PollingOrchestrator Poller,
+    TaskTracker Tracker,
+    CancellationToken ShutdownToken,
+    Action<string, string, int> OnDeviceFound,
+    Action<string, int> OnBatteryRead,
+    Action OnScanStarted,
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
