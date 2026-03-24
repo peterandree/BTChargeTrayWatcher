@@ -1,6 +1,27 @@
 <Project>
+  <!--
+    Work around missing AppxPackage/PRI tools in some .NET SDK installs by locating them
+    inside the Visual Studio installation.
+
+    Discovery order (first match wins):
+      1. AppxMSBuildToolsPath already set externally — pass via /p:AppxMSBuildToolsPath=... or
+         set in the environment before invoking MSBuild.
+      2. VSINSTALLDIR environment variable — automatically set by the VS Developer Command
+         Prompt, VS Build Tools shells, and most CI images that install VS.
+      3. Hardcoded default install-location fallbacks for common local developer machines.
+
+    Prerequisite: the "Desktop development with C++" or "Universal Windows Platform development"
+    workload (which includes the AppxPackage MSBuild targets) must be installed.
+  -->
+
+  <!-- Step 2: dynamic discovery via VSINSTALLDIR (portable, no hardcoded paths) -->
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == '' and '$(VSINSTALLDIR)' != ''">
+    <AppxMSBuildToolsPath Condition="Exists('$(VSINSTALLDIR)MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll')">$(VSINSTALLDIR)MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</AppxMSBuildToolsPath>
+    <AppxMSBuildToolsPath Condition="'$(AppxMSBuildToolsPath)' == '' and Exists('$(VSINSTALLDIR)MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll')">$(VSINSTALLDIR)MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <!-- Step 3: hardcoded fallbacks for common default VS installations on developer machines -->
   <PropertyGroup>
-    <!-- Work around missing AppxPackage tools in some .NET SDK installs by using VS MSBuild tools when present. -->
     <_Vs18CommunityAppxToolsPath>C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</_Vs18CommunityAppxToolsPath>
     <_Vs18BuildToolsAppxToolsPath>C:\Program Files\Microsoft Visual Studio\18\BuildTools\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</_Vs18BuildToolsAppxToolsPath>
     <_Vs17BuildToolsAppxToolsPath>C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</_Vs17BuildToolsAppxToolsPath>
