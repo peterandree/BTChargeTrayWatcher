@@ -30,8 +30,9 @@ internal static class Program
             var settings = new ThresholdSettings();
             var notifier = new NotificationService();
             var monitor = new BluetoothBatteryMonitor(settings, notifier);
+            var laptopMonitor = new LaptopBatteryMonitor(settings, notifier);
 
-            using var app = new TrayApp(settings, monitor, notifier);
+            using var app = new TrayApp(settings, monitor, notifier, laptopMonitor);
 
             app.StartBackgroundScan();
 
@@ -39,10 +40,7 @@ internal static class Program
         }
         finally
         {
-            if (createdNew)
-            {
-                _mutex.ReleaseMutex();
-            }
+            if (createdNew) _mutex.ReleaseMutex();
             _mutex.Dispose();
         }
     }

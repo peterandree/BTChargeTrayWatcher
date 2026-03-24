@@ -22,6 +22,7 @@ internal sealed class TrayMenuBuilder
     }
 
     public ContextMenuStrip Build(
+        ToolStripMenuItem laptopMenuItem,
         ToolStripMenuItem devicesMenu,
         ToolStripMenuItem scanMenuItem,
         ToolStripMenuItem lowMenu,
@@ -30,6 +31,8 @@ internal sealed class TrayMenuBuilder
     {
         var menu = new ContextMenuStrip();
 
+        menu.Items.Add(laptopMenuItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(devicesMenu);
         menu.Items.Add(scanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -54,6 +57,7 @@ internal sealed class TrayMenuBuilder
         return menu;
     }
 
+
     public ToolStripMenuItem BuildDevicesMenu(
         Func<IReadOnlyList<DeviceBatteryInfo>> getDevices)
     {
@@ -76,6 +80,28 @@ internal sealed class TrayMenuBuilder
             _settings.High,
             HighThresholdCandidates,
             val => _settings.High = val);
+
+    public ToolStripMenuItem BuildLaptopMenuItem()
+    {
+        var root = new ToolStripMenuItem("💻 Laptop: reading…");
+
+        var lowMenu = BuildGlobalThresholdMenu(
+            "Low threshold",
+            _settings.LaptopLow,
+            LowThresholdCandidates,
+            val => _settings.LaptopLow = val);
+
+        var highMenu = BuildGlobalThresholdMenu(
+            "High threshold",
+            _settings.LaptopHigh,
+            HighThresholdCandidates,
+            val => _settings.LaptopHigh = val);
+
+        root.DropDownItems.Add(lowMenu);
+        root.DropDownItems.Add(highMenu);
+
+        return root;
+    }
 
     public void PopulateDevicesMenu(
         ToolStripMenuItem parent,

@@ -12,36 +12,44 @@ public sealed class TrayApp : IDisposable
 {
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
+    private readonly LaptopBatteryMonitor _laptopMonitor;
     private readonly NotificationService _notifier;
     private readonly NotifyIcon _trayIcon;
     private readonly TrayIconRenderer _iconRenderer;
     private readonly ScanCoordinator _scanner;
+    private readonly SynchronizationContext _uiContext;
 
     private readonly ToolStripMenuItem _scanMenuItem;
     private readonly ToolStripMenuItem _lowMenu;
     private readonly ToolStripMenuItem _highMenu;
+    private readonly ToolStripMenuItem _laptopMenuItem;
 
     private bool _disposed;
+    private bool _hasBluetoothAlert;
+    private bool _hasLaptopAlert;
 
     public TrayApp(
         ThresholdSettings settings,
         BluetoothBatteryMonitor monitor,
-        NotificationService notifier)
+        NotificationService notifier,
+        LaptopBatteryMonitor laptopMonitor)
     {
-        var uiContext = SynchronizationContext.Current
+        _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
 
         _settings = settings;
         _monitor = monitor;
+        _laptopMonitor = laptopMonitor;
         _notifier = notifier;
         _iconRenderer = new TrayIconRenderer();
-        _scanner = new ScanCoordinator(monitor, settings, uiContext);
+        _scanner = new ScanCoordinator(monitor, settings, _uiContext);
 
         _trayIcon = new NotifyIcon { Visible = true };
 
         var menuBuilder = new TrayMenuBuilder(settings);
         _lowMenu = menuBuilder.BuildLowMenu();
         _highMenu = menuBuilder.BuildHighMenu();
+        _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
 
         _scanMenuItem = new ToolStripMenuItem("Scan devices…");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
@@ -49,6 +57,7 @@ public sealed class TrayApp : IDisposable
         var devicesMenu = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
 
         _trayIcon.ContextMenuStrip = menuBuilder.Build(
+            _laptopMenuItem,
             devicesMenu,
             _scanMenuItem,
             _lowMenu,
@@ -59,14 +68,17 @@ public sealed class TrayApp : IDisposable
 
         _scanner.ScanStarted += OnScanStarted;
         _scanner.ScanCompleted += OnScanCompleted;
-        _scanner.AlertStateChanged += UpdateTrayIcon;
+        _scanner.AlertStateChanged += OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted += OnScanFaulted;
+
+        _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
+        _laptopMonitor.AlertStateChanged += OnLaptopAlertStateChanged;
 
         _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
 
         _settings.Changed += UpdateTooltip;
         UpdateTooltip();
-        UpdateTrayIcon(false);
+        RefreshTrayIcon();
     }
 
     public void Run() => Application.Run();
@@ -77,16 +89,70 @@ public sealed class TrayApp : IDisposable
     {
         Icon? newIcon = _iconRenderer.Render(hasAlert);
         Icon? oldIcon = _trayIcon.Icon;
-
         _trayIcon.Icon = newIcon;
-
-        // The old Icon owns the handle; let it dispose it.
-        // If oldIcon is null, the default system icon is gone, and no managed handle.
         oldIcon?.Dispose();
     }
 
-    private void UpdateTooltip() =>
-        _trayIcon.Text = $"BT Battery Alert  ▼{_settings.Low}%  ▲{_settings.High}%";
+    private void OnBluetoothAlertStateChanged(bool hasAlert)
+    {
+        _hasBluetoothAlert = hasAlert;
+        RefreshTrayIcon();
+    }
+
+    private void OnLaptopAlertStateChanged(bool hasAlert)
+    {
+        _hasLaptopAlert = hasAlert;
+        RefreshTrayIcon();
+    }
+
+    private void RefreshTrayIcon()
+    {
+        UpdateTrayIcon(_hasBluetoothAlert || _hasLaptopAlert);
+    }
+
+    private void UpdateTooltip()
+    {
+        string laptopPart = _laptopMonitor.LastKnownBattery is { } info && info.HasBattery
+            ? $"  💻 {info.BatteryPercent}%{(info.IsCharging ? " ⚡" : "")}"
+            : string.Empty;
+
+        string text = $"BT Battery Alert ▼{_settings.Low}% ▲{_settings.High}%{laptopPart}";
+
+        // NotifyIcon.Text is capped at 127 chars by Win32
+        _trayIcon.Text = text.Length > 127 ? text[..127] : text;
+    }
+
+    private void OnLaptopBatteryUpdated(LaptopBatteryInfo info)
+    {
+        _uiContext.Post(_ =>
+        {
+            if (_disposed) return;
+            try
+            {
+                UpdateLaptopMenuItem(info);
+                UpdateTooltip();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayApp] Laptop battery UI update fault: {ex}");
+            }
+        }, null);
+    }
+
+    private void UpdateLaptopMenuItem(LaptopBatteryInfo info)
+    {
+        if (!info.HasBattery)
+        {
+            _laptopMenuItem.Text = "💻 Laptop: No battery";
+            return;
+        }
+
+        string charge = info.IsCharging ? " ⚡ Charging"
+            : info.IsOnAcPower ? " 🔌 Plugged in"
+            : " On battery";
+
+        _laptopMenuItem.Text = $"💻 Laptop: {info.BatteryPercent}%{charge}";
+    }
 
     private void OnScanStarted()
     {
@@ -102,8 +168,6 @@ public sealed class TrayApp : IDisposable
 
     private static void OnScanFaulted(string operationName, Exception ex)
     {
-        // Trace.TraceError is visible in both Debug and Release builds.
-        // Extend here to show a balloon tip or write to an app log if required.
         Trace.TraceError($"[TrayApp] Background operation '{operationName}' faulted: {ex}");
     }
 
@@ -118,7 +182,9 @@ public sealed class TrayApp : IDisposable
             Debug.WriteLine("[TrayApp] Exit started.");
             _trayIcon.Visible = false;
             await _monitor.DisposeAsync().ConfigureAwait(true);
-            Debug.WriteLine("[TrayApp] Monitor disposed.");
+            Debug.WriteLine("[TrayApp] Bluetooth monitor disposed.");
+            await _laptopMonitor.DisposeAsync().ConfigureAwait(true);
+            Debug.WriteLine("[TrayApp] Laptop monitor disposed.");
         }
         catch (Exception ex)
         {
@@ -139,8 +205,10 @@ public sealed class TrayApp : IDisposable
 
         _scanner.ScanStarted -= OnScanStarted;
         _scanner.ScanCompleted -= OnScanCompleted;
-        _scanner.AlertStateChanged -= UpdateTrayIcon;
+        _scanner.AlertStateChanged -= OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted -= OnScanFaulted;
+        _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
+        _laptopMonitor.AlertStateChanged -= OnLaptopAlertStateChanged;
         _settings.Changed -= UpdateTooltip;
         _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
 

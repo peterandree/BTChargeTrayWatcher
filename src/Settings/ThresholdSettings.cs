@@ -12,6 +12,8 @@ public class ThresholdSettings
 
     private int _low;
     private int _high;
+    private int _laptopLow;
+    private int _laptopHigh;
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
 
@@ -26,6 +28,7 @@ public class ThresholdSettings
 
         Load();
     }
+
     public int Low
     {
         get { lock (_thresholdLock) return _low; }
@@ -58,6 +61,38 @@ public class ThresholdSettings
         }
     }
 
+    public int LaptopLow
+    {
+        get { lock (_thresholdLock) return _laptopLow; }
+        set
+        {
+            lock (_thresholdLock)
+            {
+                if (_laptopLow == value) return;
+                if (value >= _laptopHigh) throw new ArgumentOutOfRangeException(nameof(value), "Laptop Low threshold must be below Laptop High threshold.");
+                _laptopLow = value;
+            }
+            Save();
+            Changed?.Invoke();
+        }
+    }
+
+    public int LaptopHigh
+    {
+        get { lock (_thresholdLock) return _laptopHigh; }
+        set
+        {
+            lock (_thresholdLock)
+            {
+                if (_laptopHigh == value) return;
+                if (value <= _laptopLow) throw new ArgumentOutOfRangeException(nameof(value), "Laptop High threshold must be above Laptop Low threshold.");
+                _laptopHigh = value;
+            }
+            Save();
+            Changed?.Invoke();
+        }
+    }
+
     public int GetLow(string deviceName)
     {
         lock (_thresholdLock)
@@ -81,7 +116,6 @@ public class ThresholdSettings
         lock (_thresholdLock)
             return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
     }
-
 
     public void SetLow(string deviceName, int? value)
     {
@@ -128,7 +162,6 @@ public class ThresholdSettings
         Save();
         Changed?.Invoke();
     }
-
 
     private void CleanupEmptyOverrides(string deviceName)
     {
@@ -207,12 +240,12 @@ public class ThresholdSettings
                     _low = dto.Low;
                     _high = dto.High;
 
-                    // ADD: reset to safe defaults if persisted values are invalid
-                    if (_low >= _high)
-                    {
-                        _low = 20;
-                        _high = 80;
-                    }
+                    if (_low >= _high) { _low = 20; _high = 80; }
+
+                    _laptopLow = dto.LaptopLow;
+                    _laptopHigh = dto.LaptopHigh;
+
+                    if (_laptopLow >= _laptopHigh) { _laptopLow = 20; _laptopHigh = 80; }
 
                     if (dto.IgnoredDevices != null)
                         _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
@@ -231,6 +264,8 @@ public class ThresholdSettings
 
         _low = 20;
         _high = 80;
+        _laptopLow = 20;
+        _laptopHigh = 80;
     }
 
     private void Save()
@@ -241,6 +276,8 @@ public class ThresholdSettings
             {
                 Low = _low,
                 High = _high,
+                LaptopLow = _laptopLow,
+                LaptopHigh = _laptopHigh,
                 IgnoredDevices = new List<string>(_ignoredDevices),
                 DeviceOverrides = _deviceOverrides
             };
@@ -265,6 +302,8 @@ public class ThresholdSettings
     {
         public int Low { get; set; }
         public int High { get; set; }
+        public int LaptopLow { get; set; }
+        public int LaptopHigh { get; set; }
         public List<string>? IgnoredDevices { get; set; }
         public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
     }

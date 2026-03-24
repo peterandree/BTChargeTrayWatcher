@@ -119,4 +119,19 @@ public class NotificationService
             key.SetValue("IconUri", exePath);
         }
     }
+
+    public void NotifyLaptopLow(int battery)
+    {
+        string title = "Laptop Battery Low";
+        string message = $"Laptop battery is at {battery}%. Please plug in your charger.";
+        ShowToast(title, message);
+    }
+
+    public void NotifyLaptopHigh(int battery)
+    {
+        string title = "Laptop Battery High";
+        string message = $"Laptop battery is at {battery}%. Consider unplugging to preserve battery health.";
+        ShowToast(title, message);
+    }
+
 }
