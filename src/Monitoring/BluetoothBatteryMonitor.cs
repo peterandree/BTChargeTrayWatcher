@@ -77,14 +77,13 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
             null,
-            TimeSpan.Zero,
-            TimeSpan.FromSeconds(60));
+            PollingDefaults.StartupDelay,
+            PollingDefaults.PollingInterval);
 
         _settings.Changed += Settings_Changed;
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
     }
 
-    // Public API — all external-token paths are linked to shutdown and tracked
     public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
     public Task PollAsync(CancellationToken ct) => StartTrackedPollAsync(ct);
 
@@ -136,7 +135,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (e.Mode == PowerModes.Suspend)
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
         else if (e.Mode == PowerModes.Resume)
-            _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+            _timer.Change(PollingDefaults.ResumeDelay, PollingDefaults.PollingInterval);
     }
 
     private void Settings_Changed()

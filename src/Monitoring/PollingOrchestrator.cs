@@ -23,7 +23,6 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private const int MissCountThreshold = 3;
     private readonly ConcurrentDictionary<string, int> _missCount =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -155,7 +154,7 @@ internal sealed class PollingOrchestrator : IDisposable
                 if (!currentValid.Contains(id))
                 {
                     int misses = _missCount.AddOrUpdate(id, 1, (_, prev) => prev + 1);
-                    if (misses >= MissCountThreshold)
+                    if (misses >= PollingDefaults.MissCountThreshold)
                     {
                         _lastKnown.TryRemove(id, out _);
                         _alertStates.TryRemove(id, out _);
@@ -187,7 +186,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
         int low = _settings.GetLow(name);
         int high = _settings.GetHigh(name);
-        const int hysteresis = 2;
+        int hysteresis = PollingDefaults.Hysteresis;
 
         if (battery <= low) return BatteryAlertState.Low;
         if (battery >= high) return BatteryAlertState.High;
