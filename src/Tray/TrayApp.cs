@@ -64,6 +64,7 @@ public sealed class TrayApp : IDisposable
             _highMenu,
             onExit: () => _ = ExitAsync());
 
+        _trayIcon.MouseClick += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
         _scanner.ScanStarted += OnScanStarted;
@@ -100,6 +101,15 @@ public sealed class TrayApp : IDisposable
         Icon? oldIcon = _trayIcon.Icon;
         _trayIcon.Icon = newIcon;
         oldIcon?.Dispose();
+    }
+
+    private void OnTrayMouseClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            // Show the context menu at the current cursor position on left-click
+            _trayIcon.ContextMenuStrip?.Show(Cursor.Position);
+        }
     }
 
     private void OnBluetoothAlertStateChanged(bool hasAlert)
