@@ -8,6 +8,7 @@
 	  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 	  <UseWindowsForms>true</UseWindowsForms>
 	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	  <ApplicationIcon>app.ico</ApplicationIcon>
 	</PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -16,6 +17,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="tools/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Svg" Version="3.4.7" />
     <PackageReference Include="System.Management" Version="9.0.0" />
   </ItemGroup>
 

@@ -239,6 +239,7 @@ public sealed class TrayApp : IDisposable
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        _iconRenderer.Dispose();
 
         GC.SuppressFinalize(this);
     }
