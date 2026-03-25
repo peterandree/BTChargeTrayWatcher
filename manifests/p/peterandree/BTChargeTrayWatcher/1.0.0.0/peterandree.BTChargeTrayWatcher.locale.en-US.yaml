@@ -10,7 +10,7 @@ PublisherSupportUrl: https://github.com/peterandree/BTChargeTrayWatcher/issues
 PackageName: BTChargeTrayWatcher
 PackageUrl: https://github.com/peterandree/BTChargeTrayWatcher
 License: MIT
-ShortDescription: Windows Tray app that monitors lsaptop battery and Bluetooth device battery levels and alerts on configurable tresholds. Keeps your batteries alive longer!
+ShortDescription: Windows tray app that monitors laptop and Bluetooth device batteries and alerts on configurable tresholds. Keeps your batteries alive longer!
 ReleaseNotesUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/tag/v1.0.0
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0
