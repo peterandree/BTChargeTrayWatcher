@@ -1,0 +1,20 @@
+PackageIdentifier: peterandree.BTChargeTrayWatcher
+PackageVersion: 1.0.0
+PackageLocale: en-US
+Publisher: peterandree
+PackageName: BTChargeTrayWatcher
+License: MIT
+ShortDescription: Windows tray app that monitors Bluetooth device battery levels and alerts on low or high thresholds.
+Description: |-
+  BTChargeTrayWatcher sits in the system tray and continuously monitors the battery
+  levels of connected Bluetooth devices (headphones, keyboards, mice, etc.) and your
+  laptop battery. Desktop notifications are raised when a device crosses a configurable
+  low or high threshold. Hover over the tray icon to see current battery levels at a glance.
+Tags:
+  - bluetooth
+  - battery
+  - monitor
+  - tray
+  - notification
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
