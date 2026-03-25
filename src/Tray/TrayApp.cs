@@ -72,6 +72,9 @@ public sealed class TrayApp : IDisposable
         _scanner.AlertStateChanged += OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted += OnScanFaulted;
 
+        _monitor.BackgroundRefreshCompleted += OnDevicesRefreshed;
+        _monitor.ManualScanCompleted += OnDevicesRefreshed;
+
         _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
 
         _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
@@ -143,14 +146,37 @@ public sealed class TrayApp : IDisposable
         UpdateTrayIcon(_hasBluetoothAlert || _hasLaptopAlert);
     }
 
+    private void OnDevicesRefreshed(IReadOnlyList<DeviceBatteryInfo> _) =>
+        _uiContext.Post(_ => { if (!_disposed) UpdateTooltip(); }, null);
+
     private void UpdateTooltip()
     {
-        string laptopPart = _laptopMonitor.LastKnownBattery is { } info && info.HasBattery
-            ? $"  💻 {info.BatteryPercent}%{(info.IsCharging ? " ⚡" : "")}"
-            : string.Empty;
+        var sb = new System.Text.StringBuilder();
 
-        string text = $"BT Battery Alert ▼{_settings.Low}% ▲{_settings.High}%{laptopPart}";
+        foreach (var d in _monitor.LastKnownDevices)
+        {
+            if (d.Battery < 0) continue;
+            if (sb.Length > 0) sb.Append('\n');
+            bool alert = d.Battery <= _settings.GetLow(d.Name)
+                      || d.Battery >= _settings.GetHigh(d.Name);
+            if (alert) sb.Append("! ");
+            sb.Append(d.Name).Append(" ").Append(d.Battery).Append('%');
+        }
 
+        if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
+        {
+            if (sb.Length > 0) sb.Append('\n');
+            bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
+                            || laptop.BatteryPercent >= _settings.LaptopHigh;
+            if (laptopAlert) sb.Append("! ");
+            sb.Append("Laptop ").Append(laptop.BatteryPercent).Append('%');
+            if (laptop.IsCharging) sb.Append(" (charging)");
+        }
+
+        if (sb.Length == 0)
+            sb.Append($"BT Battery Alert ▼{_settings.Low}% ▲{_settings.High}%");
+
+        string text = sb.ToString();
         // NotifyIcon.Text is capped at 127 chars by Win32
         _trayIcon.Text = text.Length > 127 ? text[..127] : text;
     }
@@ -194,10 +220,11 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem.Enabled = false;
     }
 
-    private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> _)
+    private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> devices)
     {
         _scanMenuItem.Text = "Scan devices…";
         _scanMenuItem.Enabled = true;
+        UpdateTooltip();
     }
 
     private static void OnScanFaulted(string operationName, Exception ex)
@@ -241,6 +268,8 @@ public sealed class TrayApp : IDisposable
         _scanner.ScanCompleted -= OnScanCompleted;
         _scanner.AlertStateChanged -= OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted -= OnScanFaulted;
+        _monitor.BackgroundRefreshCompleted -= OnDevicesRefreshed;
+        _monitor.ManualScanCompleted -= OnDevicesRefreshed;
         _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
         _settings.Changed -= OnSettingsChanged;
         _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
