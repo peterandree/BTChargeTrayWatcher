@@ -43,6 +43,7 @@ jobs:
           generate_release_notes: true
 
       - name: Submit to winget
+        if: ${{ secrets.WINGET_TOKEN != '' }}
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: peterandree.BTChargeTrayWatcher
