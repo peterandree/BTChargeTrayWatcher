@@ -98,9 +98,9 @@ internal sealed class ScanCoordinator : IDisposable
             if (_settings.IgnoredDevices.Contains(device.Name)) continue;
             if (_settings.TrayIconOverlayExcludedDevices.Contains(device.Name)) continue;
 
-            if (device.Battery >= 0 &&
-                (device.Battery <= _settings.GetLow(device.Name) ||
-                 device.Battery >= _settings.GetHigh(device.Name)))
+            if (device.Battery.HasValue &&
+                (device.Battery.Value <= _settings.GetLow(device.Name) ||
+                 device.Battery.Value >= _settings.GetHigh(device.Name)))
             {
                 return true;
             }
@@ -127,7 +127,7 @@ internal sealed class ScanCoordinator : IDisposable
                 action();
         }
 
-        void OnFound(string deviceId, string name, int battery) =>
+        void OnFound(string deviceId, string name, int? battery) =>
             MarshalToWindow(window, () => window.OnDeviceFound(deviceId, name, battery));
 
         void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>

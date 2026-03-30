@@ -144,8 +144,8 @@ internal sealed class TrayMenuBuilder
                     ? " [No icon alert]"
                     : string.Empty;
 
-            string label = device.Battery >= 0
-                ? $"{device.Name}   {device.Battery}%  {BatteryDisplay.Bar(device.Battery)}{statusTag}"
+            string label = device.Battery.HasValue
+                ? $"{device.Name}   {device.Battery.Value}%  {BatteryDisplay.Bar(device.Battery.Value)}{statusTag}"
                 : $"{device.Name}   N/A{statusTag}";
 
             var item = new ToolStripMenuItem(label);

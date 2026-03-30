@@ -16,9 +16,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly System.Threading.Timer _timer;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
-
-    private readonly Lock _taskGate = new();
-    private readonly HashSet<Task> _activeTasks = [];
+    private readonly TaskTracker _taskTracker = new();
 
     private volatile bool _disposeStarted;
     private volatile bool _isDisposed;
@@ -69,7 +67,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private void OnTimerTick()
     {
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
-        StartTrackedTask(ct => SafeRefreshAsync(ct));
+        _taskTracker.Start(ct => SafeRefreshAsync(ct), _shutdownCts.Token);
     }
 
     private void OnSettingsChanged()
@@ -77,7 +75,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
         // Reset alert state so threshold changes re-evaluate immediately on next poll
         _alertState = AlertState.Normal;
-        StartTrackedTask(ct => SafeRefreshAsync(ct));
+        _taskTracker.Start(ct => SafeRefreshAsync(ct), _shutdownCts.Token);
     }
 
     private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
@@ -89,44 +87,13 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         else if (e.Mode == PowerModes.Resume)
         {
             _timer.Change(PollingDefaults.ResumeDelay, PollingDefaults.PollingInterval);
-            StartTrackedTask(ct => SafeRefreshAsync(ct));
+            _taskTracker.Start(ct => SafeRefreshAsync(ct), _shutdownCts.Token);
         }
     }
 
     private void ThrowIfDisposingOrDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposeStarted || _isDisposed, this);
-    }
-
-    private void StartTrackedTask(Func<CancellationToken, Task> work)
-    {
-        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
-
-        Task task;
-        try
-        {
-            task = Task.Run(() => work(_shutdownCts.Token), _shutdownCts.Token);
-        }
-        catch (OperationCanceledException) { return; }
-
-        lock (_taskGate)
-        {
-            if (_disposeStarted || _isDisposed) return;
-            _activeTasks.Add(task);
-        }
-
-        _ = task.ContinueWith(t =>
-        {
-            lock (_taskGate) { _activeTasks.Remove(t); }
-            if (t.IsFaulted && t.Exception is not null)
-                System.Diagnostics.Debug.WriteLine(
-                    $"[BTChargeTrayWatcher] Laptop battery task fault: {t.Exception}");
-        }, TaskScheduler.Default);
-    }
-
-    private Task[] SnapshotActiveTasks()
-    {
-        lock (_taskGate) { return [.. _activeTasks]; }
     }
 
     private async Task SafeRefreshAsync(CancellationToken ct)
@@ -235,9 +202,10 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _taskTracker.Stop();
         _shutdownCts.Cancel();
 
-        Task[] tasks = SnapshotActiveTasks();
+        Task[] tasks = _taskTracker.Snapshot();
         if (tasks.Length > 0)
         {
             try { await Task.WhenAll(tasks).ConfigureAwait(false); }

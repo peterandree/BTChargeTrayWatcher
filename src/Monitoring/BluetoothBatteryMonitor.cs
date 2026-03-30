@@ -25,8 +25,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     private readonly TaskCompletionSource _disposalComplete =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public event Action<string, int>? DeviceBatteryRead;
-    public event Action<string, string, int>? DeviceFound;
+    public event Action<string, int?>? DeviceBatteryRead;
+    public event Action<string, string, int?>? DeviceFound;
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ManualScanCompleted;
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
     public event Action? ScanStarted;

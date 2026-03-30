@@ -155,12 +155,12 @@ public sealed class TrayApp : IDisposable
 
         foreach (var d in _monitor.LastKnownDevices)
         {
-            if (d.Battery < 0) continue;
+            if (d.Battery is null) continue;
             if (sb.Length > 0) sb.Append('\n');
-            bool alert = d.Battery <= _settings.GetLow(d.Name)
-                      || d.Battery >= _settings.GetHigh(d.Name);
+            bool alert = d.Battery.Value <= _settings.GetLow(d.Name)
+                      || d.Battery.Value >= _settings.GetHigh(d.Name);
             if (alert) sb.Append("! ");
-            sb.Append(d.Name).Append(" ").Append(d.Battery).Append('%');
+            sb.Append(d.Name).Append(" ").Append(d.Battery.Value).Append('%');
         }
 
         if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)

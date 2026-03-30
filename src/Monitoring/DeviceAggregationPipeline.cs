@@ -4,12 +4,12 @@ internal sealed class DeviceAggregationPipeline
 {
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
-    private readonly Action<string, string, int>? _onDeviceFound;
+    private readonly Action<string, string, int?>? _onDeviceFound;
 
     public DeviceAggregationPipeline(
         IBatteryReader gattReader,
         IBatteryReader classicReader,
-        Action<string, string, int>? onDeviceFound)
+        Action<string, string, int?>? onDeviceFound)
     {
         _gattReader = gattReader;
         _classicReader = classicReader;

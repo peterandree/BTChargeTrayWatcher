@@ -91,7 +91,7 @@ public partial class ScanWindow : Form
         Resize += (_, _) => AdjustColumns();
     }
 
-    public void OnDeviceFound(string deviceId, string name, int battery)
+    public void OnDeviceFound(string deviceId, string name, int? battery)
     {
         bool isIgnored = _settings.IgnoredDevices.Contains(name);
 
@@ -105,18 +105,18 @@ public partial class ScanWindow : Form
                     item.SubItems[2].Text = "[Ignored]";
                     item.ForeColor = Color.Gray;
                 }
-                else if (battery >= 0)
+                else if (battery.HasValue)
                 {
-                    item.SubItems[1].Text = $"{battery}%";
-                    item.SubItems[2].Text = BatteryDisplay.Bar(battery);
+                    item.SubItems[1].Text = $"{battery.Value}%";
+                    item.SubItems[2].Text = BatteryDisplay.Bar(battery.Value);
                     item.ForeColor = SystemColors.WindowText;
                 }
                 return;
             }
         }
 
-        string pct = isIgnored ? "-" : (battery >= 0 ? $"{battery}%" : "N/A");
-        string bar = isIgnored ? "[Ignored]" : (battery >= 0 ? BatteryDisplay.Bar(battery) : "");
+        string pct = isIgnored ? "-" : (battery.HasValue ? $"{battery.Value}%" : "N/A");
+        string bar = isIgnored ? "[Ignored]" : (battery.HasValue ? BatteryDisplay.Bar(battery.Value) : "");
         var newItem = new ListViewItem(name);
         newItem.Tag = deviceId;
         newItem.SubItems.Add(pct);

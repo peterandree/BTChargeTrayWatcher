@@ -23,20 +23,20 @@ internal sealed class GattBatteryProcessor
     {
         var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
         if (device is null)
-            return new GattDeviceReadResult(deviceId, fallbackName, -1);
+            return new GattDeviceReadResult(deviceId, fallbackName, null);
 
         string deviceName = GetDeviceName(device) ?? fallbackName;
 
         if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-            return new GattDeviceReadResult(deviceId, deviceName, -1);
+            return new GattDeviceReadResult(deviceId, deviceName, null);
 
         var cachedEndpoint = _cache.GetEndpoint(deviceId);
         if (cachedEndpoint is not null)
         {
             try
             {
-                int battery = await ReadCharacteristicValueAsync(cachedEndpoint.Characteristic, cancellationToken).ConfigureAwait(false);
-                if (battery >= 0)
+                int? battery = await ReadCharacteristicValueAsync(cachedEndpoint.Characteristic, cancellationToken).ConfigureAwait(false);
+                if (battery.HasValue)
                     return new GattDeviceReadResult(deviceId, deviceName, battery);
             }
             catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
@@ -52,20 +52,20 @@ internal sealed class GattBatteryProcessor
                 .AsTask(cancellationToken).ConfigureAwait(false);
 
             if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
-                return new GattDeviceReadResult(deviceId, deviceName, -1);
+                return new GattDeviceReadResult(deviceId, deviceName, null);
 
             var service = servicesResult.Services[0];
             var charsResult = await service.GetCharacteristicsForUuidAsync(BatteryLevelUuid, BluetoothCacheMode.Cached)
                 .AsTask(cancellationToken).ConfigureAwait(false);
 
             if (charsResult.Status != GattCommunicationStatus.Success || charsResult.Characteristics.Count == 0)
-                return new GattDeviceReadResult(deviceId, deviceName, -1);
+                return new GattDeviceReadResult(deviceId, deviceName, null);
 
             var characteristic = charsResult.Characteristics[0];
             _cache.SetEndpoint(deviceId, new CachedGattEndpoint(service, characteristic));
 
-            int battery = await ReadCharacteristicValueAsync(characteristic, cancellationToken).ConfigureAwait(false);
-            return new GattDeviceReadResult(deviceId, deviceName, battery >= 0 ? battery : -1);
+            int? battery = await ReadCharacteristicValueAsync(characteristic, cancellationToken).ConfigureAwait(false);
+            return new GattDeviceReadResult(deviceId, deviceName, battery);
         }
         catch (OperationCanceledException)
         {
@@ -74,7 +74,7 @@ internal sealed class GattBatteryProcessor
         catch (Exception ex)
         {
             Debug.WriteLine($"[GattBatteryProcessor] ProcessDeviceAsync failed for '{deviceId}': {ex}");
-            return new GattDeviceReadResult(deviceId, deviceName, -1);
+            return new GattDeviceReadResult(deviceId, deviceName, null);
         }
     }
 
@@ -111,7 +111,7 @@ internal sealed class GattBatteryProcessor
         }
     }
 
-    private static async Task<int> ReadCharacteristicValueAsync(
+    private static async Task<int?> ReadCharacteristicValueAsync(
         GattCharacteristic characteristic, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -120,15 +120,15 @@ internal sealed class GattBatteryProcessor
             .AsTask(cancellationToken).ConfigureAwait(false);
 
         if (readResult.Status != GattCommunicationStatus.Success)
-            return -1;
+            return null;
 
         if (readResult.Value.Length == 0)
-            return -1;
+            return null;
 
         using DataReader reader = DataReader.FromBuffer(readResult.Value);
         byte value = reader.ReadByte();
 
-        return value <= 100 ? value : -1;
+        return value <= 100 ? value : null;
     }
 
     public static bool IsExpectedBluetoothException(Exception ex)
@@ -137,4 +137,4 @@ internal sealed class GattBatteryProcessor
     }
 }
 
-internal sealed record GattDeviceReadResult(string DeviceId, string Name, int Battery);
+internal sealed record GattDeviceReadResult(string DeviceId, string Name, int? Battery);

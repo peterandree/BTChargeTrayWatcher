@@ -9,7 +9,7 @@ internal sealed class Scanner
     private readonly PollingOrchestrator _poller;
     private readonly TaskTracker _tracker;
     private readonly CancellationToken _shutdownToken;
-    private readonly Action<string, int> _onBatteryRead;
+    private readonly Action<string, int?> _onBatteryRead;
     private readonly Action _onScanStarted;
     private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
 
@@ -59,9 +59,9 @@ internal sealed class Scanner
             {
                 foreach (var device in results)
                 {
-                    if (device.Battery < 0) continue;
+                    if (device.Battery is null) continue;
                     _lastKnown[device.DeviceId] = device;
-                    _poller.UpdateAlertState(device.DeviceId, device.Name, device.Battery);
+                    _poller.UpdateAlertState(device.DeviceId, device.Name, device.Battery.Value);
                     _onBatteryRead(device.Name, device.Battery);
                 }
             }
@@ -134,8 +134,8 @@ internal sealed record ScannerOptions(
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
-    Action<string, string, int> OnDeviceFound,
-    Action<string, int> OnBatteryRead,
+    Action<string, string, int?> OnDeviceFound,
+    Action<string, int?> OnBatteryRead,
     Action OnScanStarted,
     Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
     CancellationToken ShutdownToken);

@@ -79,12 +79,12 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 Debug.WriteLine($"[GattBatteryReader] Timeout while reading '{deviceId}'.");
-                return new GattDeviceReadResult(deviceId, fallbackName, -1);
+                return new GattDeviceReadResult(deviceId, fallbackName, null);
             }
             catch (Exception ex) when (GattBatteryProcessor.IsExpectedBluetoothException(ex))
             {
                 Debug.WriteLine($"[GattBatteryReader] Device unavailable '{deviceId}': {ex.Message}");
-                return new GattDeviceReadResult(deviceId, fallbackName, -1);
+                return new GattDeviceReadResult(deviceId, fallbackName, null);
             }
         }
         finally

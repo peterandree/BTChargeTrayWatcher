@@ -61,8 +61,8 @@ public sealed class ClassicBatteryReader : IBatteryReader
             .Select(c => new DeviceBatteryInfo(
                 c.InstanceId,
                 c.Name,
-                batteryMap.TryGetValue(c.InstanceId, out int b) ? b : -1))
-            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery >= 0 && d.Battery <= 100)
+                batteryMap.TryGetValue(c.InstanceId, out int b) ? b : null))
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)
             .ToList();
     }
 
