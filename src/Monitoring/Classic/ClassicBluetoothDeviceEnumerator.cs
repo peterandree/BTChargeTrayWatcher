@@ -11,6 +11,9 @@ internal sealed class ClassicBluetoothDeviceEnumerator
     private static readonly Regex MacRegex =
         new(@"&0&([0-9A-Fa-f]{12})_", RegexOptions.Compiled);
 
+    private static readonly Regex HfpSuffixRegex =
+        new(@"\s*(Hands-Free AG|HFP|AG)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public List<ClassicBluetoothCandidate> EnumerateCandidates()
     {
         var results = new List<ClassicBluetoothCandidate>();
@@ -47,11 +50,7 @@ internal sealed class ClassicBluetoothDeviceEnumerator
                 ulong address = Convert.ToUInt64(match.Groups[1].Value, 16);
 
                 string rawName = GetDeviceDescription(devList, ref devData) ?? instanceId;
-                string name = Regex.Replace(
-                    rawName,
-                    @"\s*(Hands-Free AG|HFP|AG)$",
-                    "",
-                    RegexOptions.IgnoreCase).Trim();
+                string name = HfpSuffixRegex.Replace(rawName, "").Trim();
 
                 results.Add(new ClassicBluetoothCandidate(name, instanceId, address));
             }

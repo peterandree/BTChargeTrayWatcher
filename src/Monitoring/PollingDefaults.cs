@@ -26,4 +26,9 @@ internal static class PollingDefaults
     /// removed from the known-device cache.
     /// </summary>
     public const int MissCountThreshold = 3;
+
+    /// <summary>
+    /// Maximum number of GATT device reads that can proceed concurrently.
+    /// </summary>
+    public const int GattMaxConcurrentReads = 2;
 }

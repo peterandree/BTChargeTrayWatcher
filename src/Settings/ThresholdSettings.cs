@@ -316,6 +316,7 @@ public sealed class ThresholdSettings
         {
             dto = new SettingsDto
             {
+                Version = 1,
                 Low = _low,
                 High = _high,
                 LaptopLow = _laptopLow,
@@ -347,6 +348,7 @@ public sealed class ThresholdSettings
 
     private sealed record SettingsDto
     {
+        public int Version { get; set; } = 1;
         public int Low { get; set; }
         public int High { get; set; }
         public int LaptopLow { get; set; }

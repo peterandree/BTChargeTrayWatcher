@@ -9,7 +9,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
     private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
     private static readonly TimeSpan PerDeviceTimeout = TimeSpan.FromSeconds(4);
 
-    private readonly SemaphoreSlim _deviceReadGate = new(2, 2);
+    private readonly SemaphoreSlim _deviceReadGate = new(PollingDefaults.GattMaxConcurrentReads, PollingDefaults.GattMaxConcurrentReads);
     private readonly GattConnectionCache _cache = new();
     private readonly GattBatteryProcessor _processor;
 

@@ -88,11 +88,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
     public Task PollAsync(CancellationToken ct) => StartTrackedPollAsync(ct);
 
-    public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
-        _scanner.StartTrackedScanAsync(_shutdownCts.Token);
-    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) =>
-        _scanner.StartTrackedScanAsync(ct);
-
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
         _scanner.StartTrackedScanAsync(_shutdownCts.Token);
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) =>
@@ -127,7 +122,12 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     private void OnTimerTick()
     {
         if (_disposeStarted || _isDisposed) return;
-        _poller.OnTimerTick();
+        try { _poller.OnTimerTick(); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[BTChargeTrayWatcher] Timer tick fault: {ex}");
+        }
     }
 
     private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
