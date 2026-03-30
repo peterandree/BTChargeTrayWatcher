@@ -276,7 +276,23 @@ public sealed class ThresholdSettings
                     _excludeLaptopFromTrayIconOverlay = dto.ExcludeLaptopFromTrayIconOverlay;
 
                     if (dto.DeviceOverrides != null)
-                        _deviceOverrides = new Dictionary<string, DeviceThresholds>(dto.DeviceOverrides, StringComparer.OrdinalIgnoreCase);
+                    {
+                        _deviceOverrides = new Dictionary<string, DeviceThresholds>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var kvp in dto.DeviceOverrides)
+                        {
+                            var t = kvp.Value;
+                            if (t is null) continue;
+                            int effectiveLow = t.Low ?? _low;
+                            int effectiveHigh = t.High ?? _high;
+                            if (effectiveLow >= effectiveHigh)
+                            {
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"[ThresholdSettings] Dropping invalid override for '{kvp.Key}': Low={t.Low}, High={t.High}");
+                                continue;
+                            }
+                            _deviceOverrides[kvp.Key] = t;
+                        }
+                    }
 
                     return;
                 }

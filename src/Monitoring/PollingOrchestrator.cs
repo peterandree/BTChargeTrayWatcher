@@ -106,10 +106,10 @@ internal sealed class PollingOrchestrator : IDisposable
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
                     ? es
-                    : ClassifyBatteryState(device.DeviceId, device.Name, prev, BatteryAlertState.Normal);
+                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal);
 
                 BatteryAlertState currentState =
-                    ClassifyBatteryState(device.DeviceId, device.Name, device.Battery, previousState);
+                    ClassifyBatteryState(device.Name, device.Battery, previousState);
 
                 if (_settings.IgnoredDevices.Contains(device.Name))
                 {
@@ -158,11 +158,11 @@ internal sealed class PollingOrchestrator : IDisposable
     {
         BatteryAlertState existing = _alertStates.TryGetValue(deviceId, out var s)
             ? s : BatteryAlertState.Normal;
-        _alertStates[deviceId] = ClassifyBatteryState(deviceId, name, battery, existing);
+        _alertStates[deviceId] = ClassifyBatteryState(name, battery, existing);
     }
 
     internal BatteryAlertState ClassifyBatteryState(
-        string _, string name, int battery, BatteryAlertState previousState)
+        string name, int battery, BatteryAlertState previousState)
     {
         if (battery < 0 || _settings.IgnoredDevices.Contains(name))
             return BatteryAlertState.Normal;

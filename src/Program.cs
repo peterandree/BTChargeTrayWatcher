@@ -32,11 +32,19 @@ internal static class Program
             var monitor = new BluetoothBatteryMonitor(settings, notifier);
             var laptopMonitor = new LaptopBatteryMonitor(settings, notifier);
 
-            using var app = new TrayApp(settings, monitor, notifier, laptopMonitor);
+            try
+            {
+                using var app = new TrayApp(settings, monitor, notifier, laptopMonitor);
 
-            app.StartBackgroundScan();
+                app.StartBackgroundScan();
 
-            TrayApp.Run();
+                TrayApp.Run();
+            }
+            finally
+            {
+                monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                laptopMonitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
         }
         finally
         {
