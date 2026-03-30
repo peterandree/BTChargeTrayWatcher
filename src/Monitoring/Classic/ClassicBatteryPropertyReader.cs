@@ -95,7 +95,7 @@ internal sealed class ClassicBatteryPropertyReader
             SetupApiNative.DEVPROP_TYPE_SBYTE => (sbyte)buf[0],
             SetupApiNative.DEVPROP_TYPE_UINT16 => BitConverter.ToUInt16(buf, 0),
             SetupApiNative.DEVPROP_TYPE_INT16 => BitConverter.ToInt16(buf, 0),
-            SetupApiNative.DEVPROP_TYPE_UINT32 => checked((int)BitConverter.ToUInt32(buf, 0)),
+            SetupApiNative.DEVPROP_TYPE_UINT32 => unchecked((int)BitConverter.ToUInt32(buf, 0)),
             SetupApiNative.DEVPROP_TYPE_INT32 => BitConverter.ToInt32(buf, 0),
             _ => -1
         };

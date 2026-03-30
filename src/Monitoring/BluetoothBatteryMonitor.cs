@@ -101,13 +101,14 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     private Task StartTrackedPollAsync(CancellationToken ct)
     {
         ThrowIfDisposingOrDisposed();
-        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, ct);
-        CancellationToken token = linkedCts.Token;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         _taskTracker.Start(_ =>
         {
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, ct);
+            CancellationToken token = linkedCts.Token;
+
             return _poller.PollAsync(token).ContinueWith(t =>
             {
                 linkedCts.Dispose();

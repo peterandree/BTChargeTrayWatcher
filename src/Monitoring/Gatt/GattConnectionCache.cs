@@ -19,11 +19,12 @@ internal sealed class GattConnectionCache : IDisposable
 
     public void SetEndpoint(string deviceId, CachedGattEndpoint endpoint)
     {
-        if (_endpoints.TryGetValue(deviceId, out var old))
-        {
-            old.Dispose();
-        }
-        _endpoints[deviceId] = endpoint;
+        CachedGattEndpoint? toDispose = null;
+        _endpoints.AddOrUpdate(
+            deviceId,
+            endpoint,
+            (_, old) => { toDispose = old; return endpoint; });
+        toDispose?.Dispose();
     }
 
     public void RemoveEndpoint(string deviceId)

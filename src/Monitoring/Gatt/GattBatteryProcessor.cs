@@ -128,7 +128,7 @@ internal sealed class GattBatteryProcessor
         using DataReader reader = DataReader.FromBuffer(readResult.Value);
         byte value = reader.ReadByte();
 
-        return value is >= 0 and <= 100 ? value : -1;
+        return value <= 100 ? value : -1;
     }
 
     public static bool IsExpectedBluetoothException(Exception ex)

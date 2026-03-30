@@ -5,7 +5,7 @@ using Windows.UI.Notifications;
 
 namespace BTChargeTrayWatcher;
 
-public class NotificationService
+public sealed class NotificationService
 {
     private const string AppId = "BTChargeTrayWatcher";
     private readonly bool _toastsSupported;

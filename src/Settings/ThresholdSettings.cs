@@ -182,9 +182,15 @@ public sealed class ThresholdSettings
         }
     }
 
-    public IReadOnlyCollection<string> IgnoredDevices => _ignoredDevices;
+    public IReadOnlyCollection<string> IgnoredDevices
+    {
+        get { lock (_thresholdLock) return new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase); }
+    }
 
-    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices => _trayIconOverlayExcludedDevices;
+    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices
+    {
+        get { lock (_thresholdLock) return new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase); }
+    }
 
     public bool ExcludeLaptopFromTrayIconOverlay
     {
