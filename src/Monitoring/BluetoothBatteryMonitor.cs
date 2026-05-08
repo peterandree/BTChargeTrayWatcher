@@ -45,12 +45,12 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
-    public BluetoothBatteryMonitor(ThresholdSettings settings, NotificationService notifier)
+    public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
     public BluetoothBatteryMonitor(
         ThresholdSettings settings,
-        NotificationService notifier,
+        INotificationService notifier,
         IBatteryReader gattReader,
         IBatteryReader classicReader)
     {

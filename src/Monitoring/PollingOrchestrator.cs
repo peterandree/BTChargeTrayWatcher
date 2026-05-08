@@ -11,7 +11,7 @@ internal sealed class PollingOrchestrator : IDisposable
     internal enum BatteryAlertState { Normal = 0, Low = 1, High = 2 }
 
     private readonly ThresholdSettings _settings;
-    private readonly NotificationService _notifier;
+    private readonly INotificationService _notifier;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly TaskTracker _tracker;
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readDevices;
@@ -219,7 +219,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
 internal sealed record PollingOrchestratorOptions(
     ThresholdSettings Settings,
-    NotificationService Notifier,
+    INotificationService Notifier,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     TaskTracker Tracker,
     Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
