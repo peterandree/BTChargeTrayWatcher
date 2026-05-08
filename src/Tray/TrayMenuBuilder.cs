@@ -6,22 +6,17 @@ using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
 
-internal sealed class TrayMenuBuilder
+internal sealed class TrayMenuBuilder(ThresholdSettings settings)
 {
-    private readonly ThresholdSettings _settings;
+    private readonly ThresholdSettings _settings = settings;
 
     // Centralized policy: low thresholds (10–30)
-    private static readonly int[] LowThresholdCandidates = { 10, 15, 20, 25, 30 };
+    private static readonly int[] LowThresholdCandidates = [10, 15, 20, 25, 30];
 
     // Centralized policy: high thresholds (70–90)
-    private static readonly int[] HighThresholdCandidates = { 70, 75, 80, 85, 90 };
+    private static readonly int[] HighThresholdCandidates = [ 70, 75, 80, 85, 90 ];
 
-    public TrayMenuBuilder(ThresholdSettings settings)
-    {
-        _settings = settings;
-    }
-
-    public ContextMenuStrip Build(
+    public static ContextMenuStrip Build(
         ToolStripMenuItem laptopMenuItem,
         ToolStripMenuItem devicesMenu,
         ToolStripMenuItem scanMenuItem,
@@ -236,16 +231,20 @@ internal sealed class TrayMenuBuilder
 
         var root = new ToolStripMenuItem($"{baseText}: {displayValue}");
 
-        var globalItem = new ToolStripMenuItem($"Global ({globalValue}%)");
-        globalItem.Checked = !customValue.HasValue;
+        var globalItem = new ToolStripMenuItem($"Global ({globalValue}%)")
+        {
+            Checked = !customValue.HasValue
+        };
         globalItem.Click += (_, _) => setter(null);
         root.DropDownItems.Add(globalItem);
         root.DropDownItems.Add(new ToolStripSeparator());
 
         foreach (int val in candidates)
         {
-            var item = new ToolStripMenuItem($"{val}%");
-            item.Checked = customValue.HasValue && customValue.Value == val;
+            var item = new ToolStripMenuItem($"{val}%")
+            {
+                Checked = customValue.HasValue && customValue.Value == val
+            };
             item.Click += (_, _) => setter(val);
             root.DropDownItems.Add(item);
         }

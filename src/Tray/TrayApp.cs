@@ -56,7 +56,7 @@ public sealed class TrayApp : IDisposable
 
         var devicesMenu = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
 
-        _trayIcon.ContextMenuStrip = menuBuilder.Build(
+        _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
             _laptopMenuItem,
             devicesMenu,
             _scanMenuItem,
