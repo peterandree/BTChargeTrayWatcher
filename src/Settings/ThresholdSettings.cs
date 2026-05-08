@@ -1,12 +1,7 @@
-﻿using System.Text.Json;
-
 namespace BTChargeTrayWatcher;
 
 public sealed class ThresholdSettings
 {
-    private const string AppName = "BTChargeTrayWatcher";
-    private readonly string _settingsFilePath;
-
     private readonly Lock _thresholdLock = new();
 
     private int _low;
@@ -23,13 +18,13 @@ public sealed class ThresholdSettings
 
     public ThresholdSettings()
     {
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string appDir = Path.Combine(localAppData, AppName);
-        Directory.CreateDirectory(appDir);
-        _settingsFilePath = Path.Combine(appDir, "settings.json");
-
-        Load();
+        _low = 20;
+        _high = 80;
+        _laptopLow = 20;
+        _laptopHigh = 80;
     }
+
+    // ── Global thresholds ────────────────────────────────────────────────────
 
     public int Low
     {
@@ -42,7 +37,6 @@ public sealed class ThresholdSettings
                 if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
                 _low = value;
             }
-            Save();
             Changed?.Invoke();
         }
     }
@@ -58,7 +52,6 @@ public sealed class ThresholdSettings
                 if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
                 _high = value;
             }
-            Save();
             Changed?.Invoke();
         }
     }
@@ -74,7 +67,6 @@ public sealed class ThresholdSettings
                 if (value >= _laptopHigh) throw new ArgumentOutOfRangeException(nameof(value), "Laptop Low threshold must be below Laptop High threshold.");
                 _laptopLow = value;
             }
-            Save();
             Changed?.Invoke();
             LaptopSettingsChanged?.Invoke();
         }
@@ -91,11 +83,12 @@ public sealed class ThresholdSettings
                 if (value <= _laptopLow) throw new ArgumentOutOfRangeException(nameof(value), "Laptop High threshold must be above Laptop Low threshold.");
                 _laptopHigh = value;
             }
-            Save();
             Changed?.Invoke();
             LaptopSettingsChanged?.Invoke();
         }
     }
+
+    // ── Per-device overrides ─────────────────────────────────────────────────
 
     public int GetLow(string deviceName)
     {
@@ -143,7 +136,6 @@ public sealed class ThresholdSettings
             t.Low = value;
             CleanupEmptyOverrides(deviceName);
         }
-        Save();
         Changed?.Invoke();
     }
 
@@ -169,18 +161,17 @@ public sealed class ThresholdSettings
             t.High = value;
             CleanupEmptyOverrides(deviceName);
         }
-        Save();
         Changed?.Invoke();
     }
 
     private void CleanupEmptyOverrides(string deviceName)
     {
         if (_deviceOverrides.TryGetValue(deviceName, out var t))
-        {
             if (!t.Low.HasValue && !t.High.HasValue)
                 _deviceOverrides.Remove(deviceName);
-        }
     }
+
+    // ── Device sets ──────────────────────────────────────────────────────────
 
     public IReadOnlyCollection<string> IgnoredDevices
     {
@@ -202,7 +193,6 @@ public sealed class ThresholdSettings
                 if (_excludeLaptopFromTrayIconOverlay == value) return;
                 _excludeLaptopFromTrayIconOverlay = value;
             }
-            Save();
             Changed?.Invoke();
         }
     }
@@ -211,7 +201,6 @@ public sealed class ThresholdSettings
     {
         lock (_thresholdLock)
             _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
-        Save();
         Changed?.Invoke();
     }
 
@@ -222,7 +211,6 @@ public sealed class ThresholdSettings
             if (!_ignoredDevices.Remove(deviceName))
                 _ignoredDevices.Add(deviceName);
         }
-        Save();
         Changed?.Invoke();
     }
 
@@ -233,129 +221,54 @@ public sealed class ThresholdSettings
             if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
                 _trayIconOverlayExcludedDevices.Add(deviceName);
         }
-        Save();
         Changed?.Invoke();
     }
 
-    public bool RunOnStartup
+    // ── Internal snapshot used by SettingsPersistence ────────────────────────
+
+    internal SettingsSnapshot Snapshot()
     {
-        get => StartupRegistration.IsEnabled;
-        set
-        {
-            StartupRegistration.IsEnabled = value;
-            Changed?.Invoke();
-        }
-    }
-
-    private void Load()
-    {
-        try
-        {
-            if (File.Exists(_settingsFilePath))
-            {
-                string json = File.ReadAllText(_settingsFilePath);
-                var dto = JsonSerializer.Deserialize<SettingsDto>(json);
-                if (dto != null)
-                {
-                    _low = dto.Low;
-                    _high = dto.High;
-
-                    if (_low >= _high) { _low = 20; _high = 80; }
-
-                    _laptopLow = dto.LaptopLow;
-                    _laptopHigh = dto.LaptopHigh;
-
-                    if (_laptopLow >= _laptopHigh) { _laptopLow = 20; _laptopHigh = 80; }
-
-                    if (dto.IgnoredDevices != null)
-                        _ignoredDevices = new HashSet<string>(dto.IgnoredDevices, StringComparer.OrdinalIgnoreCase);
-
-                    if (dto.TrayIconOverlayExcludedDevices != null)
-                        _trayIconOverlayExcludedDevices = new HashSet<string>(dto.TrayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase);
-
-                    _excludeLaptopFromTrayIconOverlay = dto.ExcludeLaptopFromTrayIconOverlay;
-
-                    if (dto.DeviceOverrides != null)
-                    {
-                        _deviceOverrides = new Dictionary<string, DeviceThresholds>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var kvp in dto.DeviceOverrides)
-                        {
-                            var t = kvp.Value;
-                            if (t is null) continue;
-                            int effectiveLow = t.Low ?? _low;
-                            int effectiveHigh = t.High ?? _high;
-                            if (effectiveLow >= effectiveHigh)
-                            {
-                                System.Diagnostics.Debug.WriteLine(
-                                    $"[ThresholdSettings] Dropping invalid override for '{kvp.Key}': Low={t.Low}, High={t.High}");
-                                continue;
-                            }
-                            _deviceOverrides[kvp.Key] = t;
-                        }
-                    }
-
-                    return;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] Load fault: {ex}");
-        }
-
-        _low = 20;
-        _high = 80;
-        _laptopLow = 20;
-        _laptopHigh = 80;
-    }
-
-    private void Save()
-    {
-        SettingsDto dto;
         lock (_thresholdLock)
         {
-            dto = new SettingsDto
-            {
-                Version = 1,
-                Low = _low,
-                High = _high,
-                LaptopLow = _laptopLow,
-                LaptopHigh = _laptopHigh,
-                IgnoredDevices = [.. _ignoredDevices],
-                TrayIconOverlayExcludedDevices = [.. _trayIconOverlayExcludedDevices],
-                ExcludeLaptopFromTrayIconOverlay = _excludeLaptopFromTrayIconOverlay,
-                DeviceOverrides = new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase)
-            };
-        }
-        try
-        {
-            string json = JsonSerializer.Serialize(dto);
-            string tmp = _settingsFilePath + ".tmp";
-            File.WriteAllText(tmp, json);
-            File.Move(tmp, _settingsFilePath, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[ThresholdSettings] Save fault: {ex}");
+            return new SettingsSnapshot(
+                _low, _high, _laptopLow, _laptopHigh,
+                new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase),
+                _excludeLaptopFromTrayIconOverlay,
+                new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase));
         }
     }
 
-    public sealed record DeviceThresholds
+    internal void ApplySnapshot(SettingsSnapshot s)
     {
-        public int? Low { get; set; }
-        public int? High { get; set; }
-    }
-
-    private sealed record SettingsDto
-    {
-        public int Version { get; set; } = 1;
-        public int Low { get; set; }
-        public int High { get; set; }
-        public int LaptopLow { get; set; }
-        public int LaptopHigh { get; set; }
-        public List<string>? IgnoredDevices { get; set; }
-        public List<string>? TrayIconOverlayExcludedDevices { get; set; }
-        public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
-        public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
+        lock (_thresholdLock)
+        {
+            _low = s.Low;
+            _high = s.High;
+            _laptopLow = s.LaptopLow;
+            _laptopHigh = s.LaptopHigh;
+            _ignoredDevices = s.IgnoredDevices;
+            _trayIconOverlayExcludedDevices = s.TrayIconOverlayExcludedDevices;
+            _excludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay;
+            _deviceOverrides = s.DeviceOverrides;
+        }
     }
 }
+
+// ── Shared types ─────────────────────────────────────────────────────────────
+
+public sealed record DeviceThresholds
+{
+    public int? Low { get; set; }
+    public int? High { get; set; }
+}
+
+internal sealed record SettingsSnapshot(
+    int Low,
+    int High,
+    int LaptopLow,
+    int LaptopHigh,
+    HashSet<string> IgnoredDevices,
+    HashSet<string> TrayIconOverlayExcludedDevices,
+    bool ExcludeLaptopFromTrayIconOverlay,
+    Dictionary<string, DeviceThresholds> DeviceOverrides);
