@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 
@@ -56,7 +56,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         foreach (GattDeviceReadResult r in perDeviceResults)
         {
             if (!string.IsNullOrWhiteSpace(r.Name))
-                results.Add(new DeviceBatteryInfo(r.DeviceId, r.Name, r.Battery));
+                results.Add(new DeviceBatteryInfo(r.DeviceId, r.Name, r.Battery, r.IsCharging));
         }
 
         return results;

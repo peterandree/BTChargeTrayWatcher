@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -91,7 +91,7 @@ public partial class ScanWindow : Form
         Resize += (_, _) => AdjustColumns();
     }
 
-    public void OnDeviceFound(string deviceId, string name, int? battery)
+    public void OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null)
     {
         bool isIgnored = _settings.IgnoredDevices.Contains(name);
 
@@ -107,7 +107,7 @@ public partial class ScanWindow : Form
                 }
                 else if (battery.HasValue)
                 {
-                    item.SubItems[1].Text = $"{battery.Value}%";
+                    item.SubItems[1].Text = FormatBattery(battery.Value, isCharging);
                     item.SubItems[2].Text = BatteryDisplay.Bar(battery.Value);
                     item.ForeColor = SystemColors.WindowText;
                 }
@@ -115,7 +115,7 @@ public partial class ScanWindow : Form
             }
         }
 
-        string pct = isIgnored ? "-" : (battery.HasValue ? $"{battery.Value}%" : "N/A");
+        string pct = isIgnored ? "-" : (battery.HasValue ? FormatBattery(battery.Value, isCharging) : "N/A");
         string bar = isIgnored ? "[Ignored]" : (battery.HasValue ? BatteryDisplay.Bar(battery.Value) : "");
         var newItem = new ListViewItem(name);
         newItem.Tag = deviceId;
@@ -123,9 +123,7 @@ public partial class ScanWindow : Form
         newItem.SubItems.Add(bar);
 
         if (isIgnored)
-        {
             newItem.ForeColor = Color.Gray;
-        }
 
         _list.Items.Add(newItem);
     }
@@ -139,6 +137,14 @@ public partial class ScanWindow : Form
         _progress.Style = ProgressBarStyle.Blocks;
         _progress.Value = 100;
     }
+
+    /// <summary>
+    /// Formats the battery percentage cell text.
+    /// Appends " \u26a1" (⚡) only when charging is confirmed true.
+    /// Unknown (null) renders as plain percentage — absence of data is not shown as a state.
+    /// </summary>
+    private static string FormatBattery(int battery, bool? isCharging) =>
+        isCharging == true ? $"{battery}% \u26a1" : $"{battery}%";
 
     private void AdjustColumns()
     {

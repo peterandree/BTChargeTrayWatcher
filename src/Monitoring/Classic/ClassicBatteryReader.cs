@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
@@ -50,7 +50,7 @@ public sealed class ClassicBatteryReader : IBatteryReader
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        Dictionary<string, int> batteryMap = await Task.Run(() =>
+        Dictionary<string, (int Battery, bool? IsCharging)> batteryMap = await Task.Run(() =>
         {
             var instanceIds = connected.Select(c => c.InstanceId);
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
@@ -58,10 +58,15 @@ public sealed class ClassicBatteryReader : IBatteryReader
 
         // DeviceId = InstanceId (stable SetupAPI identity); Name is display-only
         return connected
-            .Select(c => new DeviceBatteryInfo(
-                c.InstanceId,
-                c.Name,
-                batteryMap.TryGetValue(c.InstanceId, out int b) ? b : null))
+            .Select(c =>
+            {
+                batteryMap.TryGetValue(c.InstanceId, out var props);
+                return new DeviceBatteryInfo(
+                    c.InstanceId,
+                    c.Name,
+                    props.Battery == 0 && !batteryMap.ContainsKey(c.InstanceId) ? null : props.Battery,
+                    props.IsCharging);
+            })
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)
             .ToList();
     }

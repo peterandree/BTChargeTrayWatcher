@@ -1,4 +1,4 @@
-﻿// src/Tray/TrayApp.cs
+// src/Tray/TrayApp.cs
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -51,7 +51,7 @@ public sealed class TrayApp : IDisposable
         _highMenu = menuBuilder.BuildHighMenu();
         _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
 
-        _scanMenuItem = new ToolStripMenuItem("Scan devices…");
+        _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
         var devicesMenu = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
@@ -109,10 +109,7 @@ public sealed class TrayApp : IDisposable
     private void OnTrayMouseClick(object? sender, MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left)
-        {
-            // Show the context menu at the current cursor position on left-click
             _trayIcon.ContextMenuStrip?.Show(Cursor.Position);
-        }
     }
 
     private void OnBluetoothAlertStateChanged(bool hasAlert)
@@ -160,7 +157,9 @@ public sealed class TrayApp : IDisposable
             bool alert = d.Battery.Value <= _settings.GetLow(d.Name)
                       || d.Battery.Value >= _settings.GetHigh(d.Name);
             if (alert) sb.Append("! ");
-            sb.Append(d.Name).Append(" ").Append(d.Battery.Value).Append('%');
+            sb.Append(d.Name).Append(' ').Append(d.Battery.Value).Append('%');
+            // Append charging indicator only when confirmed — null means unknown, not not-charging.
+            if (d.IsCharging == true) sb.Append(" \u26a1");
         }
 
         if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
@@ -174,7 +173,7 @@ public sealed class TrayApp : IDisposable
         }
 
         if (sb.Length == 0)
-            sb.Append($"BT Battery Alert ▼{_settings.Low}% ▲{_settings.High}%");
+            sb.Append($"BT Battery Alert \u25bc{_settings.Low}% \u25b2{_settings.High}%");
 
         string text = sb.ToString();
         // NotifyIcon.Text is capped at 127 chars by Win32
@@ -203,26 +202,26 @@ public sealed class TrayApp : IDisposable
     {
         if (!info.HasBattery)
         {
-            _laptopMenuItem.Text = "💻 Laptop: No battery";
+            _laptopMenuItem.Text = "\U0001f4bb Laptop: No battery";
             return;
         }
 
-        string charge = info.IsCharging ? " ⚡ Charging"
-            : info.IsOnAcPower ? " 🔌 Plugged in"
+        string charge = info.IsCharging ? " \u26a1 Charging"
+            : info.IsOnAcPower ? " \U0001f50c Plugged in"
             : " On battery";
 
-        _laptopMenuItem.Text = $"💻 Laptop: {info.BatteryPercent}%{charge}";
+        _laptopMenuItem.Text = $"\U0001f4bb Laptop: {info.BatteryPercent}%{charge}";
     }
 
     private void OnScanStarted()
     {
-        _scanMenuItem.Text = "⏳ Scanning…";
+        _scanMenuItem.Text = "\u23f3 Scanning\u2026";
         _scanMenuItem.Enabled = false;
     }
 
     private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> devices)
     {
-        _scanMenuItem.Text = "Scan devices…";
+        _scanMenuItem.Text = "Scan devices\u2026";
         _scanMenuItem.Enabled = true;
         UpdateTooltip();
     }
