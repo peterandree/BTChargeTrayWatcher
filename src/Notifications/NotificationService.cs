@@ -1,11 +1,11 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Microsoft.Win32;
 using Windows.Data.Xml.Dom;
 using Windows.UI.Notifications;
 
 namespace BTChargeTrayWatcher;
 
-public sealed class NotificationService
+public sealed class NotificationService : INotificationService
 {
     private const string AppId = "BTChargeTrayWatcher";
     private readonly bool _toastsSupported;
@@ -133,5 +133,4 @@ public sealed class NotificationService
         string message = $"Laptop battery is at {battery}%. Consider unplugging to preserve battery health.";
         ShowToast(title, message);
     }
-
 }

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
@@ -27,8 +27,16 @@ internal sealed class GattBatteryProcessor
 
         string deviceName = GetDeviceName(device) ?? fallbackName;
 
+        // If the cached device is stale (disconnected), evict it and try once with a fresh instance.
         if (device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-            return new GattDeviceReadResult(deviceId, deviceName, null);
+        {
+            _cache.RemoveDevice(deviceId);
+            device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
+            if (device is null || device.ConnectionStatus != BluetoothConnectionStatus.Connected)
+                return new GattDeviceReadResult(deviceId, deviceName, null);
+
+            deviceName = GetDeviceName(device) ?? deviceName;
+        }
 
         var cachedEndpoint = _cache.GetEndpoint(deviceId);
         if (cachedEndpoint is not null)

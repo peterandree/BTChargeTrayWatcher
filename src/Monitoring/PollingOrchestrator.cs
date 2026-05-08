@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
@@ -18,6 +18,7 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly CancellationToken _shutdownToken;
     private readonly Action<string, int?> _onBatteryRead;
     private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
+    private readonly Action<bool> _onAlertStateChanged;
 
     private readonly SemaphoreSlim _pollLock = new(1, 1);
     private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
@@ -41,6 +42,7 @@ internal sealed class PollingOrchestrator : IDisposable
         _shutdownToken = options.ShutdownToken;
         _onBatteryRead = options.OnBatteryRead;
         _onScanCompleted = options.OnScanCompleted;
+        _onAlertStateChanged = options.OnAlertStateChanged;
     }
 
     public void OnTimerTick()
@@ -147,6 +149,17 @@ internal sealed class PollingOrchestrator : IDisposable
             }
 
             _onScanCompleted([.. _lastKnown.Values]);
+
+            // Emit the authoritative combined alert state derived from classified states.
+            // This is the single source of truth for the tray icon overlay (ADR-011).
+            // Using hysteresis-consistent classification means the tray icon and the
+            // notification pipeline can never disagree (fixes #44).
+            bool hasAlert = false;
+            foreach (var state in _alertStates.Values)
+            {
+                if (state != BatteryAlertState.Normal) { hasAlert = true; break; }
+            }
+            _onAlertStateChanged(hasAlert);
         }
         finally
         {
@@ -205,4 +218,5 @@ internal sealed record PollingOrchestratorOptions(
     Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
     Action<string, int?> OnBatteryRead,
     Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    Action<bool> OnAlertStateChanged,
     CancellationToken ShutdownToken);

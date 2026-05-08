@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,8 +11,8 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private enum AlertState { Normal = 0, Low = 1, High = 2 }
 
     private readonly ILaptopBatteryReader _reader;
-    private readonly ThresholdSettings? _settings;
-    private readonly NotificationService? _notifier;
+    private readonly ThresholdSettings _settings;
+    private readonly INotificationService _notifier;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly System.Threading.Timer _timer;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -35,25 +35,33 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     public bool IsInAlertState => _hasAlert;
     public LaptopBatteryInfo? LastKnownBattery => _lastKnown;
 
-    // Used by Program.cs — full integration with settings and notifications
+    /// <summary>Production constructor — real reader, real settings, real notifications.</summary>
     public LaptopBatteryMonitor(ThresholdSettings settings, NotificationService notifier)
         : this(new WindowsLaptopBatteryReader(), settings, notifier) { }
 
-    // Used for testing — reader injectable, no notifications
+    /// <summary>Test constructor — injectable reader, no settings, no notifications.</summary>
     public LaptopBatteryMonitor(ILaptopBatteryReader reader)
-        : this(reader, null, null) { }
+        : this(reader, null!, NullNotificationService.Instance) { }
 
+    /// <summary>
+    /// Canonical private constructor. All fields are non-nullable.
+    /// <paramref name="settings"/> may be null only from the test constructor, in which case
+    /// threshold evaluation is skipped entirely (checked via <c>settings is not null</c> in
+    /// <see cref="RefreshAsync"/>).
+    /// TODO(#41): once the test constructor is removed, <paramref name="settings"/> becomes
+    /// non-nullable here and the null-guard in RefreshAsync is deleted.
+    /// </summary>
     private LaptopBatteryMonitor(
         ILaptopBatteryReader reader,
         ThresholdSettings? settings,
-        NotificationService? notifier)
+        INotificationService notifier)
     {
         _reader = reader;
-        _settings = settings;
+        _settings = settings!;
         _notifier = notifier;
 
-        if (_settings is not null)
-            _settings.LaptopSettingsChanged += OnSettingsChanged;
+        if (settings is not null)
+            settings.LaptopSettingsChanged += OnSettingsChanged;
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
@@ -73,7 +81,6 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private void OnSettingsChanged()
     {
         if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
-        // Reset alert state so threshold changes re-evaluate immediately on next poll
         _alertState = AlertState.Normal;
         _taskTracker.Start(ct => SafeRefreshAsync(ct), _shutdownCts.Token);
     }
@@ -124,7 +131,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
             _lastKnown = info;
             BatteryUpdated?.Invoke(info);
 
-            if (_settings is not null && _notifier is not null)
+            if (_settings is not null)
                 EvaluateThresholds(info);
         }
         finally
@@ -138,7 +145,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         if (!info.HasBattery || info.BatteryPercent < 0) return;
 
         int pct = info.BatteryPercent;
-        int low = _settings!.LaptopLow;
+        int low = _settings.LaptopLow;
         int high = _settings.LaptopHigh;
 
         AlertState previous = _alertState;
@@ -150,9 +157,9 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         if (previous != current)
         {
             if (current == AlertState.Low)
-                _notifier!.NotifyLaptopLow(pct);
+                _notifier.NotifyLaptopLow(pct);
             else if (current == AlertState.High)
-                _notifier!.NotifyLaptopHigh(pct);
+                _notifier.NotifyLaptopHigh(pct);
         }
 
         _alertState = current;
@@ -167,15 +174,12 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     private static AlertState ClassifyAlertState(
         int pct, int low, int high, AlertState previous, LaptopBatteryInfo info)
     {
-        // Low: only fire when not on AC power (plugging in silences the alert)
         if (!info.IsOnAcPower && pct <= low)
             return AlertState.Low;
 
-        // High: only fire when actively charging (prompt to unplug for battery health)
         if (info.IsCharging && pct >= high)
             return AlertState.High;
 
-        // Hysteresis — stay in current state near the boundary to prevent rapid toggling
         if (previous == AlertState.Low && !info.IsOnAcPower && pct <= low + PollingDefaults.Hysteresis)
             return AlertState.Low;
 

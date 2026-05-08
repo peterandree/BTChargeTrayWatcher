@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
@@ -31,6 +31,13 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
     public event Action? ScanStarted;
 
+    /// <summary>
+    /// Raised by the orchestrator after every poll with the authoritative combined
+    /// alert state (true = at least one non-ignored, hysteresis-consistent device is
+    /// outside its configured thresholds). Feeds <see cref="TrayApp._hasBluetoothAlert"/>.
+    /// </summary>
+    public event Action<bool>? AlertStateChanged;
+
     public bool IsScanning => _scanner.IsScanning;
 
     public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
@@ -61,7 +68,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             ReadDevices: ct => _scanner!.QuietReadAsync(ct),
             ShutdownToken: _shutdownCts.Token,
             OnBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list)));
+            OnScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list),
+            OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)));
 
         _scanner = new Scanner(new ScannerOptions(
             GattReader: gattReader,

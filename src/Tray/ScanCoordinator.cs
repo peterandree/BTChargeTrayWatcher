@@ -1,4 +1,4 @@
-﻿// src/Tray/ScanCoordinator.cs
+// src/Tray/ScanCoordinator.cs
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -22,7 +22,6 @@ internal sealed class ScanCoordinator : IDisposable
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ScanCompleted;
 
     // Raised on the thread-pool when a background scan task faults.
-    // operationName identifies which operation faulted; the exception is the unwrapped cause.
     public event Action<string, Exception>? ScanFaulted;
 
     public ScanCoordinator(
@@ -37,13 +36,15 @@ internal sealed class ScanCoordinator : IDisposable
         _monitor.ScanStarted += Monitor_ScanStarted;
         _monitor.ManualScanCompleted += Monitor_ManualScanCompleted;
         _monitor.BackgroundRefreshCompleted += Monitor_BackgroundRefreshCompleted;
+
+        // Alert state is now driven exclusively by the orchestrator's classified,
+        // hysteresis-consistent state (ADR-011, fixes #44).
+        _monitor.AlertStateChanged += Monitor_AlertStateChanged;
     }
 
     public void StartBackgroundScan() =>
         FireAndForget(RunStartupScanAsync(), "Startup scan");
 
-    // Posts a request to the UI thread to open the scan window and trigger a scan.
-    // Returns immediately; does not represent completion of either action.
     public void RequestOpenScanWindow() =>
         PostToUi(OpenScanWindowAndTriggerScan);
 
@@ -65,7 +66,6 @@ internal sealed class ScanCoordinator : IDisposable
     private async Task RunStartupScanAsync()
     {
         if (_disposed) return;
-
         Debug.WriteLine("[ScanCoordinator] Startup scan started.");
         await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
         Debug.WriteLine("[ScanCoordinator] Startup scan completed.");
@@ -82,31 +82,13 @@ internal sealed class ScanCoordinator : IDisposable
         PostToUi(() => ScanStarted?.Invoke());
 
     private void Monitor_ManualScanCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
-        PostToUi(() =>
-        {
-            ScanCompleted?.Invoke(results);
-            AlertStateChanged?.Invoke(EvaluateAlert(results));
-        });
+        PostToUi(() => ScanCompleted?.Invoke(results));
 
     private void Monitor_BackgroundRefreshCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
-        PostToUi(() => AlertStateChanged?.Invoke(EvaluateAlert(results)));
+        PostToUi(() => { /* results available for future extension */ });
 
-    private bool EvaluateAlert(IReadOnlyList<DeviceBatteryInfo> results)
-    {
-        foreach (var device in results)
-        {
-            if (_settings.IgnoredDevices.Contains(device.Name)) continue;
-            if (_settings.TrayIconOverlayExcludedDevices.Contains(device.Name)) continue;
-
-            if (device.Battery.HasValue &&
-                (device.Battery.Value <= _settings.GetLow(device.Name) ||
-                 device.Battery.Value >= _settings.GetHigh(device.Name)))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+    private void Monitor_AlertStateChanged(bool hasAlert) =>
+        PostToUi(() => AlertStateChanged?.Invoke(hasAlert));
 
     private void OpenScanWindowCore()
     {
@@ -181,8 +163,6 @@ internal sealed class ScanCoordinator : IDisposable
         }, null);
     }
 
-    // Instance method — needs access to ScanFaulted event.
-    // Expected cancellation and disposal are not faults; they are swallowed silently.
     private void FireAndForget(Task task, string operationName)
     {
         _ = task.ContinueWith(t =>
@@ -206,6 +186,7 @@ internal sealed class ScanCoordinator : IDisposable
         _monitor.ScanStarted -= Monitor_ScanStarted;
         _monitor.ManualScanCompleted -= Monitor_ManualScanCompleted;
         _monitor.BackgroundRefreshCompleted -= Monitor_BackgroundRefreshCompleted;
+        _monitor.AlertStateChanged -= Monitor_AlertStateChanged;
 
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
             _scanWindow.Dispose();
