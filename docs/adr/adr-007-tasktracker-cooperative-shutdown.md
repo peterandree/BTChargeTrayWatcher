@@ -42,6 +42,8 @@ Alternatively, use an `Interlocked` counter (increment on enter, decrement on ex
 - Shutdown latency is bounded by the longest individual task's cancellation response time. GATT per-device timeout is 4 s; Classic connection-check timeout is 3 s. Worst-case shutdown drain is therefore approximately 4 seconds if a scan is in progress at exit.
 - Any task that does not respect cancellation will block shutdown indefinitely. All async paths in the codebase must forward the `CancellationToken`.
 
-## Known violation requiring remediation
+## Resolution
 
-The current `TaskTracker.Start` implementation calls `Task.Run(...)` before adding the resulting `Task` to `_active`. If the task completes and its `ContinueWith` removal fires before `_active.Add` executes, the task leaks in the set for the remainder of the process lifetime. See issue **#[TBD]** — _TaskTracker.Start: fix add-before-schedule race condition_.
+The add-before-schedule race was fixed in `TaskTracker.Start` by registering a `TaskCompletionSource` placeholder in `_active` inside the lock **before** calling `Task.Run`. The running task mirrors its outcome into the TCS via `ContinueWith`, and the `finally` block removes `tcs.Task` from `_active` — so a task that completes before or concurrently with registration is always cleaned up correctly.
+
+Verified by the `Start_race_condition_no_task_leaks_in_active_set` stress test (500 near-instant tasks) in `TaskTrackerTests.cs`. See issue **#43** — _TaskTracker.Start: fix add-before-schedule race condition_.

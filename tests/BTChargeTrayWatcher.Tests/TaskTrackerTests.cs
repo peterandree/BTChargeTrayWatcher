@@ -145,4 +145,34 @@ public sealed class TaskTrackerTests
         await Task.Delay(100);
         Assert.Empty(tracker.Snapshot());
     }
+
+    // ── Race condition regression (ADR-007 / issue #43) ───────────────────────────────────
+
+    /// <summary>
+    /// Verifies the add-before-schedule ordering constraint from ADR-007.
+    /// Schedules a large number of near-instant tasks so that many complete
+    /// before or concurrently with the TCS registration path, then asserts
+    /// that _active is fully drained — no completed Task leaks in the set.
+    /// </summary>
+    [Fact]
+    public async Task Start_race_condition_no_task_leaks_in_active_set()
+    {
+        const int iterations = 500;
+
+        for (int i = 0; i < iterations; i++)
+        {
+            var tracker = new TaskTracker();
+
+            // work completes synchronously (returns Task.CompletedTask), maximising
+            // the chance that ContinueWith fires before _active.Add in a buggy impl.
+            tracker.Start(_ => Task.CompletedTask, CancellationToken.None);
+
+            // Allow all continuations to drain.
+            await Task.Yield();
+            await Task.Delay(10);
+
+            var leaked = tracker.Snapshot().Where(t => t.IsCompleted).ToArray();
+            Assert.Empty(leaked);
+        }
+    }
 }
