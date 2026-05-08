@@ -1,4 +1,4 @@
-﻿// src/Tray/TrayMenuBuilder.cs
+// src/Tray/TrayMenuBuilder.cs
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -42,12 +42,12 @@ internal sealed class TrayMenuBuilder
 
         var autostartItem = new ToolStripMenuItem("Run on startup")
         {
-            Checked = _settings.RunOnStartup
+            Checked = StartupRegistration.IsEnabled
         };
         autostartItem.Click += (_, _) =>
         {
-            _settings.RunOnStartup = !_settings.RunOnStartup;
-            autostartItem.Checked = _settings.RunOnStartup;
+            StartupRegistration.IsEnabled = !StartupRegistration.IsEnabled;
+            autostartItem.Checked = StartupRegistration.IsEnabled;
         };
         menu.Items.Add(autostartItem);
 
