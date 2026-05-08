@@ -35,33 +35,26 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     public bool IsInAlertState => _hasAlert;
     public LaptopBatteryInfo? LastKnownBattery => _lastKnown;
 
-    /// <summary>Production constructor — real reader, real settings, real notifications.</summary>
+    /// <summary>
+    /// Production constructor — uses the real Windows battery reader.
+    /// </summary>
     public LaptopBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(new WindowsLaptopBatteryReader(), settings, notifier) { }
 
-    /// <summary>Test constructor — injectable reader, no settings, no notifications.</summary>
-    public LaptopBatteryMonitor(ILaptopBatteryReader reader)
-        : this(reader, null!, NullNotificationService.Instance) { }
-
     /// <summary>
-    /// Canonical private constructor. All fields are non-nullable.
-    /// <paramref name="settings"/> may be null only from the test constructor, in which case
-    /// threshold evaluation is skipped entirely (checked via <c>settings is not null</c> in
-    /// <see cref="RefreshAsync"/>).
-    /// TODO(#41): once the test constructor is removed, <paramref name="settings"/> becomes
-    /// non-nullable here and the null-guard in RefreshAsync is deleted.
+    /// Full constructor — injectable reader for test and production use.
+    /// All three parameters are non-nullable; no null-guards required in the body.
     /// </summary>
-    private LaptopBatteryMonitor(
+    public LaptopBatteryMonitor(
         ILaptopBatteryReader reader,
-        ThresholdSettings? settings,
+        ThresholdSettings settings,
         INotificationService notifier)
     {
-        _reader = reader;
-        _settings = settings!;
+        _reader   = reader;
+        _settings = settings;
         _notifier = notifier;
 
-        if (settings is not null)
-            settings.LaptopSettingsChanged += OnSettingsChanged;
+        _settings.LaptopSettingsChanged += OnSettingsChanged;
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),
@@ -130,9 +123,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
             LaptopBatteryInfo info = await _reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             _lastKnown = info;
             BatteryUpdated?.Invoke(info);
-
-            if (_settings is not null)
-                EvaluateThresholds(info);
+            EvaluateThresholds(info);
         }
         finally
         {
@@ -200,9 +191,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
 
         _disposeStarted = true;
 
-        if (_settings is not null)
-            _settings.LaptopSettingsChanged -= OnSettingsChanged;
-
+        _settings.LaptopSettingsChanged -= OnSettingsChanged;
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);

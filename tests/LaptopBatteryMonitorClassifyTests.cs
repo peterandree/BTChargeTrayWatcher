@@ -7,7 +7,7 @@ namespace BTChargeTrayWatcher.Tests;
 
 /// <summary>
 /// Exercises LaptopBatteryMonitor.ClassifyAlertState (private static) via the public
-/// RefreshAsync entry point.  All hardware dependencies are replaced by StubLaptopBatteryReader.
+/// RefreshAsync entry point. All hardware dependencies are replaced by StubLaptopBatteryReader.
 /// </summary>
 public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
 {
@@ -36,40 +36,6 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
         public void NotifyStatusReport(string body)  { }
     }
 
-    private static (LaptopBatteryMonitor monitor, StubLaptopBatteryReader reader, NotificationSpy spy)
-        Build()
-    {
-        var reader = new StubLaptopBatteryReader();
-        var spy    = new NotificationSpy();
-        var settings = new ThresholdSettings();   // low=20, high=80
-        // Use the injectable-reader constructor (test path in LaptopBatteryMonitor).
-        // We need settings+notifier: use the internal three-arg route via the two-arg
-        // public constructor that accepts ILaptopBatteryReader + inject settings manually.
-        // Since the test constructor deliberately omits settings, we instead call the
-        // two-arg production constructor with a real ThresholdSettings and a real spy,
-        // but swap out the reader by routing through the three-arg private constructor
-        // via reflection — which is the right thing to do until #41 is resolved.
-        var monitor = CreateWithReader(reader, settings, spy);
-        return (monitor, reader, spy);
-    }
-
-    /// <summary>
-    /// Calls the private canonical constructor via reflection so tests can supply all
-    /// three dependencies without waiting for #41 to land.
-    /// </summary>
-    private static LaptopBatteryMonitor CreateWithReader(
-        ILaptopBatteryReader reader,
-        ThresholdSettings settings,
-        INotificationService notifier)
-    {
-        var ctor = typeof(LaptopBatteryMonitor).GetConstructor(
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
-            [typeof(ILaptopBatteryReader), typeof(ThresholdSettings), typeof(INotificationService)]);
-
-        Assert.NotNull(ctor);
-        return (LaptopBatteryMonitor)ctor!.Invoke([reader, settings, notifier]);
-    }
-
     private static LaptopBatteryInfo Bat(int pct, bool onAc, bool charging) =>
         new(HasBattery: true, BatteryPercent: pct, IsOnAcPower: onAc, IsCharging: charging);
 
@@ -79,9 +45,12 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
 
     private (LaptopBatteryMonitor m, StubLaptopBatteryReader r, NotificationSpy s) Create()
     {
-        var (m, r, s) = Build();
-        _created.Add((m, s));
-        return (m, r, s);
+        var reader   = new StubLaptopBatteryReader();
+        var spy      = new NotificationSpy();
+        var settings = new ThresholdSettings();   // low=20, high=80
+        var monitor  = new LaptopBatteryMonitor(reader, settings, spy);
+        _created.Add((monitor, spy));
+        return (monitor, reader, spy);
     }
 
     public async ValueTask DisposeAsync()
@@ -178,16 +147,13 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
     public async Task Hysteresis_Low_stays_low_within_band_while_discharging()
     {
         var (m, r, s) = Create();
-        // First poll: enter Low
         r.Next = Bat(18, onAc: false, charging: false);
         await m.RefreshAsync();
         Assert.Equal(1, s.LaptopLowCount);
 
-        // Second poll: still within hysteresis band (20 + 5 = 25)
-        r.Next = Bat(22, onAc: false, charging: false);
+        r.Next = Bat(22, onAc: false, charging: false);  // within hysteresis band (20+5=25)
         await m.RefreshAsync();
-        // Should NOT fire again — still Low, no state transition
-        Assert.Equal(1, s.LaptopLowCount);
+        Assert.Equal(1, s.LaptopLowCount);   // no new fire
         Assert.True(m.IsInAlertState);
     }
 
@@ -198,7 +164,7 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
         r.Next = Bat(18, onAc: false, charging: false);
         await m.RefreshAsync();
 
-        r.Next = Bat(30, onAc: false, charging: false);   // above 20+5
+        r.Next = Bat(30, onAc: false, charging: false);  // above 20+5
         await m.RefreshAsync();
         Assert.False(m.IsInAlertState);
     }
@@ -210,7 +176,6 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
         r.Next = Bat(18, onAc: false, charging: false);
         await m.RefreshAsync();
 
-        // Same pct, but now on AC
         r.Next = Bat(18, onAc: true, charging: false);
         await m.RefreshAsync();
         Assert.False(m.IsInAlertState);
@@ -224,10 +189,9 @@ public sealed class LaptopBatteryMonitorClassifyTests : IAsyncDisposable
         await m.RefreshAsync();
         Assert.Equal(1, s.LaptopHighCount);
 
-        // Within hysteresis band (80 - 5 = 75)
-        r.Next = Bat(78, onAc: true, charging: true);
+        r.Next = Bat(78, onAc: true, charging: true);  // within band (80-5=75)
         await m.RefreshAsync();
-        Assert.Equal(1, s.LaptopHighCount);   // no new fire
+        Assert.Equal(1, s.LaptopHighCount);  // no new fire
         Assert.True(m.IsInAlertState);
     }
 
