@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -28,6 +28,9 @@ internal static class Program
             Application.SetCompatibleTextRenderingDefault(false);
 
             var settings = new ThresholdSettings();
+            var persistence = new SettingsPersistence(settings);
+            persistence.Load();
+
             var notifier = new NotificationService();
             var monitor = new BluetoothBatteryMonitor(settings, notifier);
             var laptopMonitor = new LaptopBatteryMonitor(settings, notifier);
