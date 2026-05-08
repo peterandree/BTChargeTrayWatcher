@@ -30,6 +30,14 @@ A `System.Threading.Timer` fires every 60 seconds (`PollingDefaults.PollingInter
 
 ## Cache invalidation requirement
 
-Because the GATT connection cache (`GattConnectionCache`) retains `BluetoothLEDevice` instances across polls, the cache must be treated as **stale after a device reconnects**. When `GattBatteryProcessor` finds a cached device whose `ConnectionStatus` is `Disconnected`, it must evict that entry and attempt a fresh `BluetoothLEDevice.FromIdAsync` call in the same poll cycle before returning a null battery. The current implementation returns null immediately without re-creating the device object, causing the device to appear missing for an entire poll cycle after every sleep/wake reconnect.
+Because the GATT connection cache (`GattConnectionCache`) retains `BluetoothLEDevice` instances across polls, the cache must be treated as **stale after a device reconnects**. When `GattBatteryProcessor` finds a cached device whose `ConnectionStatus` is `Disconnected`, it must evict that entry and attempt a fresh `BluetoothLEDevice.FromIdAsync` call in the same poll cycle before returning a null battery.
 
-See issue **#[TBD]** — _GattBatteryProcessor: re-create stale BluetoothLEDevice on reconnect instead of returning null_.
+## Resolution
+
+`GattBatteryProcessor.ProcessDeviceAsync` implements the evict-and-retry pattern:
+
+1. If `device.ConnectionStatus != Connected`, call `_cache.RemoveDevice(deviceId)` — this evicts both the stale `BluetoothLEDevice` and any associated `CachedGattEndpoint`, and disposes the WinRT object.
+2. Call `GetOrCreateDeviceAsync` again, which issues a fresh `BluetoothLEDevice.FromIdAsync`.
+3. If the new instance is still null or still not connected, return a null battery result for this poll cycle — the device is genuinely unreachable.
+
+`GattConnectionCache.RemoveDevice` is a public method; `GattBatteryProcessor` does not access `_devices` directly. See issue **#42** — _GattBatteryProcessor: re-create stale BluetoothLEDevice on reconnect instead of returning null_.
