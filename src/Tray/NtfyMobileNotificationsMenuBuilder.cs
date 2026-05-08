@@ -12,15 +12,21 @@ namespace BTChargeTrayWatcher;
 /// </summary>
 internal sealed class NtfyMobileNotificationsMenuBuilder
 {
-    private readonly ThresholdSettings           _settings;
-    private readonly NtfyNotificationChannel     _ntfyChannel;
+    private readonly ThresholdSettings          _settings;
+    private readonly NtfyNotificationChannel    _ntfyChannel;
+    private readonly BluetoothBatteryMonitor    _btMonitor;
+    private readonly LaptopBatteryMonitor       _laptopMonitor;
 
     public NtfyMobileNotificationsMenuBuilder(
         ThresholdSettings       settings,
-        NtfyNotificationChannel ntfyChannel)
+        NtfyNotificationChannel ntfyChannel,
+        BluetoothBatteryMonitor btMonitor,
+        LaptopBatteryMonitor    laptopMonitor)
     {
-        _settings    = settings;
-        _ntfyChannel = ntfyChannel;
+        _settings      = settings;
+        _ntfyChannel   = ntfyChannel;
+        _btMonitor     = btMonitor;
+        _laptopMonitor = laptopMonitor;
     }
 
     public ToolStripMenuItem Build()
@@ -31,7 +37,7 @@ internal sealed class NtfyMobileNotificationsMenuBuilder
         return root;
     }
 
-    // ── Menu population ──────────────────────────────────────────────────────
+    // ── Menu population ────────────────────────────────────────────────────────────────────
 
     private void Rebuild(ToolStripMenuItem root)
     {
@@ -75,6 +81,15 @@ internal sealed class NtfyMobileNotificationsMenuBuilder
                 _settings.UpdateNtfySettings(s => s.IsEnabled = true));
         }
 
+        // Status report + test (only meaningful when enabled)
+        if (ntfy.IsEnabled)
+        {
+            AddItem(root, "Send current charge status", () =>
+            {
+                _ = SendStatusReportAsync();
+            });
+        }
+
         // Test notification
         AddItem(root, "Send test notification", () =>
         {
@@ -87,7 +102,7 @@ internal sealed class NtfyMobileNotificationsMenuBuilder
         AddGuides(root);
     }
 
-    // ── Actions ──────────────────────────────────────────────────────────────
+    // ── Actions ─────────────────────────────────────────────────────────────────────────
 
     private void AddGenerateTopic(ToolStripMenuItem root, string label = "Generate topic")
     {
@@ -107,6 +122,23 @@ internal sealed class NtfyMobileNotificationsMenuBuilder
         });
     }
 
+    private async Task SendStatusReportAsync()
+    {
+        var btDevices = _btMonitor.LastKnownDevices;
+        var laptop    = _laptopMonitor.LastKnownBattery;
+
+        bool ok = await _ntfyChannel
+            .SendStatusReportAsync(btDevices, laptop)
+            .ConfigureAwait(false);
+
+        string msg = ok
+            ? "Current charge status sent. Check your phone."
+            : "Failed to send status. Check your internet connection and verify the topic is correct.";
+        MessageBox.Show(msg, "Mobile notifications — charge status",
+            MessageBoxButtons.OK,
+            ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+    }
+
     private async Task SendTestAsync()
     {
         bool ok = await _ntfyChannel.SendTestNotificationAsync().ConfigureAwait(false);
@@ -120,12 +152,12 @@ internal sealed class NtfyMobileNotificationsMenuBuilder
 
     private static void AddGuides(ToolStripMenuItem root)
     {
-        AddItem(root, "Android setup guide",  () => OpenUrl("https://docs.ntfy.sh/subscribe/phone/"));
-        AddItem(root, "iPhone setup guide",   () => OpenUrl("https://docs.ntfy.sh/subscribe/phone/"));
+        AddItem(root, "Android setup guide",    () => OpenUrl("https://docs.ntfy.sh/subscribe/phone/"));
+        AddItem(root, "iPhone setup guide",     () => OpenUrl("https://docs.ntfy.sh/subscribe/phone/"));
         AddItem(root, "ntfy integration guide", () => OpenUrl("https://ntfy.sh"));
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers ────────────────────────────────────────────────────────────────────────
 
     private static void AddItem(ToolStripMenuItem parent, string text, Action onClick)
     {

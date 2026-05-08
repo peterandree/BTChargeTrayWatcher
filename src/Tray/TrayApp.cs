@@ -38,25 +38,26 @@ public sealed class TrayApp : IDisposable
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
 
-        _settings     = settings;
-        _monitor      = monitor;
+        _settings      = settings;
+        _monitor       = monitor;
         _laptopMonitor = laptopMonitor;
-        _notifier     = notifier;
-        _iconRenderer = new TrayIconRenderer();
-        _scanner      = new ScanCoordinator(monitor, settings, _uiContext);
+        _notifier      = notifier;
+        _iconRenderer  = new TrayIconRenderer();
+        _scanner       = new ScanCoordinator(monitor, settings, _uiContext);
 
         _trayIcon = new NotifyIcon { Visible = true };
 
         var menuBuilder = new TrayMenuBuilder(settings);
-        _lowMenu      = menuBuilder.BuildLowMenu();
-        _highMenu     = menuBuilder.BuildHighMenu();
+        _lowMenu        = menuBuilder.BuildLowMenu();
+        _highMenu       = menuBuilder.BuildHighMenu();
         _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
 
         _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
         var devicesMenu             = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
-        var mobileNotificationsMenu = new NtfyMobileNotificationsMenuBuilder(settings, ntfyChannel).Build();
+        var mobileNotificationsMenu = new NtfyMobileNotificationsMenuBuilder(
+            settings, ntfyChannel, monitor, laptopMonitor).Build();
 
         _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
             _laptopMenuItem,
@@ -70,10 +71,10 @@ public sealed class TrayApp : IDisposable
         _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        _scanner.ScanStarted        += OnScanStarted;
-        _scanner.ScanCompleted      += OnScanCompleted;
-        _scanner.AlertStateChanged  += OnBluetoothAlertStateChanged;
-        _scanner.ScanFaulted        += OnScanFaulted;
+        _scanner.ScanStarted       += OnScanStarted;
+        _scanner.ScanCompleted     += OnScanCompleted;
+        _scanner.AlertStateChanged += OnBluetoothAlertStateChanged;
+        _scanner.ScanFaulted       += OnScanFaulted;
 
         _monitor.BackgroundRefreshCompleted += OnDevicesRefreshed;
         _monitor.ManualScanCompleted        += OnDevicesRefreshed;

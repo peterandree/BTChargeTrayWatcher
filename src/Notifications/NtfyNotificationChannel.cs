@@ -48,7 +48,43 @@ public sealed class NtfyNotificationChannel : INotificationChannel
         ).ConfigureAwait(false);
     }
 
-    // ── Private ──────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Publishes the current charge status of all known devices as a single
+    /// notification. Each device appears on its own line.
+    /// Returns true on HTTP 2xx, false otherwise.
+    /// </summary>
+    public async Task<bool> SendStatusReportAsync(
+        System.Collections.Generic.IReadOnlyList<DeviceBatteryInfo> btDevices,
+        LaptopBatteryInfo? laptop)
+    {
+        if (!_ntfySettings.IsEnabled || string.IsNullOrWhiteSpace(_ntfySettings.Topic))
+            return false;
+
+        var sb = new StringBuilder();
+
+        foreach (var d in btDevices)
+        {
+            if (d.Battery is null) continue;
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(d.Name).Append(" ").Append(d.Battery.Value).Append('%');
+            if (d.IsCharging == true) sb.Append(" \u26a1");
+        }
+
+        if (laptop is { HasBattery: true })
+        {
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append("Laptop ").Append(laptop.BatteryPercent).Append('%');
+            if (laptop.IsCharging)   sb.Append(" (charging)");
+            else if (laptop.IsOnAcPower) sb.Append(" (plugged in)");
+        }
+
+        if (sb.Length == 0)
+            sb.Append("No devices currently known.");
+
+        return await PublishAsync(sb.ToString(), "default").ConfigureAwait(false);
+    }
+
+    // ── Private ─────────────────────────────────────────────────────────────────────────
 
     private void Fire(string body, string priority)
     {
