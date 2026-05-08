@@ -11,3 +11,8 @@ This directory captures significant design decisions made during the development
 | [ADR-005](adr-005-atomic-settings-persistence.md) | Atomic JSON settings persistence | Accepted |
 | [ADR-006](adr-006-winrt-toast-notifications.md) | WinRT Toast Notifications via AUMID registration | Accepted |
 | [ADR-007](adr-007-tasktracker-cooperative-shutdown.md) | TaskTracker for cooperative async shutdown | Accepted |
+| [ADR-008](adr-008-options-record-for-constructor-parameter-groups.md) | Options record for multi-parameter constructors | Accepted |
+| [ADR-009](adr-009-device-identity-vs-display-name.md) | Device identity by ID, configuration by Name | Accepted |
+| [ADR-010](adr-010-synchronizationcontext-over-control-invoke.md) | SynchronizationContext capture over Control.Invoke | Accepted |
+| [ADR-011](adr-011-two-source-alert-or-in-trayapp.md) | Two-source alert OR in TrayApp | Accepted |
+| [ADR-012](adr-012-two-distinct-settings-events.md) | Two distinct settings-changed events | Accepted |
