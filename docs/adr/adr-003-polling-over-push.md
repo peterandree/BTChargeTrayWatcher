@@ -1,6 +1,6 @@
 # ADR-003 — Polling-based monitoring over event-driven push
 
-**Status:** Accepted  
+**Status:** Accepted (amended 2026-05-08)  
 **Date:** 2026-05-08
 
 ## Context
@@ -27,3 +27,9 @@ A `System.Threading.Timer` fires every 60 seconds (`PollingDefaults.PollingInter
 - Maximum notification latency is 60 seconds after a battery crosses a threshold.
 - Battery reads impose a small periodic cost on the Bluetooth radio. At 60-second intervals this is negligible.
 - `PollingDefaults.PollingInterval` can be reduced if faster notifications are needed.
+
+## Cache invalidation requirement
+
+Because the GATT connection cache (`GattConnectionCache`) retains `BluetoothLEDevice` instances across polls, the cache must be treated as **stale after a device reconnects**. When `GattBatteryProcessor` finds a cached device whose `ConnectionStatus` is `Disconnected`, it must evict that entry and attempt a fresh `BluetoothLEDevice.FromIdAsync` call in the same poll cycle before returning a null battery. The current implementation returns null immediately without re-creating the device object, causing the device to appear missing for an entire poll cycle after every sleep/wake reconnect.
+
+See issue **#[TBD]** — _GattBatteryProcessor: re-create stale BluetoothLEDevice on reconnect instead of returning null_.
