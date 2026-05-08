@@ -108,10 +108,10 @@ internal sealed class PollingOrchestrator : IDisposable
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
                     ? es
-                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal);
+                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal, device.IsCharging);
 
                 BatteryAlertState currentState =
-                    ClassifyBatteryState(device.Name, device.Battery.Value, previousState);
+                    ClassifyBatteryState(device.Name, device.Battery.Value, previousState, device.IsCharging);
 
                 if (_settings.IgnoredDevices.Contains(device.Name))
                 {
@@ -152,8 +152,6 @@ internal sealed class PollingOrchestrator : IDisposable
 
             // Emit the authoritative combined alert state derived from classified states.
             // This is the single source of truth for the tray icon overlay (ADR-011).
-            // Using hysteresis-consistent classification means the tray icon and the
-            // notification pipeline can never disagree (fixes #44).
             bool hasAlert = false;
             foreach (var state in _alertStates.Values)
             {
@@ -171,11 +169,18 @@ internal sealed class PollingOrchestrator : IDisposable
     {
         BatteryAlertState existing = _alertStates.TryGetValue(deviceId, out var s)
             ? s : BatteryAlertState.Normal;
-        _alertStates[deviceId] = ClassifyBatteryState(name, battery, existing);
+        _alertStates[deviceId] = ClassifyBatteryState(name, battery, existing, isCharging: null);
     }
 
+    /// <summary>
+    /// Classifies the battery alert state with hysteresis.
+    /// When <paramref name="isCharging"/> is confirmed true, the High threshold
+    /// is suppressed — a device intentionally on charge must not fire a High alert.
+    /// Unknown (null) does not suppress: absence of data is not confirmation.
+    /// Low alerts are never suppressed (ADR-004 extension).
+    /// </summary>
     internal BatteryAlertState ClassifyBatteryState(
-        string name, int battery, BatteryAlertState previousState)
+        string name, int battery, BatteryAlertState previousState, bool? isCharging)
     {
         if (battery < 0 || _settings.IgnoredDevices.Contains(name))
             return BatteryAlertState.Normal;
@@ -185,11 +190,13 @@ internal sealed class PollingOrchestrator : IDisposable
         int hysteresis = PollingDefaults.Hysteresis;
 
         if (battery <= low) return BatteryAlertState.Low;
-        if (battery >= high) return BatteryAlertState.High;
+
+        // Suppress High alert when the device is confirmed charging (ADR-004 extension).
+        if (battery >= high && isCharging != true) return BatteryAlertState.High;
 
         if (previousState == BatteryAlertState.Low && battery <= low + hysteresis)
             return BatteryAlertState.Low;
-        if (previousState == BatteryAlertState.High && battery >= high - hysteresis)
+        if (previousState == BatteryAlertState.High && battery >= high - hysteresis && isCharging != true)
             return BatteryAlertState.High;
 
         return BatteryAlertState.Normal;
