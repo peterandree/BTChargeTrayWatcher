@@ -12,6 +12,7 @@ public sealed class ThresholdSettings
     private HashSet<string> _trayIconOverlayExcludedDevices = new(StringComparer.OrdinalIgnoreCase);
     private bool _excludeLaptopFromTrayIconOverlay;
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private NtfyIntegrationSettings _ntfy = new();
 
     public event Action? Changed;
     public event Action? LaptopSettingsChanged;
@@ -86,6 +87,20 @@ public sealed class ThresholdSettings
             Changed?.Invoke();
             LaptopSettingsChanged?.Invoke();
         }
+    }
+
+    // ── ntfy integration ─────────────────────────────────────────────────────
+
+    /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
+    public NtfyIntegrationSettings GetNtfySettings()
+    {
+        lock (_thresholdLock) return _ntfy.Clone();
+    }
+
+    public void UpdateNtfySettings(Action<NtfyIntegrationSettings> mutate)
+    {
+        lock (_thresholdLock) mutate(_ntfy);
+        Changed?.Invoke();
     }
 
     // ── Per-device overrides ─────────────────────────────────────────────────
@@ -235,7 +250,8 @@ public sealed class ThresholdSettings
                 new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase),
                 _excludeLaptopFromTrayIconOverlay,
-                new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase));
+                new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase),
+                _ntfy.Clone());
         }
     }
 
@@ -251,6 +267,7 @@ public sealed class ThresholdSettings
             _trayIconOverlayExcludedDevices = s.TrayIconOverlayExcludedDevices;
             _excludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay;
             _deviceOverrides = s.DeviceOverrides;
+            _ntfy = s.Ntfy;
         }
     }
 }
@@ -259,7 +276,7 @@ public sealed class ThresholdSettings
 
 public sealed record DeviceThresholds
 {
-    public int? Low { get; set; }
+    public int? Low  { get; set; }
     public int? High { get; set; }
 }
 
@@ -271,4 +288,5 @@ internal sealed record SettingsSnapshot(
     HashSet<string> IgnoredDevices,
     HashSet<string> TrayIconOverlayExcludedDevices,
     bool ExcludeLaptopFromTrayIconOverlay,
-    Dictionary<string, DeviceThresholds> DeviceOverrides);
+    Dictionary<string, DeviceThresholds> DeviceOverrides,
+    NtfyIntegrationSettings Ntfy);

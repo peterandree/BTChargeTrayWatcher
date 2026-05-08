@@ -36,7 +36,7 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
     public LaptopBatteryInfo? LastKnownBattery => _lastKnown;
 
     /// <summary>Production constructor — real reader, real settings, real notifications.</summary>
-    public LaptopBatteryMonitor(ThresholdSettings settings, NotificationService notifier)
+    public LaptopBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(new WindowsLaptopBatteryReader(), settings, notifier) { }
 
     /// <summary>Test constructor — injectable reader, no settings, no notifications.</summary>
