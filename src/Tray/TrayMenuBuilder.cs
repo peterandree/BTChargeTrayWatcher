@@ -10,11 +10,8 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
 {
     private readonly ThresholdSettings _settings = settings;
 
-    // Centralized policy: low thresholds (10–30)
-    private static readonly int[] LowThresholdCandidates = [10, 15, 20, 25, 30];
-
-    // Centralized policy: high thresholds (70–90)
-    private static readonly int[] HighThresholdCandidates = [ 70, 75, 80, 85, 90 ];
+    private static readonly int[] LowThresholdCandidates  = [10, 15, 20, 25, 30];
+    private static readonly int[] HighThresholdCandidates = [70, 75, 80, 85, 90];
 
     public static ContextMenuStrip Build(
         ToolStripMenuItem laptopMenuItem,
@@ -22,6 +19,7 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
         ToolStripMenuItem scanMenuItem,
         ToolStripMenuItem lowMenu,
         ToolStripMenuItem highMenu,
+        ToolStripMenuItem mobileNotificationsMenu,
         Action onExit)
     {
         var menu = new ContextMenuStrip();
@@ -33,6 +31,8 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(lowMenu);
         menu.Items.Add(highMenu);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(mobileNotificationsMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         var autostartItem = new ToolStripMenuItem("Run on startup")
@@ -52,12 +52,11 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
         return menu;
     }
 
-
     public ToolStripMenuItem BuildDevicesMenu(
         Func<IReadOnlyList<DeviceBatteryInfo>> getDevices)
     {
         var menu = new ToolStripMenuItem("Connected devices");
-        menu.DropDownItems.Add(new ToolStripMenuItem("⏳ Initializing…") { Enabled = false });
+        menu.DropDownItems.Add(new ToolStripMenuItem("\u23f3 Initializing\u2026") { Enabled = false });
         menu.DropDownOpening += (_, _) => PopulateDevicesMenu(menu, getDevices());
         return menu;
     }
@@ -78,7 +77,7 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
 
     public ToolStripMenuItem BuildLaptopMenuItem()
     {
-        var root = new ToolStripMenuItem("💻 Laptop: reading…");
+        var root = new ToolStripMenuItem("\U0001f4bb Laptop: reading\u2026");
 
         var lowMenu = BuildGlobalThresholdMenu(
             "Low threshold",
@@ -130,7 +129,7 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
 
         foreach (var device in results)
         {
-            bool isIgnored = _settings.IgnoredDevices.Contains(device.Name);
+            bool isIgnored         = _settings.IgnoredDevices.Contains(device.Name);
             bool isOverlayExcluded = _settings.TrayIconOverlayExcludedDevices.Contains(device.Name);
 
             string statusTag = isIgnored

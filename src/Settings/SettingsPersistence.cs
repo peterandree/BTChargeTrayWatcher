@@ -21,7 +21,6 @@ internal sealed class SettingsPersistence
         Directory.CreateDirectory(appDir);
         _settingsFilePath = Path.Combine(appDir, "settings.json");
 
-        // Auto-save on every domain mutation.
         _settings.Changed += OnChanged;
     }
 
@@ -29,7 +28,6 @@ internal sealed class SettingsPersistence
 
     // ── Public API ───────────────────────────────────────────────────────────
 
-    /// <summary>Populates <paramref name="settings"/> from disk. Safe to call once at startup before any consumers are wired.</summary>
     public void Load()
     {
         try
@@ -75,7 +73,12 @@ internal sealed class SettingsPersistence
                 }
             }
 
-            // Suppress auto-save during bulk load by unsubscribing temporarily.
+            var ntfy = new NtfyIntegrationSettings
+            {
+                IsEnabled = dto.NtfyEnabled,
+                Topic     = dto.NtfyTopic
+            };
+
             _settings.Changed -= OnChanged;
             try
             {
@@ -83,7 +86,8 @@ internal sealed class SettingsPersistence
                     low, high, laptopLow, laptopHigh,
                     ignored, excluded,
                     dto.ExcludeLaptopFromTrayIconOverlay,
-                    overrides));
+                    overrides,
+                    ntfy));
             }
             finally
             {
@@ -111,7 +115,9 @@ internal sealed class SettingsPersistence
             IgnoredDevices = [.. s.IgnoredDevices],
             TrayIconOverlayExcludedDevices = [.. s.TrayIconOverlayExcludedDevices],
             ExcludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay,
-            DeviceOverrides = new Dictionary<string, DeviceThresholds>(s.DeviceOverrides, StringComparer.OrdinalIgnoreCase)
+            DeviceOverrides = new Dictionary<string, DeviceThresholds>(s.DeviceOverrides, StringComparer.OrdinalIgnoreCase),
+            NtfyEnabled = s.Ntfy.IsEnabled,
+            NtfyTopic   = s.Ntfy.Topic
         };
 
         try
@@ -127,7 +133,7 @@ internal sealed class SettingsPersistence
         }
     }
 
-    // ── DTO (private; only SettingsPersistence ever touches it) ──────────────
+    // ── DTO ──────────────────────────────────────────────────────────────────
 
     private sealed record SettingsDto
     {
@@ -140,5 +146,7 @@ internal sealed class SettingsPersistence
         public List<string>? TrayIconOverlayExcludedDevices { get; set; }
         public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
         public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
+        public bool    NtfyEnabled { get; set; }
+        public string? NtfyTopic   { get; set; }
     }
 }

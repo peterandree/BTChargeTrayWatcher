@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -27,17 +28,27 @@ internal static class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            var settings = new ThresholdSettings();
+            var settings    = new ThresholdSettings();
             var persistence = new SettingsPersistence(settings);
             persistence.Load();
 
-            var notifier = new NotificationService();
-            var monitor = new BluetoothBatteryMonitor(settings, notifier);
-            var laptopMonitor = new LaptopBatteryMonitor(settings, notifier);
+            var toastService  = new NotificationService();
+            var ntfySettings  = settings.GetNtfySettings();  // live reference via ThresholdSettings
+            var ntfyChannel   = new NtfyNotificationChannel(settings.GetNtfySettings());
+
+            // Build dispatcher: toast always on, ntfy gated by its own IsEnabled check.
+            var dispatcher = new NotificationDispatcher(new List<INotificationChannel>
+            {
+                new WindowsToastNotificationChannel(toastService),
+                ntfyChannel
+            });
+
+            var monitor       = new BluetoothBatteryMonitor(settings, dispatcher);
+            var laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
             try
             {
-                using var app = new TrayApp(settings, monitor, notifier, laptopMonitor);
+                using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
 
                 app.StartBackgroundScan();
 

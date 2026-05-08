@@ -29,32 +29,34 @@ public sealed class TrayApp : IDisposable
     private bool _hasLaptopAlert;
 
     public TrayApp(
-        ThresholdSettings settings,
-        BluetoothBatteryMonitor monitor,
-        NotificationService notifier,
-        LaptopBatteryMonitor laptopMonitor)
+        ThresholdSettings        settings,
+        BluetoothBatteryMonitor  monitor,
+        NotificationService      notifier,
+        LaptopBatteryMonitor     laptopMonitor,
+        NtfyNotificationChannel  ntfyChannel)
     {
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
 
-        _settings = settings;
-        _monitor = monitor;
+        _settings     = settings;
+        _monitor      = monitor;
         _laptopMonitor = laptopMonitor;
-        _notifier = notifier;
+        _notifier     = notifier;
         _iconRenderer = new TrayIconRenderer();
-        _scanner = new ScanCoordinator(monitor, settings, _uiContext);
+        _scanner      = new ScanCoordinator(monitor, settings, _uiContext);
 
         _trayIcon = new NotifyIcon { Visible = true };
 
         var menuBuilder = new TrayMenuBuilder(settings);
-        _lowMenu = menuBuilder.BuildLowMenu();
-        _highMenu = menuBuilder.BuildHighMenu();
+        _lowMenu      = menuBuilder.BuildLowMenu();
+        _highMenu     = menuBuilder.BuildHighMenu();
         _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
 
         _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        var devicesMenu = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
+        var devicesMenu             = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
+        var mobileNotificationsMenu = new NtfyMobileNotificationsMenuBuilder(settings, ntfyChannel).Build();
 
         _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
             _laptopMenuItem,
@@ -62,18 +64,19 @@ public sealed class TrayApp : IDisposable
             _scanMenuItem,
             _lowMenu,
             _highMenu,
+            mobileNotificationsMenu,
             onExit: () => _ = ExitAsync());
 
-        _trayIcon.MouseClick += OnTrayMouseClick;
+        _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        _scanner.ScanStarted += OnScanStarted;
-        _scanner.ScanCompleted += OnScanCompleted;
-        _scanner.AlertStateChanged += OnBluetoothAlertStateChanged;
-        _scanner.ScanFaulted += OnScanFaulted;
+        _scanner.ScanStarted        += OnScanStarted;
+        _scanner.ScanCompleted      += OnScanCompleted;
+        _scanner.AlertStateChanged  += OnBluetoothAlertStateChanged;
+        _scanner.ScanFaulted        += OnScanFaulted;
 
         _monitor.BackgroundRefreshCompleted += OnDevicesRefreshed;
-        _monitor.ManualScanCompleted += OnDevicesRefreshed;
+        _monitor.ManualScanCompleted        += OnDevicesRefreshed;
 
         _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
 
@@ -158,7 +161,6 @@ public sealed class TrayApp : IDisposable
                       || d.Battery.Value >= _settings.GetHigh(d.Name);
             if (alert) sb.Append("! ");
             sb.Append(d.Name).Append(' ').Append(d.Battery.Value).Append('%');
-            // Append charging indicator only when confirmed — null means unknown, not not-charging.
             if (d.IsCharging == true) sb.Append(" \u26a1");
         }
 
@@ -176,7 +178,6 @@ public sealed class TrayApp : IDisposable
             sb.Append($"BT Battery Alert \u25bc{_settings.Low}% \u25b2{_settings.High}%");
 
         string text = sb.ToString();
-        // NotifyIcon.Text is capped at 127 chars by Win32
         _trayIcon.Text = text.Length > 127 ? text[..127] : text;
     }
 
@@ -215,13 +216,13 @@ public sealed class TrayApp : IDisposable
 
     private void OnScanStarted()
     {
-        _scanMenuItem.Text = "\u23f3 Scanning\u2026";
+        _scanMenuItem.Text    = "\u23f3 Scanning\u2026";
         _scanMenuItem.Enabled = false;
     }
 
     private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> devices)
     {
-        _scanMenuItem.Text = "Scan devices\u2026";
+        _scanMenuItem.Text    = "Scan devices\u2026";
         _scanMenuItem.Enabled = true;
         UpdateTooltip();
     }
@@ -234,8 +235,8 @@ public sealed class TrayApp : IDisposable
     private async Task ExitAsync()
     {
         _scanMenuItem.Enabled = false;
-        _lowMenu.Enabled = false;
-        _highMenu.Enabled = false;
+        _lowMenu.Enabled      = false;
+        _highMenu.Enabled     = false;
 
         try
         {
@@ -263,14 +264,14 @@ public sealed class TrayApp : IDisposable
 
         Debug.WriteLine("[TrayApp] Disposing.");
 
-        _scanner.ScanStarted -= OnScanStarted;
-        _scanner.ScanCompleted -= OnScanCompleted;
+        _scanner.ScanStarted       -= OnScanStarted;
+        _scanner.ScanCompleted     -= OnScanCompleted;
         _scanner.AlertStateChanged -= OnBluetoothAlertStateChanged;
-        _scanner.ScanFaulted -= OnScanFaulted;
+        _scanner.ScanFaulted       -= OnScanFaulted;
         _monitor.BackgroundRefreshCompleted -= OnDevicesRefreshed;
-        _monitor.ManualScanCompleted -= OnDevicesRefreshed;
+        _monitor.ManualScanCompleted        -= OnDevicesRefreshed;
         _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
-        _settings.Changed -= OnSettingsChanged;
+        _settings.Changed             -= OnSettingsChanged;
         _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
 
         _scanner.Dispose();
