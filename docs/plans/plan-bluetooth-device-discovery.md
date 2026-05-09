@@ -49,6 +49,7 @@ The existing architecture isolates **GATT** and **Classic Bluetooth** readers as
 - An extension to an existing reader (e.g., adding BLE advertisement scanning to `GattBatteryReader`), **but only if the extension is logically aligned with the existing reader's responsibilities**.
 
 ---
+
 ### ADR-003 — Polling Over Push
 The project uses a **polling-based approach** (60-second interval) for battery monitoring, as documented in [ADR-003](docs/adr/adr-003-polling-over-push.md). This decision must be respected:
 - **No event-driven subscriptions** (e.g., GATT notifications) are introduced for battery monitoring.
@@ -86,6 +87,17 @@ Settings changes (e.g., thresholds, ignored devices) are propagated via the exis
 **Rule:** If new settings are required (e.g., to enable/disable a specific monitoring method), they must be added to `ThresholdSettings` and use the existing event mechanism.
 
 ---
+### ADR-013 — Phased Scanning for Responsiveness
+To maintain a **responsive UI** while adding multiple new protocols, scanning must be **phased** to prioritize fast, high-success methods first, while slower methods run in the background. This ensures users see **immediate results** without blocking the UI.
+
+**Rule:** All new battery monitoring methods must be integrated into a **phased scanning system** that:
+1. Prioritizes fast/high-success protocols (e.g., GATT, Classic, HID) in **Phase 1** (instant results).
+2. Runs slower/low-success protocols (e.g., AVRCP, HFP, BLE Ads) in **Phase 2+** (background).
+3. Merges results incrementally to update the UI as data becomes available.
+4. Respects user-triggered deep scans for thorough but slower discovery.
+5. Limits concurrent Bluetooth operations to avoid radio contention.
+
+---
 
 ## Technical Specification: Phased Scanning for Bluetooth Battery Monitoring
 
@@ -94,403 +106,440 @@ Ensure that adding multiple new Bluetooth battery monitoring protocols **does no
 
 ---
 
-### Background
+### Background and UX Requirements
 Before optimizations, discovery took **3–5 seconds**, which was unacceptable for users. After optimizations, discovery is **fast and responsive**. Adding 6+ new protocols risks **reintroducing latency** if not implemented carefully.
 
-**Key Insight:**
+**Key Insights:**
 - **~80% of devices** are covered by **GATT, Classic, and HID** (fast protocols).
 - **~20% of devices** require **AVRCP, HFP, or BLE Ads** (slower protocols).
 - **Users expect immediate feedback** when opening the scan window.
 
----
-
-### Requirements
-1. **Fast Initial Results:**
-   - Users must see **some battery data within 200–500ms** of opening the scan window.
-2. **Non-Blocking UI:**
-   - The UI must **never freeze** during a scan.
-3. **No Bluetooth Radio Contention:**
-   - Scans must not **interfere with active Bluetooth connections** (e.g., audio streaming, file transfers).
-4. **Graceful Degradation:**
-   - If a protocol fails or is slow, the scan must **continue without it**.
-5. **Configurable Behavior:**
-   - Users must be able to **disable slow protocols** if they experience issues.
+**UX Requirements:**
+1. **Fast Initial Results:** Users must see **some battery data within 200–500ms** of opening the scan window.
+2. **Non-Blocking UI:** The UI must **never freeze** during a scan.
+3. **No Bluetooth Radio Contention:** Scans must not **interfere with active Bluetooth connections** (e.g., audio streaming, file transfers).
+4. **Graceful Degradation:** If a protocol fails or is slow, the scan must **continue without it**.
+5. **Configurable Behavior:** Users must be able to **disable slow protocols** if they experience issues.
 
 ---
 
-### Design
-
-#### 1. Phased Scanning Model
-Scanning is divided into **4 phases**, each with a **time budget** and **priority level**:
+### Architecture: Phased Scanning Model
+Scanning is divided into **4 phases**, each with a **time budget**, **priority level**, and **user visibility**:
 
 | Phase | Protocols | Time Budget | Priority | User Visibility | Notes |
 |-------|-----------|-------------|----------|-----------------|-------|
-| 1 | PnP Watcher, Cached Data | ~50ms | Highest | Instant | Background-triggered or cached. |
-| 2 | GATT (known devices), Classic, HID | ~200–500ms | High | Immediate | Fast, high-success protocols. |
-| 3 | AVRCP, HFP | ~500ms–2s | Medium | Delayed | Slower, lower-success protocols. |
-| 4 | BLE Ads, Vendor-Specific | ~1–3s | Low | Background | Optional, user-triggered. |
+| **1** | PnP Watcher, Cached Data | ~50ms | Highest | Instant | Background-triggered or cached. |
+| **2** | GATT (known devices), Classic, HID | ~200–500ms | High | Immediate | Fast, high-success protocols. |
+| **3** | AVRCP, HFP | ~500ms–2s | Medium | Delayed | Slower, lower-success protocols. |
+| **4** | BLE Ads, Vendor-Specific | ~1–3s | Low | Background | Optional, user-triggered. |
 
 **Workflow:**
-```mermaid
-sequenceDiagram
-    participant User
-    participant UI
-    participant ScanCoordinator
-    participant Phase1
-    participant Phase2
-    participant Phase3
-    participant Phase4
-
-    User->>UI: Open Scan Window
-    UI->>ScanCoordinator: StartScan()
-    ScanCoordinator->>Phase1: Run (PnP + Cache)
-    Phase1-->>ScanCoordinator: Results (Instant)
-    ScanCoordinator->>UI: Show Initial Results
-    ScanCoordinator->>Phase2: Run (GATT + Classic + HID)
-    Phase2-->>ScanCoordinator: Results (~500ms)
-    ScanCoordinator->>UI: Update Results
-    ScanCoordinator->>Phase3: Run Background (AVRCP + HFP)
-    Phase3-->>ScanCoordinator: Results (~2s)
-    ScanCoordinator->>UI: Update Results
-    ScanCoordinator->>Phase4: Run Background (BLE Ads + Vendor)
-    Phase4-->>ScanCoordinator: Results (~3s)
-    ScanCoordinator->>UI: Final Update
+```
+User Opens Scan Window
+       ↓
+Phase 1: Show Cached + PnP Results (Instant)
+       ↓
+Phase 2: Scan GATT/Classic/HID (Fast, ~500ms)
+       ↓
+Phase 3: Scan AVRCP/HFP (Background, ~2s)
+       ↓
+Phase 4: Scan BLE Ads/Vendor (Optional, User-Triggered)
 ```
 
 ---
 
-#### 2. Protocol Prioritization
+### Protocol Prioritization
 Protocols are **prioritized by speed and success rate**:
 
-| Protocol | Speed | Success Rate | Priority | Phase |
-|----------|-------|--------------|----------|-------|
-| PnP Watcher | ⚡ Instant | 90%+ | 1 | 1 |
-| Cached Data | ⚡ Instant | 100% | 1 | 1 |
-| GATT (Known Devices) | ⚡ Fast | 80% | 2 | 2 |
-| Classic Bluetooth | ⚡ Fast | 70% | 2 | 2 |
-| HID | ⚡ Fast | 60% | 2 | 2 |
-| AVRCP | 🐢 Medium | 40% | 3 | 3 |
-| HFP | 🐢 Slow | 20% | 3 | 3 |
-| BLE Ads | ⚡ Fast* | 30% | 4 | 4 |
-| Vendor-Specific | 🐢 Slow | 10% | 4 | 4 |
+| Protocol | Speed | Success Rate | Priority | Phase | Notes |
+|----------|-------|--------------|----------|-------|-------|
+| PnP Watcher | ⚡ Instant | 90%+ | 1 | 1 | Event-driven |
+| Cached Data | ⚡ Instant | 100% | 1 | 1 | TTL: 5–10 min |
+| GATT (Known Devices) | ⚡ Fast | 80% | 2 | 2 | Limited to known devices |
+| Classic Bluetooth | ⚡ Fast | 70% | 2 | 2 | Paired devices only |
+| HID | ⚡ Fast | 60% | 2 | 2 | Keyboards/mice |
+| AVRCP | 🐢 Medium | 40% | 3 | 3 | Audio devices |
+| HFP | 🐢 Slow | 20% | 3 | 3 | Legacy headsets |
+| BLE Ads | ⚡ Fast* | 30% | 4 | 4 | Passive, high radio load |
+| Vendor-Specific | 🐢 Slow | 10% | 4 | 4 | Optional |
 
 **"*BLE Ads is fast per-scan but requires frequent scans (high radio load).**
 
 ---
 
-#### 3. Implementation Details
+### Implementation
 
-##### 3.1 Phase 1: Instant Results
-**Goal:** Show **cached or PnP-triggered results immediately**.
+#### 1. Core Components
 
-**Components:**
-- **`BatteryCache`:** Stores last-known battery levels for devices (TTL: 5–10 minutes).
-- **`DeviceWatcherService`:** Triggers scans when devices are connected/disconnected.
+##### A. `PhasedScanOrchestrator`
+**Purpose:** Coordinates the phased scanning process and merges results incrementally.
 
-**Code:**
+**Responsibilities:**
+- Trigger phased scans (Phase 1 → Phase 2 → Phase 3+).
+- Merge results from all phases, deduplicating by `DeviceId`.
+- Prioritize data sources (GATT/Classic > HID > AVRCP/HFP > BLE Ads > Vendor).
+- Limit concurrent Bluetooth operations to avoid radio contention.
+
+**Key Methods:**
 ```csharp
-// In ScanCoordinator
-public async Task StartScanAsync(bool isUserTriggered = false)
+public class PhasedScanOrchestrator : IAsyncDisposable
 {
-    // Phase 1: Instant results
-    ShowCachedResults();
-    await _deviceWatcherService.TriggerScanIfNewDeviceAsync();
+    private readonly IBatteryReader[] _phase2Readers; // GATT, Classic, HID
+    private readonly IBatteryReader[] _phase3Readers; // AVRCP, HFP
+    private readonly IBatteryReader[] _phase4Readers; // BLE Ads, Vendor
+    private readonly BatteryCache _batteryCache;
+    private readonly SemaphoreSlim _bluetoothSemaphore = new(2); // Max 2 concurrent BT ops
+    private readonly CancellationTokenSource _cts = new();
 
-    // Phase 2: Fast protocols
-    await RunPhase2Async();
-
-    // Phase 3: Medium protocols (background)
-    _ = RunPhase3Async();
-
-    // Phase 4: Slow protocols (background, only if user-triggered)
-    if (isUserTriggered)
+    public async Task StartPhasedScanAsync(
+        Action<IReadOnlyList<DeviceBatteryInfo>> onPhase1Complete,
+        Action<IReadOnlyList<DeviceBatteryInfo>> onPhase2Complete,
+        Action<IReadOnlyList<DeviceBatteryInfo>> onPhase3Complete)
     {
-        _ = RunPhase4Async();
-    }
-}
-```
+        // Phase 1: Instant (cached + PnP)
+        var phase1Results = _batteryCache.GetAllCachedDevices();
+        onPhase1Complete?.Invoke(phase1Results);
 
-**Files Modified:**
-- `src/Tray/ScanCoordinator.cs` (Add phased scanning logic).
-- `src/Monitoring/BatteryCache.cs` (New file: Caching layer).
+        // Phase 2: Fast protocols (synchronous)
+        var phase2Results = await RunPhaseAsync(_phase2Readers, _cts.Token);
+        onPhase2Complete?.Invoke(phase2Results);
 
----
-
-##### 3.2 Phase 2: Fast Protocols
-**Goal:** Scan **GATT (known devices), Classic, and HID** in parallel.
-
-**Components:**
-- **`GattBatteryReader`:** Only scan devices that **previously reported battery via GATT** (cached list).
-- **`ClassicBatteryReader`:** Scan all paired Classic Bluetooth devices.
-- **`HidBatteryReader`:** Scan all HID devices.
-
-**Code:**
-```csharp
-private async Task RunPhase2Async()
-{
-    var gattTask = _gattBatteryReader.ScanKnownDevicesAsync();
-    var classicTask = _classicBatteryReader.ScanAsync();
-    var hidTask = _hidBatteryReader.ScanAsync();
-
-    var results = await Task.WhenAll(gattTask, classicTask, hidTask);
-    UpdateUI(results.Flatten());
-}
-```
-
-**Optimizations:**
-- **Limit GATT to known devices** (avoid full discovery every time).
-- **Use `Task.WhenAll`** for parallel execution.
-
-**Files Modified:**
-- `src/Monitoring/GattBatteryReader.cs` (Add `ScanKnownDevicesAsync`).
-
----
-
-##### 3.3 Phase 3: Medium Protocols (Background)
-**Goal:** Scan **AVRCP and HFP** in the background without blocking the UI.
-
-**Components:**
-- **`AvrcpBatteryReader`:** Scan all paired audio devices.
-- **`HfpBatteryReader`:** Scan all paired HFP devices.
-
-**Code:**
-```csharp
-private async Task RunPhase3Async()
-{
-    try
-    {
-        var avrcpTask = _avrcpBatteryReader.ScanAsync();
-        var hfpTask = _hfpBatteryReader.ScanAsync();
-        var results = await Task.WhenAll(avrcpTask, hfpTask);
-        UpdateUI(results.Flatten());
-    }
-    catch (Exception ex)
-    {
-        Log.Warning(ex, "Phase 3 scan failed");
-    }
-}
-```
-
-**Optimizations:**
-- **Run on a background thread** (via `Task.Run` if needed).
-- **Timeout after 2 seconds** per protocol.
-
-**Files Modified:**
-- `src/Tray/ScanCoordinator.cs` (Add background task handling).
-
----
-
-##### 3.4 Phase 4: Slow Protocols (Optional)
-**Goal:** Scan **BLE Ads and Vendor-Specific APIs** only if explicitly requested.
-
-**Components:**
-- **`BleAdvertisementBatteryReader`:** Scan for BLE advertisements (throttled).
-- **`VendorBatteryReader`:** Scan for vendor-specific devices (if enabled).
-
-**Code:**
-```csharp
-private async Task RunPhase4Async()
-{
-    if (!_settings.EnableBleAdvertisementMonitoring && !_settings.EnableVendorBatteryMonitoring)
-    {
-        return;
-    }
-
-    var tasks = new List<Task<IReadOnlyList<DeviceBatteryInfo>>>();
-    if (_settings.EnableBleAdvertisementMonitoring)
-    {
-        tasks.Add(_bleAdvertisementBatteryReader.ScanAsync());
-    }
-    if (_settings.EnableVendorBatteryMonitoring)
-    {
-        tasks.Add(_vendorBatteryReader.ScanAsync());
-    }
-
-    var results = await Task.WhenAll(tasks);
-    UpdateUI(results.Flatten());
-}
-```
-
-**Optimizations:**
-- **Disabled by default** (user must opt-in).
-- **Throttle BLE Ads** (e.g., every 30 seconds).
-
-**Files Modified:**
-- `src/Settings/ThresholdSettings.cs` (Add `EnableBleAdvertisementMonitoring` and `EnableVendorBatteryMonitoring`).
-
----
-
-#### 4. Bluetooth Radio Throttling
-**Goal:** Prevent **radio contention** by limiting concurrent Bluetooth operations.
-
-**Implementation:**
-- Use a **`SemaphoreSlim`** to limit concurrent Bluetooth operations (e.g., max 2–3 at once).
-
-**Code:**
-```csharp
-// In BluetoothBatteryMonitor or ScanCoordinator
-private static readonly SemaphoreSlim _bluetoothSemaphore = new(2); // Max 2 concurrent BT operations
-
-public async Task<int?> ReadBatteryAsync(Device device)
-{
-    await _bluetoothSemaphore.WaitAsync();
-    try
-    {
-        return await device.ReadBatteryAsync();
-    }
-    finally
-    {
-        _bluetoothSemaphore.Release();
-    }
-}
-```
-
-**Files Modified:**
-- `src/Monitoring/BluetoothBatteryMonitor.cs` (Add semaphore).
-
----
-
-#### 5. Deduplication
-**Goal:** Avoid showing the **same device multiple times** in the UI.
-
-**Implementation:**
-- **Use `DeviceId` as the primary key** (fall back to MAC address for BLE Ads).
-- **Prioritize data sources** (GATT/Classic > HID > AVRCP/HFP > BLE Ads).
-
-**Code:**
-```csharp
-// In DeviceAggregationPipeline
-public IReadOnlyList<DeviceBatteryInfo> MergeAndDeduplicate(IEnumerable<DeviceBatteryInfo> allResults)
-{
-    var merged = new Dictionary<string, DeviceBatteryInfo>();
-    var sourcePriority = new Dictionary<BatterySource, int>
-    {
-        { BatterySource.Gatt, 0 },
-        { BatterySource.Classic, 0 },
-        { BatterySource.Hid, 1 },
-        { BatterySource.Avrcp, 2 },
-        { BatterySource.Hfp, 2 },
-        { BatterySource.BleAdvertisement, 3 },
-        { BatterySource.VendorSpecific, 3 },
-        { BatterySource.Unknown, 4 }
-    };
-
-    foreach (var result in allResults)
-    {
-        if (!merged.TryGetValue(result.DeviceId, out var existing) ||
-            sourcePriority[result.Source] < sourcePriority[existing.Source])
+        // Phase 3: Medium protocols (background)
+        _ = Task.Run(async () =>
         {
-            merged[result.DeviceId] = result;
+            var phase3Results = await RunPhaseAsync(_phase3Readers, _cts.Token);
+            onPhase3Complete?.Invoke(phase3Results);
+        });
+    }
+
+    public async Task StartDeepScanAsync(Action<IReadOnlyList<DeviceBatteryInfo>> onComplete)
+    {
+        var phase4Results = await RunPhaseAsync(_phase4Readers, _cts.Token);
+        onComplete?.Invoke(phase4Results);
+    }
+
+    private async Task<IReadOnlyList<DeviceBatteryInfo>> RunPhaseAsync(
+        IBatteryReader[] readers, CancellationToken ct)
+    {
+        var tasks = readers.Select(reader => RunReaderAsync(reader, ct)).ToArray();
+        await Task.WhenAll(tasks);
+        return MergeAndDeduplicateResults(tasks.Select(t => t.Result).ToList());
+    }
+
+    private async Task<IReadOnlyList<DeviceBatteryInfo>> RunReaderAsync(
+        IBatteryReader reader, CancellationToken ct)
+    {
+        await _bluetoothSemaphore.WaitAsync(ct);
+        try
+        {
+            return await reader.ReadAllAsync(ct);
+        }
+        finally
+        {
+            _bluetoothSemaphore.Release();
         }
     }
-    return merged.Values.ToList();
+
+    private IReadOnlyList<DeviceBatteryInfo> MergeAndDeduplicateResults(
+        IReadOnlyList<IReadOnlyList<DeviceBatteryInfo>> results)
+    {
+        var merged = new Dictionary<string, DeviceBatteryInfo>();
+        var sourcePriority = new Dictionary<BatterySource, int>
+        {
+            { BatterySource.Gatt, 0 }, { BatterySource.Classic, 0 }, { BatterySource.Hid, 1 },
+            { BatterySource.Avrcp, 2 }, { BatterySource.Hfp, 2 },
+            { BatterySource.BleAdvertisement, 3 }, { BatterySource.VendorSpecific, 3 },
+            { BatterySource.Unknown, 4 }
+        };
+
+        foreach (var resultList in results)
+        foreach (var deviceInfo in resultList)
+        {
+            if (!merged.TryGetValue(deviceInfo.DeviceId, out var existing) ||
+                sourcePriority[deviceInfo.Source] < sourcePriority[existing.Source])
+            {
+                merged[deviceInfo.DeviceId] = deviceInfo;
+            }
+        }
+        return merged.Values.ToList();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _bluetoothSemaphore.Dispose();
+    }
 }
 ```
 
-**Files Modified:**
-- `src/Monitoring/DeviceAggregationPipeline.cs` (Add deduplication logic).
+**Files:**
+- `src/Monitoring/PhasedScanOrchestrator.cs` (New)
 
 ---
 
-#### 6. Caching
-**Goal:** Avoid **re-scanning devices that haven’t changed**.
+##### B. `BatteryCache`
+**Purpose:** Caches battery levels and timestamps to avoid redundant scans and provide instant results in Phase 1.
 
-**Implementation:**
-- **Cache battery levels** for **5–10 minutes** (battery doesn’t change quickly).
-- **Invalidate cache** if:
-  - Device **disconnects/reconnects** (via PnP Watcher).
-  - User **manually triggers a scan**.
-  - Battery **drops below a threshold** (e.g., <20%).
-
-**Code:**
+**Key Methods:**
 ```csharp
-// In BatteryCache.cs
 public class BatteryCache
 {
-    private readonly Dictionary<string, (int? Battery, DateTimeOffset Timestamp)> _cache = new();
+    private readonly ConcurrentDictionary<string, (DeviceBatteryInfo Info, DateTimeOffset Timestamp)> _cache = new();
     private readonly TimeSpan _cacheTTL = TimeSpan.FromMinutes(5);
 
-    public bool TryGetCachedBattery(string deviceId, out int? battery)
+    public bool TryGetCachedBattery(string deviceId, out DeviceBatteryInfo info)
     {
         if (_cache.TryGetValue(deviceId, out var entry) &&
             DateTimeOffset.UtcNow - entry.Timestamp < _cacheTTL)
         {
-            battery = entry.Battery;
+            info = entry.Info;
             return true;
         }
-        battery = null;
+        info = null!;
         return false;
     }
 
-    public void UpdateCache(string deviceId, int? battery)
+    public void UpdateCache(string deviceId, DeviceBatteryInfo info)
     {
-        _cache[deviceId] = (battery, DateTimeOffset.UtcNow);
+        _cache[deviceId] = (info, DateTimeOffset.UtcNow);
     }
 
     public void InvalidateCache(string deviceId)
     {
-        _cache.Remove(deviceId);
+        _cache.TryRemove(deviceId, out _);
+    }
+
+    public IReadOnlyList<DeviceBatteryInfo> GetAllCachedDevices()
+    {
+        return _cache.Values
+            .Where(entry => DateTimeOffset.UtcNow - entry.Timestamp < _cacheTTL)
+            .Select(entry => entry.Info)
+            .ToList();
     }
 }
 ```
 
-**Files Modified:**
-- `src/Monitoring/BatteryCache.cs` (New file).
-- `src/Monitoring/DeviceAggregationPipeline.cs` (Integrate cache).
+**Files:**
+- `src/Monitoring/BatteryCache.cs` (New)
 
 ---
 
-#### 7. Timeout and Graceful Degradation
-**Goal:** Ensure **no protocol hangs the UI**.
+##### C. `ScanPhase` Enum
+**Purpose:** Defines the scan phases for clarity.
 
-**Implementation:**
-- **Timeout after 2 seconds** per protocol.
-- **Fallback to cached data** if a protocol fails.
-
-**Code:**
 ```csharp
-// In ScanCoordinator
-private async Task<IReadOnlyList<DeviceBatteryInfo>> RunWithTimeoutAsync(
-    Func<CancellationToken, Task<IReadOnlyList<DeviceBatteryInfo>>> scanFunc,
-    string protocolName)
+public enum ScanPhase
 {
-    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-    try
+    Phase1, // Instant (cached + PnP)
+    Phase2, // Fast (GATT/Classic/HID)
+    Phase3, // Medium (AVRCP/HFP)
+    Phase4  // Slow (BLE Ads/Vendor)
+}
+```
+
+**Files:**
+- `src/Monitoring/ScanPhase.cs` (New)
+
+---
+
+#### 2. Integration Points
+
+##### A. `BluetoothBatteryMonitor`
+**Changes:**
+- Replace polling logic with `PhasedScanOrchestrator`.
+- Trigger phased scans on timer ticks.
+- Handle deep scans separately.
+
+```csharp
+public class BluetoothBatteryMonitor : IAsyncDisposable
+{
+    private readonly PhasedScanOrchestrator _phasedScanOrchestrator;
+    private readonly Timer _pollingTimer;
+
+    public BluetoothBatteryMonitor(PhasedScanOrchestrator phasedScanOrchestrator)
     {
-        return await scanFunc(cts.Token);
+        _phasedScanOrchestrator = phasedScanOrchestrator;
+        _pollingTimer = new Timer(OnPollingTick, null, TimeSpan.Zero, TimeSpan.FromSeconds(60));
     }
-    catch (OperationCanceledException)
+
+    private async void OnPollingTick(object? state)
     {
-        Log.Warning($"{protocolName} scan timed out");
-        return Array.Empty<DeviceBatteryInfo>();
+        await _phasedScanOrchestrator.StartPhasedScanAsync(
+            onPhase1Complete: results => OnScanResults(ScanPhase.Phase1, results),
+            onPhase2Complete: results => OnScanResults(ScanPhase.Phase2, results),
+            onPhase3Complete: results => OnScanResults(ScanPhase.Phase3, results));
     }
-    catch (Exception ex)
+
+    public async Task StartDeepScanAsync()
     {
-        Log.Error(ex, $"{protocolName} scan failed");
-        return Array.Empty<DeviceBatteryInfo>();
+        await _phasedScanOrchestrator.StartDeepScanAsync(results =>
+            OnScanResults(ScanPhase.Phase4, results));
+    }
+
+    private void OnScanResults(ScanPhase phase, IReadOnlyList<DeviceBatteryInfo> results)
+    {
+        ScanCoordinator.OnScanResults(phase, results);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _pollingTimer?.Dispose();
+        await _phasedScanOrchestrator.DisposeAsync();
     }
 }
 ```
 
 **Files Modified:**
-- `src/Tray/ScanCoordinator.cs` (Add timeout handling).
+- `src/Monitoring/BluetoothBatteryMonitor.cs`
 
 ---
 
-#### 8. Throttling Background Scans
-**Goal:** Prevent **battery drain** and **CPU overload** from background scans.
+##### B. `ScanCoordinator`
+**Changes:**
+- Handle incremental UI updates as results arrive from each phase.
+- Merge results from all phases.
 
-**Implementation:**
-- **BLE Advertisement Scanning:**
-  - **Default interval: 30 seconds** (configurable).
-  - **Pause if:**
-    - Laptop is on **battery power** (not AC).
-    - Bluetooth radio is **busy** (e.g., file transfer, audio streaming).
-- **PnP Watcher:**
-  - **Always on** (low overhead).
-- **Polling Intervals:**
-  - **Default: 60 seconds** (as per ADR-003).
-  - **Increase to 120 seconds** if system is **idle** (no user activity).
+```csharp
+public class ScanCoordinator
+{
+    private readonly SynchronizationContext _uiContext;
+    private readonly ScanWindow _scanWindow;
+    private readonly Dictionary<ScanPhase, IReadOnlyList<DeviceBatteryInfo>> _phaseResults = new();
+
+    public void OnScanResults(ScanPhase phase, IReadOnlyList<DeviceBatteryInfo> results)
+    {
+        _phaseResults[phase] = results;
+        var mergedResults = MergePhaseResults();
+        _uiContext.Post(_ => UpdateScanWindow(mergedResults), null);
+    }
+
+    private IReadOnlyList<DeviceBatteryInfo> MergePhaseResults()
+    {
+        var merged = new Dictionary<string, DeviceBatteryInfo>();
+        foreach (var results in _phaseResults.Values)
+        foreach (var deviceInfo in results)
+        {
+            if (!merged.ContainsKey(deviceInfo.DeviceId))
+            {
+                merged[deviceInfo.DeviceId] = deviceInfo;
+            }
+        }
+        return merged.Values.ToList();
+    }
+
+    private void UpdateScanWindow(IReadOnlyList<DeviceBatteryInfo> results)
+    {
+        _scanWindow.UpdateDeviceList(results);
+        if (_phaseResults.Count >= 3) // All expected phases complete
+        {
+            _scanWindow.HideLoadingIndicator();
+        }
+    }
+}
+```
+
+**Files Modified:**
+- `src/Tray/ScanCoordinator.cs`
+
+---
+
+##### C. `ScanWindow`
+**Changes:**
+- Show loading spinner during scans.
+- Add "Deep Scan" button for Phase 4.
+- Display phase progress.
+
+**UI Updates:**
+- Add a **loading spinner** (`ProgressBar` with `Style = ProgressBarStyle.Marquee`).
+- Add a **"Deep Scan" button** to trigger Phase 4.
+- Add a **status label** (e.g., "Scanning fast protocols…").
+
+**Files Modified:**
+- `src/Tray/ScanWindow.cs`
+
+---
+
+##### D. `GattBatteryReader`
+**Changes:**
+- Add `ScanKnownDevicesAsync()` to only scan devices that previously reported battery via GATT.
+
+```csharp
+public class GattBatteryReader : IBatteryReader
+{
+    private readonly BatteryCache _batteryCache;
+
+    public async Task<IReadOnlyList<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
+    {
+        // Full scan (for Phase 4 or initial setup)
+        return await ScanAllDevicesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<DeviceBatteryInfo>> ScanKnownDevicesAsync(CancellationToken ct)
+    {
+        // Only scan devices that previously reported battery via GATT
+        var knownDevices = _batteryCache.GetAllCachedDevices()
+            .Where(d => d.Source == BatterySource.Gatt)
+            .Select(d => d.DeviceId)
+            .ToList();
+        return await ScanDevicesAsync(knownDevices, ct);
+    }
+}
+```
+
+**Files Modified:**
+- `src/Monitoring/Gatt/GattBatteryReader.cs`
+
+---
+
+##### E. `BleAdvertisementBatteryReader`
+**Changes:**
+- Skip scanning if on battery power (configurable).
+- Throttle scanning to 30-second intervals.
+
+```csharp
+public class BleAdvertisementBatteryReader : IBatteryReader
+{
+    private readonly PowerStatus _powerStatus;
+    private readonly TimeSpan _scanInterval = TimeSpan.FromSeconds(30);
+    private DateTimeOffset _lastScanTime;
+
+    public async Task<IReadOnlyList<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
+    {
+        if (_powerStatus.IsBatteryPower)
+        {
+            return Array.Empty<DeviceBatteryInfo>(); // Skip on battery
+        }
+
+        if (DateTimeOffset.UtcNow - _lastScanTime < _scanInterval)
+        {
+            return Array.Empty<DeviceBatteryInfo>(); // Throttle
+        }
+
+        _lastScanTime = DateTimeOffset.UtcNow;
+        return await ScanAdvertisementsAsync(ct);
+    }
+}
+```
+
+**Files Modified:**
+- `src/Monitoring/BleAdvertisement/BleAdvertisementBatteryReader.cs`
+
+---
+
+#### 3. Throttling and Concurrency Control
+
+##### A. Bluetooth Radio Throttling
+- **`SemaphoreSlim`** limits concurrent Bluetooth operations to **2–3** at once.
+- Applied in `PhasedScanOrchestrator.RunReaderAsync`.
+
+##### B. Timeout Handling
+- **2-second timeout** per protocol.
+- Implemented via `CancellationTokenSource` in `RunReaderAsync`.
+
+##### C. Power-Aware Scanning
+- **Skip BLE Ads** if on battery power.
+- **Increase polling interval** to 120s if system is idle.
 
 **Code:**
 ```csharp
@@ -499,77 +548,43 @@ private async void OnTimerTick()
 {
     if (PowerStatus.IsBatteryPower && !UserIsActive)
     {
-        // Skip scan if on battery and user is idle
-        return;
+        return; // Skip scan if on battery and user is idle
     }
     await PollAsync();
 }
-
-// In BleAdvertisementBatteryReader
-public async Task<IReadOnlyList<DeviceBatteryInfo>> ScanAsync()
-{
-    if (PowerStatus.IsBatteryPower)
-    {
-        return Array.Empty<DeviceBatteryInfo>(); // Skip on battery
-    }
-    // ... rest of scan logic
-}
 ```
-
-**Files Modified:**
-- `src/Monitoring/BluetoothBatteryMonitor.cs` (Add power-aware throttling).
-- `src/Monitoring/BleAdvertisementBatteryReader.cs` (Skip on battery power).
 
 ---
 
-#### 9. User Feedback for Slow Operations
-**Goal:** Set **expectations** if a scan takes longer than usual.
+#### 4. Deduplication and Data Priority
+- **Deduplicate by `DeviceId`** (fall back to MAC address for BLE Ads).
+- **Prioritize data sources:**
+  - **GATT/Classic > HID > AVRCP/HFP > BLE Ads > Vendor-Specific**.
+- Implemented in `PhasedScanOrchestrator.MergeAndDeduplicateResults`.
 
-**Implementation:**
-- **Show a loading spinner** in the scan window.
-- **Progress Updates:**
-  - "Scanning GATT devices… (3/5 found)"
-  - "Checking HID devices… (1/2 found)"
-- **Estimated Time Remaining:**
-  - If a scan takes >1s, show **"This may take a few seconds…"**.
+---
 
-**Code:**
-```csharp
-// In ScanWindow.cs
-private void UpdateScanStatus(string message)
-{
-    _statusLabel.Text = message;
-    _progressBar.Style = ProgressBarStyle.Marquee;
-}
-
-// In ScanCoordinator.cs
-private async Task RunPhase2Async()
-{
-    UpdateScanStatus("Scanning fast protocols…");
-    var results = await RunPhase2CoreAsync();
-    UpdateScanStatus("Updating results…");
-    UpdateUI(results);
-    UpdateScanStatus("Ready");
-}
-```
-
-**Files Modified:**
-- `src/Tray/ScanWindow.cs` (Add status updates).
+#### 5. User Feedback
+- **Loading Spinner:** Shown during scans.
+- **Status Updates:**
+  - "Scanning fast protocols…"
+  - "Checking audio devices…"
+  - "Ready"
+- **Deep Scan Button:** Triggers Phase 4 (BLE Ads + Vendor-Specific).
 
 ---
 
 ### Testing Requirements
 1. **Performance Tests:**
-   - Measure **discovery time** with all protocols enabled.
-   - Verify **<200ms for Phase 1**, **<500ms for Phase 2**, **<2s for Phase 3**.
+   - Verify **Phase 1 < 200ms**, **Phase 2 < 500ms**, **Phase 3 < 2s**.
 2. **Stress Tests:**
-   - Simulate **10+ Bluetooth devices** and verify **no UI freezes**.
-   - Test **BLE Ads + GATT + AVRCP simultaneously** and verify **no radio contention**.
+   - Simulate **10+ devices** and verify **no UI freezes**.
+   - Test **concurrent Bluetooth operations** (max 2–3).
 3. **Battery Tests:**
-   - Run **BLE Ads scanning every 10s** on battery power and measure **battery impact**.
+   - Run **BLE Ads every 10s** on battery power and measure impact.
 4. **User Tests:**
-   - Validate that **Phase 1 results appear instantly**.
-   - Validate that **slow protocols don’t block the UI**.
+   - Validate **instant Phase 1 results**.
+   - Validate **background Phase 3 doesn’t block UI**.
 
 ---
 
@@ -581,13 +596,20 @@ private async Task RunPhase2Async()
 
 ---
 
-### Open Questions
-1. **Should Phase 3 (AVRCP/HFP) run on every poll cycle, or only on manual scans?**
-   - **Proposed:** Run on every poll cycle but with a **timeout** (2s).
-2. **Should BLE Ads scanning be limited to a subset of users (e.g., opt-in)?**
-   - **Proposed:** Yes, disable by default and allow users to enable it.
-3. **How to handle devices that are detected by multiple protocols?**
-   - **Proposed:** Prioritize **GATT/Classic > HID > AVRCP/HFP > BLE Ads** and deduplicate in `DeviceAggregationPipeline`.
+### Settings
+Add to `ThresholdSettings`:
+```json
+{
+  "PhasedScanning": {
+    "EnablePhase2": true,
+    "EnablePhase3": true,
+    "EnablePhase4": false,
+    "MaxConcurrentBluetoothOperations": 2,
+    "ScanTimeoutSeconds": 2,
+    "BleAdvertisementScanIntervalSeconds": 30
+  }
+}
+```
 
 ---
 
@@ -603,24 +625,24 @@ The following methods are **realistic options** for expanding device coverage. E
 #### Background
 - Many HID devices (e.g., Logitech, Microsoft, Razer) report battery via **HID reports** or **vendor-specific GATT characteristics**.
 - Windows exposes HID device battery via **`Windows.Devices.HumanInterfaceDevice`** (UWP) or **Win32 HID APIs**.
-- Some HID devices use the **`0x2A1B` (Battery Power State)** GATT characteristic, which is already partially supported in the existing GATT reader (see [plan-charging-indicator.md](docs/plans/plan-charging-indicator.md)).
+- Some HID devices use the **`0x2A1B` (Battery Power State)** GATT characteristic, which is already partially supported in the existing GATT reader.
 
 #### Implementation
 1. **Create a new `HidBatteryReader`** implementing `IBatteryReader`.
-   - Use **`Windows.Devices.HumanInterfaceDevice`** (UWP) or **Win32 HID APIs** to enumerate HID devices.
+   - Use **`Windows.Devices.HumanInterfaceDevice`** or **Win32 HID APIs** to enumerate HID devices.
    - For each HID device, attempt to read battery level from:
      - **HID reports** (vendor-specific usage pages).
      - **GATT `0x2A1B` (Battery Power State)** if the device supports BLE.
    - Return `DeviceBatteryInfo` with `Battery` and `IsCharging` (if available).
 
-2. **Integrate into `DeviceAggregationPipeline`**:
+2. **Integrate into `DeviceAggregationPipeline`:**
    - Add `HidBatteryReader.ReadAllAsync` to the existing `Task.WhenAll` call in `DeviceAggregationPipeline.ReadMergedAsync`.
    - Merge results with GATT and Classic readers, deduplicating by `DeviceId`.
 
-3. **Handle Cache Invalidation**:
-   - HID devices do not require connection caching (unlike GATT), so no changes to `GattConnectionCache` are needed.
+3. **Handle Cache Invalidation:**
+   - HID devices do not require connection caching (unlike GATT).
 
-4. **UI Updates**:
+4. **UI Updates:**
    - No changes required. The existing `ScanWindow` and `TrayApp` will display battery data from `DeviceBatteryInfo`.
 
 #### Files Changed
@@ -628,12 +650,10 @@ The following methods are **realistic options** for expanding device coverage. E
 |------|--------|
 | `src/Monitoring/Hid/HidBatteryReader.cs` | New file: Implement `IBatteryReader` for HID devices. |
 | `src/Monitoring/DeviceAggregationPipeline.cs` | Add `HidBatteryReader.ReadAllAsync` to the pipeline. |
-| `src/Monitoring/IBatteryReader.cs` | No changes (interface already supports new reader). |
 
 #### Acceptance Criteria
 - HID devices (e.g., Logitech MX Master, Microsoft Sculpt Keyboard) that do not support GATT Battery Service now have their battery levels displayed in the scan window and tray tooltip.
 - Battery data from HID devices is merged with GATT and Classic data, with no duplicates.
-- No new UI logic is introduced; existing `DeviceBatteryInfo` handling suffices.
 
 ---
 
@@ -647,20 +667,8 @@ The following methods are **realistic options** for expanding device coverage. E
 
 #### Implementation
 1. **Create a new `AvrcpBatteryReader`** implementing `IBatteryReader`.
-   - Use **`Windows.Devices.Bluetooth.Rfcomm`** or **Win32 Bluetooth APIs** to interact with AVRCP.
-   - For each paired audio device, attempt to read battery level via AVRCP commands.
-   - Fall back to **vendor-specific GATT characteristics** (e.g., Sony's `0xFE00` service) if AVRCP is unavailable.
-
-2. **Integrate into `DeviceAggregationPipeline`**:
-   - Add `AvrcpBatteryReader.ReadAllAsync` to the pipeline.
-   - Merge results with GATT, Classic, and HID readers.
-
-3. **Handle Vendor-Specific Logic**:
-   - Maintain a **mapping of vendor IDs to known battery characteristics** (e.g., Sony, Bose, Jabra).
-   - If a device's vendor ID matches a known entry, attempt to read its proprietary battery characteristic.
-
-4. **UI Updates**:
-   - No changes required. Battery data will be displayed via existing `DeviceBatteryInfo` handling.
+2. **Integrate into `DeviceAggregationPipeline`:** Add `AvrcpBatteryReader.ReadAllAsync` to the pipeline.
+3. **Handle Vendor-Specific Logic:** Maintain a mapping of vendor IDs to known battery characteristics.
 
 #### Files Changed
 | File | Change |
@@ -671,8 +679,6 @@ The following methods are **realistic options** for expanding device coverage. E
 
 #### Acceptance Criteria
 - Audio devices (e.g., Sony WH-1000XM4) that do not support GATT Battery Service now have their battery levels displayed.
-- Vendor-specific battery characteristics are read for known devices.
-- No duplicates in the merged device list.
 
 ---
 
@@ -680,29 +686,15 @@ The following methods are **realistic options** for expanding device coverage. E
 **Goal:** Capture battery state from **BLE devices that broadcast battery level in advertisements** (e.g., beacons, wearables).
 
 #### Background
-- Some BLE devices (e.g., Tile trackers, certain wearables) include battery level in their **advertisement packets** (manufacturer data or service data).
+- Some BLE devices (e.g., Tile trackers) include battery level in their **advertisement packets** (manufacturer data or service data).
 - Windows provides **`BluetoothLEAdvertisementWatcher`** (UWP) to scan for BLE advertisements.
-- Advertisement scanning is **passive** (no connection required) but **short-range**.
 
 #### Implementation
 1. **Create a new `BleAdvertisementBatteryReader`** implementing `IBatteryReader`.
-   - Use **`BluetoothLEAdvertisementWatcher`** to scan for BLE advertisements.
-   - Parse **manufacturer data** and **service data** for known battery level formats (e.g., Tile's manufacturer data includes battery %).
-   - Map advertisement data to `DeviceId` (if possible) or use a **temporary identifier** (e.g., MAC address) for deduplication.
-
-2. **Integrate into `DeviceAggregationPipeline`**:
-   - Add `BleAdvertisementBatteryReader.ReadAllAsync` to the pipeline.
-   - Merge results with other readers, prioritizing **connected device data** over advertisement data (since advertisements may be stale).
-
-3. **Adjust Polling Interval**:
-   - BLE advertisement scanning may require a **shorter interval** (e.g., 10–30 seconds) to capture transient advertisements.
-   - Use a **separate timer** for advertisement scanning, but synchronize results with the main 60-second poll.
-
-4. **Handle Deduplication**:
-   - Advertisement-based battery data may not include a stable `DeviceId`. Use **MAC address** or **advertisement address** as a fallback for deduplication.
-
-5. **UI Updates**:
-   - Display advertisement-based battery data in the scan window with a **visual indicator** (e.g., "✧" to denote advertisement-sourced data).
+2. **Integrate into `DeviceAggregationPipeline`:** Add `BleAdvertisementBatteryReader.ReadAllAsync` to the pipeline.
+3. **Adjust Polling Interval:** Use a **separate timer** for advertisement scanning (default: 30s).
+4. **Handle Deduplication:** Use **MAC address** as a fallback `DeviceId`.
+5. **UI Updates:** Display advertisement-based battery data with a **visual indicator** (e.g., "✧").
 
 #### Files Changed
 | File | Change |
@@ -715,7 +707,6 @@ The following methods are **realistic options** for expanding device coverage. E
 #### Acceptance Criteria
 - BLE devices that broadcast battery level in advertisements (e.g., Tile trackers) now have their battery levels displayed.
 - Advertisement data is merged with connected device data, with connected data taking precedence.
-- Advertisement scanning does not interfere with the main 60-second polling cycle.
 
 ---
 
@@ -725,28 +716,13 @@ The following methods are **realistic options** for expanding device coverage. E
 #### Background
 - **`DeviceWatcher`** (from `Windows.Devices.Enumeration`) monitors **PnP events** for device additions, removals, and property changes.
 - Can detect **Bluetooth device connection/disconnection** in real-time.
-- Useful for **triggering immediate scans** when a new device is paired or connected.
 
 #### Implementation
-1. **Create a new `DeviceWatcherService`**:
-   - Use **`DeviceInformation.CreateWatcher`** with the Bluetooth device selector:
-     ```csharp
-     var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
-     var watcher = DeviceInformation.CreateWatcher(selector);
-     ```
+1. **Create a new `DeviceWatcherService`:**
+   - Use **`DeviceInformation.CreateWatcher`** with the Bluetooth device selector.
    - Subscribe to `Added`, `Removed`, and `Updated` events.
-   - On `Added` or `Updated`, trigger a **manual scan** via `ScanCoordinator.RequestOpenScanWindow`.
-
-2. **Integrate with `BluetoothBatteryMonitor`**:
-   - Start the `DeviceWatcherService` when `BluetoothBatteryMonitor` initializes.
-   - Stop the watcher when the monitor is disposed.
-
-3. **Handle Edge Cases**:
-   - Avoid **duplicate scans** if multiple `Added`/`Updated` events fire in quick succession.
-   - Ensure the watcher is **re-started** after suspend/resume (see [ADR-003](docs/adr/adr-003-polling-over-push.md)).
-
-4. **UI Updates**:
-   - No direct changes, but the scan window will open automatically when new devices are detected.
+   - On `Added` or `Updated`, trigger a **manual scan** via `ScanCoordinator`.
+2. **Integrate with `BluetoothBatteryMonitor`:** Start/stop `DeviceWatcherService` with the monitor.
 
 #### Files Changed
 | File | Change |
@@ -758,7 +734,6 @@ The following methods are **realistic options** for expanding device coverage. E
 #### Acceptance Criteria
 - New Bluetooth devices are **automatically detected** and trigger a scan window to display their battery state.
 - The watcher is **suspended/resumed** with the system power state.
-- No duplicate scans are triggered for rapid device connection/disconnection events.
 
 ---
 
@@ -767,69 +742,37 @@ The following methods are **realistic options** for expanding device coverage. E
 
 #### Background
 - HFP is a Bluetooth profile used for call handling.
-- Some **legacy audio devices** (e.g., Plantronics, Jabra, older Sony/Bose models) report battery level via **HFP AT commands** (e.g., `AT+BTRH?`).
-- HFP battery reporting is **not standardized** and often vendor-specific.
-- **Realism on Windows:** Low (~10–20% of older headsets). Most modern headsets use GATT or AVRCP for battery reporting.
+- Some **legacy audio devices** (e.g., Plantronics, Jabra) report battery level via **HFP AT commands** (e.g., `AT+BTRH?`).
+- **Realism on Windows:** Low (~10–20% of older headsets). Most modern headsets use GATT or AVRCP.
 
 #### Implementation
 1. **Create a new `HfpBatteryReader`** implementing `IBatteryReader`.
    - Use **`Windows.Devices.Bluetooth.Rfcomm`** to connect to the **HFP service UUID** (`0x111F`).
    - Send **AT commands** (e.g., `AT+BTRH?`) to query battery level.
-   - Parse the response (e.g., `+BTRH: 1,80` = 80% battery).
-   - Return `DeviceBatteryInfo` with `Battery` and `IsCharging` (if available).
-
-2. **Integrate into `DeviceAggregationPipeline`**:
-   - Add `HfpBatteryReader.ReadAllAsync` to the pipeline.
-   - Merge results with GATT, Classic, HID, and AVRCP readers.
-
-3. **Handle Vendor-Specific Logic**:
-   - Maintain a **mapping of vendor IDs to known HFP battery commands** (e.g., Plantronics, Jabra).
-   - If a device's vendor ID matches a known entry, attempt to read its proprietary battery command.
-
-4. **UI Updates**:
-   - No changes required. Battery data will be displayed via existing `DeviceBatteryInfo` handling.
+2. **Integrate into `DeviceAggregationPipeline`:** Add `HfpBatteryReader.ReadAllAsync` to the pipeline.
 
 #### Files Changed
 | File | Change |
 |------|--------|
 | `src/Monitoring/Hfp/HfpBatteryReader.cs` | New file: Implement `IBatteryReader` for HFP devices. |
 | `src/Monitoring/DeviceAggregationPipeline.cs` | Add `HfpBatteryReader.ReadAllAsync` to the pipeline. |
-| `src/Monitoring/VendorBatteryMappings.cs` | Extend to include HFP battery commands. |
 
 #### Acceptance Criteria
-- Audio devices (e.g., Plantronics Voyager, Jabra Elite) that do not support GATT or AVRCP Battery Service now have their battery levels displayed.
-- Vendor-specific HFP battery commands are read for known devices.
-- No duplicates in the merged device list.
+- Audio devices (e.g., Plantronics Voyager) that do not support GATT or AVRCP now have their battery levels displayed.
 
 ---
 
 ### Method 6: Vendor-Specific APIs (Optional)
-**Goal:** Support **proprietary battery monitoring** for devices from specific manufacturers (e.g., Intel, Broadcom, Logitech, Sony).
+**Goal:** Support **proprietary battery monitoring** for devices from specific manufacturers (e.g., Intel, Logitech, Sony).
 
 #### Background
 - Some manufacturers provide **SDKs or APIs** for advanced Bluetooth features, including battery monitoring.
-- Examples:
-  - **Intel Wireless Bluetooth**: Proprietary APIs for Intel-based Bluetooth adapters.
-  - **Logitech BLE**: Some Logitech devices use proprietary GATT services for battery reporting.
-  - **Sony/Bose Audio**: Vendor-specific GATT characteristics for battery and charging state.
 
 #### Implementation
 1. **Create a `VendorBatteryReader`** implementing `IBatteryReader`.
    - Maintain a **registry of vendor-specific handlers** (e.g., `IVendorBatteryHandler` for Intel, Logitech, Sony).
-   - For each paired device, check its **vendor ID** and delegate to the appropriate handler.
-
-2. **Vendor-Specific Handlers**:
-   - **IntelHandler**: Use Intel's proprietary API to read battery state.
-   - **LogitechHandler**: Read from Logitech's proprietary GATT services (e.g., `0xFF00`).
-   - **SonyHandler**: Read from Sony's proprietary characteristics (e.g., `0xFE00`).
-
-3. **Integrate into `DeviceAggregationPipeline`**:
-   - Add `VendorBatteryReader.ReadAllAsync` to the pipeline.
-   - Merge results with other readers.
-
-4. **Configuration**:
-   - Add a **setting** to enable/disable vendor-specific monitoring (default: disabled).
-   - Log **warnings** if a vendor-specific API fails to load (e.g., Intel SDK not installed).
+2. **Integrate into `DeviceAggregationPipeline`:** Add `VendorBatteryReader.ReadAllAsync` to the pipeline.
+3. **Configuration:** Add a **setting** to enable/disable vendor-specific monitoring (default: disabled).
 
 #### Files Changed
 | File | Change |
@@ -843,9 +786,7 @@ The following methods are **realistic options** for expanding device coverage. E
 | `src/Settings/ThresholdSettings.cs` | Add `EnableVendorBatteryMonitoring` setting. |
 
 #### Acceptance Criteria
-- Devices from supported vendors (e.g., Intel, Logitech, Sony) have their battery levels displayed even if they do not support standard GATT/Classic methods.
-- Vendor-specific monitoring can be **disabled** via settings.
-- Failures in vendor-specific APIs are **logged but do not crash** the application.
+- Devices from supported vendors (e.g., Intel, Logitech, Sony) have their battery levels displayed even if they do not support standard methods.
 
 ---
 
@@ -864,37 +805,37 @@ The following methods are **realistic options** for expanding device coverage. E
 ### Google Fast Pair Battery Reporting
 - **Google Fast Pair** (used by Pixel Buds, some Sony/Bose headphones) exposes battery level via a **proprietary Bluetooth service**.
 - **Realism on Windows:** Very low (~1% of users). Fast Pair is Android-specific, and most devices also support **GATT 0x180F** or **BLE advertisements**.
-- **Action:** Skip implementation for now. If users report missing battery data for Fast Pair devices, investigate whether they broadcast battery in advertisements.
+- **Action:** Skip implementation for now. If users report missing battery data for Fast Pair devices, investigate whether they broadcast battery in advertisements or support GATT.
 
 ---
 
 ## Prioritization and Implementation Order
 
-The following table prioritizes the proposed methods based on **feasibility**, **coverage**, and **alignment with existing architecture**.
-
 | Method | Effort | Coverage | Real-Time? | Priority | Notes |
 |--------|--------|----------|------------|----------|-------|
-| **PnP Device Watcher** | Low | Medium | ✅ Yes | **1 (High)** | Improves device discovery; minimal changes. |
-| **HID Battery Reporting** | Medium | Medium | ❌ No | **2 (High)** | Covers keyboards/mice; aligns with existing GATT/Classic. |
-| **BLE Advertisement Scanning** | Medium | Low | ✅ Yes | **3 (Medium)** | Passive monitoring; limited to devices that broadcast battery. |
-| **AVRCP Battery Reporting** | High | Low | ❌ No | **4 (Medium)** | Audio devices only; vendor-specific. |
-| **HFP Battery Reporting** | Medium | Low | ❌ No | **5 (Low)** | Legacy headsets only; optional. |
-| **Vendor-Specific APIs** | High | Low | ❌ No | **6 (Low)** | Hardware-dependent; optional. |
+| **Implement Phased Scanning Infrastructure** | Medium | N/A | ✅ Yes | **1 (High)** | Foundational for all new protocols. |
+| **PnP Device Watcher** | Low | Medium | ✅ Yes | **2 (High)** | Improves device discovery; minimal changes. |
+| **HID Battery Reporting** | Medium | Medium | ❌ No | **3 (High)** | Covers keyboards/mice; aligns with existing GATT/Classic. |
+| **BLE Advertisement Scanning** | Medium | Low | ✅ Yes | **4 (Medium)** | Passive monitoring; limited to devices that broadcast battery. |
+| **AVRCP Battery Reporting** | High | Low | ❌ No | **5 (Medium)** | Audio devices only; vendor-specific. |
+| **HFP Battery Reporting** | Medium | Low | ❌ No | **6 (Low)** | Legacy headsets only; optional. |
+| **Vendor-Specific APIs** | High | Low | ❌ No | **7 (Low)** | Hardware-dependent; optional. |
 
 **Recommended Implementation Order:**
-1. **PnP Device Watcher** (Quick win for device discovery).
-2. **HID Battery Reporting** (Covers common peripherals).
-3. **BLE Advertisement Scanning** (Passive monitoring for wearables/beacons).
-4. **AVRCP Battery Reporting** (Audio devices).
-5. **HFP Battery Reporting** (Optional, for legacy headsets).
-6. **Vendor-Specific APIs** (Optional, for advanced users).
+1. **Implement Phased Scanning Infrastructure** (High priority, foundational for all new protocols).
+2. **PnP Device Watcher** (Quick win for device discovery).
+3. **HID Battery Reporting** (Covers common peripherals).
+4. **BLE Advertisement Scanning** (Passive monitoring for wearables/beacons).
+5. **AVRCP Battery Reporting** (Audio devices).
+6. **HFP Battery Reporting** (Optional, for legacy headsets).
+7. **Vendor-Specific APIs** (Optional, for advanced users).
 
 ---
 
 ## Data Model Changes
 
 ### `DeviceBatteryInfo`
-To support the new methods, extend `DeviceBatteryInfo` with the following **optional fields** (defaulting to `null` to maintain backward compatibility):
+To support the new methods, extend `DeviceBatteryInfo` with the following **optional fields**:
 
 ```csharp
 public sealed record DeviceBatteryInfo(
@@ -920,18 +861,13 @@ public enum BatterySource
 }
 ```
 
-**Purpose:**
-- Helps with **debugging** (e.g., "Why is this device's battery not updating?").
-- Enables **UI indicators** (e.g., "✧" for BLE advertisements, "🎧" for AVRCP, "📞" for HFP).
-- Preserves **immutability** (ADR-001).
-
 ---
 
 ### `DeviceAggregationPipeline`
 Update the pipeline to:
-1. **Track the source** of each battery reading.
-2. **Prioritize connected data** over advertisement data (e.g., if a device is connected via GATT, use GATT data even if BLE advertisement data is available).
-3. **Deduplicate by `DeviceId`** (or MAC address for advertisement data).
+1. Track the source of each battery reading.
+2. Prioritize connected data over advertisement data.
+3. Deduplicate by `DeviceId` (or MAC address for advertisement data).
 
 ---
 
@@ -944,7 +880,7 @@ All new methods must adhere to the existing **threading model**:
 ---
 
 ## Settings Changes
-Add the following settings to `ThresholdSettings` to control the new methods:
+Add the following settings to `ThresholdSettings`:
 
 ```json
 {
@@ -956,13 +892,13 @@ Add the following settings to `ThresholdSettings` to control the new methods:
   "EnableBleAdvertisementMonitoring": true,
   "EnableHfpBatteryMonitoring": false,
   "EnableVendorBatteryMonitoring": false,
-  "BleAdvertisementScanIntervalSeconds": 30
+  "BleAdvertisementScanIntervalSeconds": 30,
+  "PhasedScanning": {
+    "MaxConcurrentBluetoothOperations": 2,
+    "ScanTimeoutSeconds": 2
+  }
 }
 ```
-
-**Notes:**
-- All new settings default to `true` (enabled) except `EnableHfpBatteryMonitoring` and `EnableVendorBatteryMonitoring` (disabled by default due to low realism or dependency risks).
-- `BleAdvertisementScanIntervalSeconds` allows users to adjust the frequency of BLE advertisement scanning (default: 30 seconds).
 
 ---
 
@@ -971,25 +907,27 @@ Add the following settings to `ThresholdSettings` to control the new methods:
    - All existing functionality (GATT, Classic) continues to work unchanged.
    - Existing `DeviceBatteryInfo` construction sites compile without changes.
 
-2. **No New Dependencies:**
-   - New methods use **existing Windows APIs** (UWP, Win32) or **open-source libraries** (e.g., 32feet.NET for HID).
-   - Vendor-specific APIs are **optional** and gracefully degraded if unavailable.
-
-3. **Performance:**
+2. **Performance:**
+   - **Phase 1 results appear instantly** (<200ms).
+   - **Phase 2 results appear within 500ms**.
+   - **Phase 3 results appear within 2s** (background).
    - Polling intervals remain **configurable** and **non-blocking**.
    - BLE advertisement scanning does not **drain battery** or **overload the Bluetooth radio**.
 
-4. **UI Consistency:**
+3. **UI Consistency:**
    - Battery data from all sources is displayed **uniformly** in the scan window and tray tooltip.
    - Optional **source indicators** (e.g., "✧" for advertisements, "🎧" for AVRCP, "📞" for HFP) are added but do not clutter the UI.
+   - **Loading indicators** are shown during scans.
 
-5. **Error Handling:**
-   - Failures in new methods (e.g., HID read error, AVRCP unsupported, HFP unsupported) are **logged** but do not crash the application.
+4. **Error Handling:**
+   - Failures in new methods are **logged** but do not crash the application.
    - Stale or missing data is treated as `null` (unknown) rather than an error.
+   - **Timeouts** prevent UI freezes.
 
-6. **Testing:**
-   - Unit tests are added for new readers (e.g., `HidBatteryReaderTests`, `AvrcpBatteryReaderTests`, `HfpBatteryReaderTests`).
-   - Integration tests verify that battery data from all sources is **merged correctly** in `DeviceAggregationPipeline`.
+5. **Testing:**
+   - Unit tests for new readers (e.g., `HidBatteryReaderTests`, `AvrcpBatteryReaderTests`).
+   - Integration tests verify that battery data from all sources is **merged correctly**.
+   - Performance tests verify **scan times** and **Bluetooth radio usage**.
 
 ---
 
@@ -1009,18 +947,22 @@ Add the following settings to `ThresholdSettings` to control the new methods:
 | `src/Monitoring/Vendor/LogitechBatteryHandler.cs` | Logitech-specific handler. |
 | `src/Monitoring/Vendor/SonyBatteryHandler.cs` | Sony-specific handler. |
 | `src/Monitoring/BatterySource.cs` | Enum for battery data sources. |
-| `src/Monitoring/BatteryCache.cs` | Caching layer for battery data. |
+| `src/Monitoring/PhasedScanOrchestrator.cs` | Orchestrates phased scanning. |
+| `src/Monitoring/ScanPhase.cs` | Enum for scan phases. |
+| `src/Monitoring/BatteryCache.cs` | Caches battery data for instant results. |
 
 ### Modified Files
 | File | Change |
 |------|--------|
 | `src/Monitoring/DeviceBatteryInfo.cs` | Add `BatterySource? Source = null` parameter. |
-| `src/Monitoring/DeviceAggregationPipeline.cs` | Add new readers to the pipeline; prioritize connected data; deduplicate results. |
+| `src/Monitoring/DeviceAggregationPipeline.cs` | Add new readers to the pipeline; prioritize connected data. |
 | `src/Monitoring/PollingOrchestrator.cs` | Add timer for BLE advertisement scanning. |
-| `src/Monitoring/BluetoothBatteryMonitor.cs` | Start/stop `DeviceWatcherService`; add Bluetooth radio throttling. |
-| `src/Tray/ScanCoordinator.cs` | Implement phased scanning; trigger manual scan on `DeviceWatcher` events; add timeout handling. |
-| `src/Tray/ScanWindow.cs` | Add source indicators (e.g., "✧" for advertisements, "🎧" for AVRCP, "📞" for HFP); add scan status updates. |
-| `src/Settings/ThresholdSettings.cs` | Add new settings for enabling/disabling methods. |
+| `src/Monitoring/BluetoothBatteryMonitor.cs` | Integrate `PhasedScanOrchestrator`; start/stop `DeviceWatcherService`. |
+| `src/Monitoring/Gatt/GattBatteryReader.cs` | Add `ScanKnownDevicesAsync` for Phase 2. |
+| `src/Monitoring/BleAdvertisement/BleAdvertisementBatteryReader.cs` | Skip on battery power; throttle to 30s. |
+| `src/Tray/ScanCoordinator.cs` | Handle incremental UI updates; trigger manual scan on `DeviceWatcher` events. |
+| `src/Tray/ScanWindow.cs` | Add source indicators (e.g., "✧" for advertisements, "🎧" for AVRCP, "📞" for HFP); add loading spinner and "Deep Scan" button. |
+| `src/Settings/ThresholdSettings.cs` | Add new settings for phased scanning and enabling/disabling methods. |
 
 ---
 
@@ -1045,22 +987,16 @@ Add the following settings to `ThresholdSettings` to control the new methods:
    - How will frequent BLE scanning (e.g., every 10 seconds) impact **battery life** on laptops?
    - **Proposed Solution:** Default to **30-second intervals** and allow users to adjust or disable it.
 
-6. **Should Phase 3 (AVRCP/HFP) run on every poll cycle, or only on manual scans?**
-   - **Proposed:** Run on every poll cycle but with a **timeout** (2s).
-
-7. **Should BLE Ads scanning be limited to a subset of users (e.g., opt-in)?**
-   - **Proposed:** Yes, disable by default and allow users to enable it.
-
 ---
 
 ## Next Steps
-1. **Implement PnP Device Watcher** (high priority, low effort).
-2. **Implement HID Battery Reporting** (high priority, medium effort).
-3. **Implement BLE Advertisement Scanning** (medium priority).
-4. **Implement AVRCP Battery Reporting** (medium priority, if time permits).
-5. **Implement Phased Scanning** (high priority, as specified in the technical spec).
+1. **Implement Phased Scanning Infrastructure** (High priority, foundational for all new protocols).
+2. **Implement PnP Device Watcher** (Quick win for device discovery).
+3. **Implement HID Battery Reporting** (Covers common peripherals).
+4. **Implement BLE Advertisement Scanning** (Passive monitoring for wearables/beacons).
+5. **Implement AVRCP Battery Reporting** (Audio devices).
 6. **Update `DeviceBatteryInfo`** to include `BatterySource`.
-7. **Add Settings** for enabling/disabling new methods.
+7. **Add Settings** for enabling/disabling new methods and phased scanning.
 8. **Test and Validate** with a variety of Bluetooth devices (HID, audio, wearables).
-9. **Implement HFP Battery Reporting** (low priority, optional).
-10. **Implement Vendor-Specific APIs** (low priority, optional).
+9. **Implement HFP Battery Reporting** (Optional, for legacy headsets).
+10. **Implement Vendor-Specific APIs** (Optional, for advanced users).
