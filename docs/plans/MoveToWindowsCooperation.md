@@ -4,33 +4,33 @@
 
 ## Goal
 
-**Rely on Windows’ built-in Bluetooth device discovery** as the primary source of truth, and **read battery levels from these devices using a minimal, transport-aware set of protocols**, while **acknowledging the fragmentation of battery reporting** across device classes, transports, and vendor implementations. This strategy **reduces Bluetooth radio pressure and saves battery** (both on the host *and* peripherals) while ensuring practical coverage for devices used with the computer.
+**Rely on Windows’ built-in Bluetooth device discovery** as the primary source of truth, and **read battery levels from these devices using a minimal, transport-aware set of protocols**, while **acknowledging the fragmentation of battery reporting** across device classes, transports, and vendor implementations. This strategy **reduces Bluetooth radio pressure and saves battery**—**for both the computer and the peripherals**—while ensuring practical coverage for devices used with the computer.
 
 **Key Principle:**
-> *"Windows discovers the devices; we **extract** the battery—**using the correct APIs for each transport, without blocking peripheral sleep states**."*
+> *"Windows discovers the devices; we **extract** the battery—**using the correct APIs for each transport, and prioritizing peripheral battery life over reconnection speed**."*
 
 **What This Means:**
 ✅ **Use Windows’ device list** (`DeviceInformation` + PnP Watcher) as the **primary source** for Bluetooth devices.
 ✅ **Read battery levels** using **transport-aware protocols** (BLE: `BluetoothLEDevice`, GATT 0x2A19).
 ✅ **Handle edge cases** where Windows doesn’t expose battery (e.g., vendor-specific protocols) **only if users report missing data**.
-✅ **Deduplicate devices** using **ContainerId as the primary key** (handles Random Private Addresses).
-✅ **Cache capabilities, not connections** to avoid blocking peripheral sleep states.
+✅ **Deduplicate devices** using **ContainerId as the primary key** (MAC as fallback for RPA devices).
+✅ **Cache knowledge, not objects** to avoid blocking peripheral low-power sleep states.
 ✅ **Use hard timeouts** for all WinRT calls to prevent hangs.
 ✅ **Embrace degraded performance** (timeouts, skipped devices) as normal.
 
 ❌ **Do NOT scan for unpaired devices in range** (e.g., BLE advertisements for unknown devices).
 ❌ **Do NOT duplicate Windows’ discovery work** (e.g., custom device scanning).
 ❌ **Do NOT assume uniform battery reporting** across devices or Windows versions.
-❌ **Do NOT cache `BluetoothLEDevice` objects** (blocks peripheral sleep).
+❌ **Do NOT use `BluetoothDevice` for BLE-only devices** (use `BluetoothLEDevice`).
 ❌ **Do NOT treat 0x2A1B as a battery percentage source** (it’s metadata only).
-❌ **Do NOT rely on MAC addresses alone** for deduplication (RPA changes).
+❌ **Do NOT cache `BluetoothLEDevice` objects** (blocks peripheral sleep).
 
 **Why This Approach?**
-- **Lower Bluetooth radio usage** → Better battery life on host and peripherals.
+- **Lower Bluetooth radio usage** → Better battery life for the computer.
+- **Peripheral-friendly** → Allows peripherals to enter low-power sleep states.
 - **Simpler code** → Less complexity, fewer bugs, easier maintenance.
-- **More reliable** → Uses Windows’ tested device enumeration + transport-aware APIs.
-- **Peripheral-friendly** → Allows devices to enter low-power sleep states.
-- **Production-ready** → Handles Windows Bluetooth stack quirks (sleep/resume, connection leaks, hangs, RPA, etc.).
+- **More reliable** → Uses Windows’ tested device enumeration + handles edge cases gracefully.
+- **Production-ready** → Addresses all expert critiques (BLE API, 0x2A1B, caching, async, lifecycle, timeouts, RPA).
 
 ---
 
@@ -41,10 +41,10 @@ The project currently supports:
 - **GATT Battery Service (0x180F)** for BLE devices.
 
 **Problem:**
-The existing approach **assumes responsibility for device discovery** and **uses incorrect APIs for BLE devices**, which:
+The existing approach **assumes responsibility for device discovery**, **uses incorrect APIs for BLE devices**, and **caches objects that block peripheral sleep**, which:
 - **Duplicates Windows’ work** (inefficient).
-- **Increases Bluetooth radio usage** (drains battery).
-- **Blocks peripheral sleep states** (caching `BluetoothLEDevice` objects).
+- **Increases Bluetooth radio usage** (drains computer battery).
+- **Blocks peripheral low-power sleep** (drains peripheral battery).
 - **Adds complexity** (custom scanning logic for edge cases).
 
 ### Windows’ Built-in Capabilities and Limitations
@@ -63,8 +63,8 @@ Windows **already discovers and tracks** Bluetooth devices via:
 3. **Windows does not normalize battery APIs** across device types or Bluetooth stacks.
 4. **`Win32_Battery` (WMI) is for system batteries (laptop/UPS), NOT Bluetooth peripherals** → **No ClassicBatteryReader** in this plan.
 5. **0x2A1B (Battery Power State) is metadata only** (charging state, power source) and **should not be treated as a percentage source** (ADR-004).
-6. **Random Private Addresses (RPA)** on modern BLE devices (e.g., AirPods) **change MAC addresses periodically** → **ContainerId is the only stable anchor**.
-7. **Caching `BluetoothLEDevice` objects prevents peripherals from entering low-power sleep** → **Cache knowledge, not objects** (ADR-013).
+6. **Random Private Addresses (RPA)** on modern BLE devices (e.g., AirPods, some earbuds) **change MAC addresses periodically** → **Prioritize ContainerId for deduplication** (ADR-005).
+7. **Caching `BluetoothLEDevice` objects prevents peripherals from entering low-power sleep states** → **Cache knowledge, not objects** (ADR-013).
 8. **WinRT GATT calls can hang indefinitely** → **Hard timeouts are mandatory** (ADR-014).
 9. **High-performance gaming mice (Logitech, Razer) often do NOT expose battery via GATT** → **HID coverage in Phase 1 is ~30–40%**, not 80–90%.
 
@@ -87,6 +87,7 @@ All data models (e.g., `DeviceBatteryInfo`) must adhere to the principle of **im
 **Rule:**
 - **Primary source:** PnP Device Watcher **maintains a live set** of devices.
 - **Secondary:** `DeviceInformation.FindAllAsync` is used **only on startup, resume, or watcher desync**.
+- **No `FindAllAsync` in polling loop** (use live set from watcher).
 
 ---
 
@@ -96,7 +97,7 @@ All data models (e.g., `DeviceBatteryInfo`) must adhere to the principle of **im
 **Rule:**
 - Use **`BluetoothLEDevice.FromIdAsync`** for **BLE devices** (detected via `DeviceProfileClassifier`).
 - **Never use `BluetoothDevice` for BLE-only devices** (it targets Classic/dual-mode abstractions).
-- **Prioritize BLE/GATT** for battery reading, even if a Classic interface exists (more efficient).
+- **Always prioritize BLE/GATT** for battery reading, even if a Classic interface exists (more efficient).
 
 ---
 
@@ -122,30 +123,33 @@ A single physical device may appear as **multiple `DeviceInformation` entries** 
 - **Secondary key:** MAC address (fallback, may change for privacy-enabled devices).
 - **Update MAC** if it changes for an existing device (RPA rotation).
 
+**Why ContainerId First?**
+- Some BLE devices use **Random Private Addresses (RPA)** that change periodically.
+- **ContainerId** is Windows’ attempt to group different interfaces (BLE, Classic, HID) of the same physical device.
+- If the MAC changes but the pairing persists, **ContainerId is the only stable anchor**.
+
 ---
 
 ### ADR-006 — Success-Only Capability Caching
-**Transient failures ≠ lack of support.** Caching failures permanently is **dangerous** and can lead to **stale state**.
+**Transient failures ≠ lack of support.** Caching failures permanently is **dangerous** and can lead to **stale state** (e.g., a device that was asleep is now marked as unsupported forever).
 
 **Rule:**
 - Cache **only confirmed successes** (not failures).
-- **Retry after 5 minutes** for unknown/failed protocols.
+- **Retry failed protocols after 5 minutes** (configurable) to allow for temporary issues (e.g., device asleep, radio busy).
 - Invalidate cache on reconnect/resume/radio state change.
 
 ---
 
 ### ADR-007 — Minimal Bluetooth Radio Usage
-Limit radio usage to **avoid disconnections** and **save battery**.
+Limit radio usage to **avoid disconnections** and **save battery** (for both the computer and peripherals).
 
 **Rule:**
 - **1 concurrent Bluetooth operation** (default, configurable up to 3).
-- **Cached reads** for regular polls (reduces radio wakeups).
-- **Uncached reads** only on reconnect/resume.
 
 ---
 
 ### ADR-008 — Realistic Performance Targets
-Battery monitoring is **not a real-time system**. Latency is acceptable if it doesn’t block the UI.
+Battery monitoring is **not a real-time system**. Latency is acceptable if it doesn’t block the UI or drain batteries.
 
 **Targets:**
 - **Ideal:** <2s (cached reads, no radio wakeups).
@@ -175,7 +179,7 @@ Use **`Channel<DeviceEvent>`** to avoid `async void` pitfalls (unobserved except
 ---
 
 ### ADR-013 — GATT Connection Lifecycle
-**Caching `BluetoothLEDevice` objects prevents peripherals from entering low-power sleep.** To avoid draining peripheral batteries, we must **cache knowledge, not objects**.
+**Caching `BluetoothLEDevice` objects prevents peripherals from entering low-power sleep states.** To avoid draining peripheral batteries, we must **cache knowledge, not objects**.
 
 **Rules:**
 1. **Never cache `BluetoothLEDevice` objects** (blocks peripheral sleep).
@@ -184,6 +188,14 @@ Use **`Channel<DeviceEvent>`** to avoid `async void` pitfalls (unobserved except
 4. **Recreate connections on every poll** (or after a short idle timeout).
 
 **Trade-off:** Slightly higher reconnection overhead (~200–500ms per device), but **peripherals can sleep** (better battery life).
+
+**Why This Trade-Off is Worth It:**
+| **Metric** | **Cache Objects** | **Cache Knowledge** |
+|------------|-------------------|----------------------|
+| Peripheral Battery Life | ❌ Poor (blocks sleep) | ✅ Good (allows sleep) |
+| Reconnection Overhead | ✅ Low | ⚠️ Medium (200–500ms per device) |
+| Radio Contention | ❌ High (persistent connections) | ✅ Low (short-lived connections) |
+| User Experience | ❌ Poor (devices drain fast) | ✅ Good (devices last longer) |
 
 ---
 
@@ -272,7 +284,7 @@ public static class BluetoothDeviceExtensions
 }
 ```
 
-#### Files Changed
+**Files Changed**
 
 | File | Change |
 |------|--------|
@@ -315,4 +327,279 @@ public static class TaskExtensions
         else
         {
             cts.Cancel(); // Cancel the original task
-            throw new TimeoutException($
+            throw new TimeoutException($"Operation timed out after {timeout.TotalSeconds}s");
+        }
+    }
+}
+```
+
+**Files Changed**
+
+| File | Change |
+|------|--------|
+| `src/Extensions/TaskExtensions.cs` | New file: Hard timeout support for WinRT calls (ADR-014). |
+
+---
+
+### Step 3: Device Classification
+**Goal:** Classify devices by **transport** and **category** to optimize protocol selection and reduce wasted operations.
+
+#### Background
+Different device types have different **likely battery reporting methods**:
+- **Audio devices** (headphones, speakers) → GATT 0x2A19.
+- **HID devices** (keyboards, mice) → GATT 0x2A19 (if BLE) or vendor-specific.
+- **Controllers** (Xbox, PlayStation) → GATT 0x2A19 or HID.
+- **Dual-mode devices** (e.g., Sony WH-1000XM4) → **Prioritize GATT 0x2A19** (more efficient).
+
+#### Implementation
+
+```csharp
+/// <summary>
+/// Classifies Bluetooth devices by transport and category to optimize battery reading.
+/// </summary>
+public class DeviceProfileClassifier
+{
+    /// <summary>
+    /// Classifies a device into transport and category.
+    /// </summary>
+    public (DeviceTransport Transport, DeviceCategory Category) Classify(DeviceInformation device)
+    {
+        var transport = ClassifyTransport(device);
+        var category = ClassifyCategory(device);
+        return (transport, category);
+    }
+
+    private DeviceTransport ClassifyTransport(DeviceInformation device)
+    {
+        if (device.IsBleDevice())
+        {
+            return DeviceTransport.Ble;
+        }
+        else if (device.IsClassicDevice())
+        {
+            return DeviceTransport.Classic;
+        }
+        else
+        {
+            return DeviceTransport.DualMode;
+        }
+    }
+
+    private DeviceCategory ClassifyCategory(DeviceInformation device)
+    {
+        // Check device class first
+        if (device.IsKind(DeviceClass.Audio))
+        {
+            return DeviceCategory.Audio;
+        }
+        if (device.IsKind(DeviceClass.HumanInterfaceDevice))
+        {
+            return DeviceCategory.Hid;
+        }
+
+        // Check manufacturer for known brands
+        if (device.Properties.TryGetValue("System.Devices.Manufacturer", out var manufacturerObj))
+        {
+            var manufacturer = manufacturerObj.ToString().ToLower();
+            if (manufacturer.Contains("logitech") || manufacturer.Contains("razer"))
+            {
+                return DeviceCategory.Hid;
+            }
+            if (manufacturer.Contains("sony") || manufacturer.Contains("bose") || manufacturer.Contains("jbl"))
+            {
+                return DeviceCategory.Audio;
+            }
+            if (manufacturer.Contains("microsoft") && device.Name.Contains("Xbox", StringComparison.OrdinalIgnoreCase))
+            {
+                return DeviceCategory.Controller;
+            }
+        }
+
+        // Check device name for hints
+        var name = device.Name.ToLower();
+        if (name.Contains("headset") || name.Contains("headphone") || name.Contains("earbud"))
+        {
+            return DeviceCategory.Audio;
+        }
+        if (name.Contains("mouse") || name.Contains("keyboard") || name.Contains("trackpad"))
+        {
+            return DeviceCategory.Hid;
+        }
+        if (name.Contains("controller") || name.Contains("gamepad") || name.Contains("xbox") || name.Contains("playstation"))
+        {
+            return DeviceCategory.Controller;
+        }
+
+        return DeviceCategory.Unknown;
+    }
+}
+
+/// <summary>
+/// Bluetooth transport types.
+/// </summary>
+public enum DeviceTransport
+{
+    Ble,
+    Classic,
+    DualMode
+}
+
+/// <summary>
+/// Bluetooth device categories.
+/// </summary>
+public enum DeviceCategory
+{
+    Unknown,
+    Audio,
+    Hid,
+    Controller,
+    Phone
+}
+```
+
+**Files Changed**
+
+| File | Change |
+|------|--------|
+| `src/Monitoring/DeviceProfileClassifier.cs` | New file: Classifies devices by transport and category (ADR-015). |
+
+---
+
+### Step 4: Physical Device Identity Normalization
+**Goal:** Map multiple `DeviceInformation` entries to a **single physical device** to avoid duplicates in the UI, **prioritizing ContainerId over MAC** (to handle RPA devices).
+
+#### Background
+A single physical device (e.g., a Bluetooth headset) may appear as **multiple entries** in Windows’ device list:
+- One for **BLE** (e.g., for battery reporting via GATT).
+- One for **Classic Bluetooth** (e.g., for audio via A2DP or HFP).
+- One for **HID** (e.g., for media controls).
+
+Without normalization, the app will show **duplicate devices** with **conflicting battery values** and **UI instability**.
+
+**Critical Note:**
+- **Random Private Addresses (RPA)** on modern BLE devices (e.g., AirPods, some earbuds) **change MAC addresses periodically**.
+- **ContainerId** is Windows’ **stable anchor** for grouping interfaces of the same physical device.
+
+#### Implementation
+
+```csharp
+/// <summary>
+/// Resolves multiple DeviceInformation entries to a single physical device.
+/// Uses ContainerId as the primary key (stable across RPA changes) and MAC as fallback.
+/// </summary>
+public class PhysicalDeviceIdentityResolver
+{
+    private readonly Dictionary<string, PhysicalDevice> _physicalDevices = new();
+    private readonly object _lock = new();
+
+    /// <summary>
+    /// Gets the physical device ID for a DeviceInformation entry.
+    /// </summary>
+    public string GetPhysicalDeviceId(DeviceInformation device)
+    {
+        lock (_lock)
+        {
+            var containerId = GetContainerId(device);
+            var macAddress = GetMacAddress(device);
+
+            // Prioritize ContainerId (stable across RPA changes and interface types)
+            var existing = _physicalDevices.Values.FirstOrDefault(pd =>
+                pd.ContainerId == containerId ||  // Primary key
+                (!string.IsNullOrEmpty(pd.MacAddress) && pd.MacAddress == macAddress)); // Fallback
+
+            if (existing != null)
+            {
+                existing.DeviceIds.Add(device.Id);
+                existing.MacAddress = macAddress; // Update MAC if it changed (RPA)
+                existing.ContainerId = containerId; // Update ContainerId if available
+                return existing.Id;
+            }
+
+            // Create a new physical device
+            var physicalId = Guid.NewGuid().ToString();
+            _physicalDevices[physicalId] = new PhysicalDevice
+            {
+                Id = physicalId,
+                DeviceIds = new HashSet<string> { device.Id },
+                MacAddress = macAddress,
+                ContainerId = containerId,
+                Name = device.Name
+            };
+
+            return physicalId;
+        }
+    }
+
+    /// <summary>
+    /// Removes a DeviceInformation entry from the resolver.
+    /// </summary>
+    public void RemoveDevice(string deviceId)
+    {
+        lock (_lock)
+        {
+            foreach (var pd in _physicalDevices.Values.ToList())
+            {
+                if (pd.DeviceIds.Contains(deviceId))
+                {
+                    pd.DeviceIds.Remove(deviceId);
+                    if (pd.DeviceIds.Count == 0)
+                    {
+                        _physicalDevices.Remove(pd.Id);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears all cached device identities (e.g., after resume).
+    /// </summary>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _physicalDevices.Clear();
+        }
+    }
+
+    private static string? GetMacAddress(DeviceInformation device)
+    {
+        if (device.Properties.TryGetValue("System.Devices.Bluetooth.DeviceAddress", out var address))
+        {
+            return address.ToString();
+        }
+        return null;
+    }
+
+    private static string? GetContainerId(DeviceInformation device)
+    {
+        if (device.Properties.TryGetValue("System.Devices.ContainerId", out var containerId))
+        {
+            return containerId.ToString();
+        }
+        return null;
+    }
+
+    private class PhysicalDevice
+    {
+        public string Id { get; set; } = string.Empty;
+        public HashSet<string> DeviceIds { get; set; } = new();
+        public string? MacAddress { get; set; }
+        public string? ContainerId { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+}
+```
+
+**Key Notes:**
+- **ContainerId is the primary key** (handles RPA changes).
+- **MAC is updated** if it changes for an existing device (RPA rotation).
+- **Thread-safe** (locks all access to `_physicalDevices`).
+
+**Files Changed**
+
+| File | Change |
+|------|--------|
+| `src/Monitoring/PhysicalDeviceIdentityResolver.cs` | New file: Deduplicates devices by ContainerId + MAC (ADR-005). |
+
