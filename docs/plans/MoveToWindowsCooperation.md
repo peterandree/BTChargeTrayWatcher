@@ -9,7 +9,6 @@
 **Key Principle:**
 > *"Windows discovers the devices; we **extract** the battery—**using the correct APIs, prioritizing peripheral battery life over reconnection speed, and handling Windows Bluetooth stack quirks**."*
 
-
 **What This Means:**
 ✅ **Use Windows’ device list** (`DeviceInformation` + PnP Watcher) as the **primary source** for Bluetooth devices.
 ✅ **Read battery levels** using **transport-aware protocols** (BLE: `BluetoothLEDevice`, GATT 0x2A19).
@@ -38,27 +37,41 @@
 ## Background and Constraints
 
 ### Current Implementation
-
 The project currently supports:
 - **GATT Battery Service (0x180F)** for BLE devices.
 
-
 **Problem:**
-
 The existing approach **assumes responsibility for device discovery**, **uses incorrect APIs for BLE devices**, and **caches objects that block peripheral sleep**, which:
-
-
 - **Duplicates Windows’ work** (inefficient).
 - **Increases Bluetooth radio usage** (drains computer battery).
 - **Blocks peripheral low-power sleep** (drains peripheral battery).
 
 ### Windows’ Built-in Capabilities and Limitations
-
 Windows **already discovers and tracks** Bluetooth devices via:
-
 
 | Mechanism | Devices Covered | Battery Access? | API | Notes |
 |-----------|-----------------|-----------------|-----|-------|
-| `DeviceInformation.FindAllAsync` | All paired/remembered devices (BLE + Classic) | ⚠️ | `Windows.Devices.Enumeration` | Used **only on startup/resume/desync** |
-| PnP Device Watcher | Real-time device additions/removals | ❌ | `Windows.Devices.Enumeration` | **Maintains live device set** |
-| `BluetoothLEDevice` | BLE devices | ✅ | `Windows.Devices.Bluetooth` | **Correct API for BLE** |
+| `DeviceInformation.FindAllAsync` | All paired/remembered devices (BLE + Classic) | ⚠️ Partial | `Windows.Devices.Enumeration` | Used **only on startup/resume/desync** (ADR-002). |
+| PnP Device Watcher | Real-time device additions/removals | ❌ No (triggers scans) | `Windows.Devices.Enumeration` | **Maintains live device set** (no `FindAllAsync` in polling loop). |
+| `BluetoothLEDevice` | BLE devices | ✅ Yes (GATT) | `Windows.Devices.Bluetooth` | **Correct API for BLE** (ADR-003). |
+| GATT (0x2A19) | BLE Battery Level | ✅ Yes | `GenericAttributeProfile` | **Primary source for battery %** (ADR-004). |
+
+**Critical Realities:**
+1. **Not all Bluetooth devices report battery levels** (e.g., some legacy headsets, gaming peripherals).
+2. **0x2A1B is metadata only** (charging state) → **0x2A19 is the only percentage source** (ADR-004).
+3. **Random Private Addresses (RPA)** change MAC addresses → **Prioritize ContainerId** (ADR-005).
+4. **Caching `BluetoothLEDevice` blocks peripheral sleep** → **Cache knowledge, not objects** (ADR-014).
+5. **WinRT calls can hang** → **Hard timeouts mandatory** (ADR-017).
+6. **HID via GATT coverage is ~30–40%** (not 80–90%) → **Vendor adapters needed for full coverage** (Phase 2).
+
+---
+
+## Design Decisions That Govern This Feature
+
+---
+
+### ADR-001 — Single Non-Nullable Constructor per Class
+All data models (e.g., `DeviceBatteryInfo`) must adhere to the principle of **immutability** and **single non-nullable constructors**. Any new fields must be added as optional parameters with defaults to avoid breaking existing code.
+
+**Rule:** New fields in `DeviceBatteryInfo` or related records must be added as optional constructor parameters with default values (e.g., `bool? IsCharging = null`).
+
