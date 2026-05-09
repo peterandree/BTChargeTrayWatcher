@@ -172,47 +172,7 @@ The following methods are **realistic options** for expanding device coverage. E
 
 ---
 
-### Method 3: HFP Battery Reporting
-**Goal:** Capture battery state from **audio devices** (e.g., headsets) that use the **HFP (Hands-Free Profile)**.
-
-#### Background
-- HFP is a Bluetooth profile used for call handling.
-- Some audio devices (e.g., Plantronics, Jabra, older Sony/Bose models) report battery level via **HFP AT commands** (e.g., `AT+BTRH?`).
-- HFP battery reporting is **not standardized** and often vendor-specific.
-
-#### Implementation
-1. **Create a new `HfpBatteryReader`** implementing `IBatteryReader`.
-   - Use **`Windows.Devices.Bluetooth.Rfcomm`** to connect to the **HFP service UUID** (`0x111F`).
-   - Send **AT commands** (e.g., `AT+BTRH?`) to query battery level.
-   - Parse the response (e.g., `+BTRH: 1,80` = 80% battery).
-   - Return `DeviceBatteryInfo` with `Battery` and `IsCharging` (if available).
-
-2. **Integrate into `DeviceAggregationPipeline`**:
-   - Add `HfpBatteryReader.ReadAllAsync` to the pipeline.
-   - Merge results with GATT, Classic, HID, and AVRCP readers.
-
-3. **Handle Vendor-Specific Logic**:
-   - Maintain a **mapping of vendor IDs to known HFP battery commands** (e.g., Plantronics, Jabra).
-   - If a device's vendor ID matches a known entry, attempt to read its proprietary battery command.
-
-4. **UI Updates**:
-   - No changes required. Battery data will be displayed via existing `DeviceBatteryInfo` handling.
-
-#### Files Changed
-| File | Change |
-|------|--------|
-| `src/Monitoring/Hfp/HfpBatteryReader.cs` | New file: Implement `IBatteryReader` for HFP devices. |
-| `src/Monitoring/DeviceAggregationPipeline.cs` | Add `HfpBatteryReader.ReadAllAsync` to the pipeline. |
-| `src/Monitoring/VendorBatteryMappings.cs` | Extend to include HFP battery commands. |
-
-#### Acceptance Criteria
-- Audio devices (e.g., Plantronics Voyager, Jabra Elite) that do not support GATT or AVRCP Battery Service now have their battery levels displayed.
-- Vendor-specific HFP battery commands are read for known devices.
-- No duplicates in the merged device list.
-
----
-
-### Method 4: BLE Advertisement Scanning
+### Method 3: BLE Advertisement Scanning
 **Goal:** Capture battery state from **BLE devices that broadcast battery level in advertisements** (e.g., beacons, wearables).
 
 #### Background
@@ -255,7 +215,7 @@ The following methods are **realistic options** for expanding device coverage. E
 
 ---
 
-### Method 5: PnP Device Watcher
+### Method 4: PnP Device Watcher
 **Goal:** Improve **device discovery** and **connection state monitoring** using Windows' **`DeviceWatcher`** API.
 
 #### Background
@@ -298,6 +258,47 @@ The following methods are **realistic options** for expanding device coverage. E
 
 ---
 
+### Method 5: HFP Battery Reporting (Optional)
+**Goal:** Capture battery state from **audio devices** (e.g., headsets) that use the **HFP (Hands-Free Profile)**.
+
+#### Background
+- HFP is a Bluetooth profile used for call handling.
+- Some **legacy audio devices** (e.g., Plantronics, Jabra, older Sony/Bose models) report battery level via **HFP AT commands** (e.g., `AT+BTRH?`).
+- HFP battery reporting is **not standardized** and often vendor-specific.
+- **Realism on Windows:** Low (~10–20% of older headsets). Most modern headsets use GATT or AVRCP for battery reporting.
+
+#### Implementation
+1. **Create a new `HfpBatteryReader`** implementing `IBatteryReader`.
+   - Use **`Windows.Devices.Bluetooth.Rfcomm`** to connect to the **HFP service UUID** (`0x111F`).
+   - Send **AT commands** (e.g., `AT+BTRH?`) to query battery level.
+   - Parse the response (e.g., `+BTRH: 1,80` = 80% battery).
+   - Return `DeviceBatteryInfo` with `Battery` and `IsCharging` (if available).
+
+2. **Integrate into `DeviceAggregationPipeline`**:
+   - Add `HfpBatteryReader.ReadAllAsync` to the pipeline.
+   - Merge results with GATT, Classic, HID, and AVRCP readers.
+
+3. **Handle Vendor-Specific Logic**:
+   - Maintain a **mapping of vendor IDs to known HFP battery commands** (e.g., Plantronics, Jabra).
+   - If a device's vendor ID matches a known entry, attempt to read its proprietary battery command.
+
+4. **UI Updates**:
+   - No changes required. Battery data will be displayed via existing `DeviceBatteryInfo` handling.
+
+#### Files Changed
+| File | Change |
+|------|--------|
+| `src/Monitoring/Hfp/HfpBatteryReader.cs` | New file: Implement `IBatteryReader` for HFP devices. |
+| `src/Monitoring/DeviceAggregationPipeline.cs` | Add `HfpBatteryReader.ReadAllAsync` to the pipeline. |
+| `src/Monitoring/VendorBatteryMappings.cs` | Extend to include HFP battery commands. |
+
+#### Acceptance Criteria
+- Audio devices (e.g., Plantronics Voyager, Jabra Elite) that do not support GATT or AVRCP Battery Service now have their battery levels displayed.
+- Vendor-specific HFP battery commands are read for known devices.
+- No duplicates in the merged device list.
+
+---
+
 ### Method 6: Vendor-Specific APIs (Optional)
 **Goal:** Support **proprietary battery monitoring** for devices from specific manufacturers (e.g., Intel, Broadcom, Logitech, Sony).
 
@@ -323,7 +324,7 @@ The following methods are **realistic options** for expanding device coverage. E
    - Merge results with other readers.
 
 4. **Configuration**:
-   - Add a **setting** to enable/disable vendor-specific monitoring (default: enabled).
+   - Add a **setting** to enable/disable vendor-specific monitoring (default: disabled).
    - Log **warnings** if a vendor-specific API fails to load (e.g., Intel SDK not installed).
 
 #### Files Changed
@@ -348,18 +349,18 @@ The following methods are **realistic options** for expanding device coverage. E
 
 ### Bluetooth LE Audio (LC3) Battery Reporting
 - **Bluetooth LE Audio** (introduced in **Bluetooth 5.2**) includes a **new battery reporting mechanism** for hearing aids and other audio devices.
-- This is **very new** (2020+) and **not widely adopted yet**, but may become relevant for future-proofing.
-- **Action:** Monitor Bluetooth SIG specifications for LE Audio battery reporting. Skip implementation for now, but revisit if users report missing battery data for LE Audio devices.
+- **Realism on Windows:** Very low (~1–2% of users in 2026). Windows 11 22H2+ includes experimental LE Audio support, but it is not yet widely adopted.
+- **Action:** Skip implementation for now. Most LE Audio devices will also support **GATT 0x180F** for backward compatibility. Revisit in 2027–2028 if adoption increases.
 
 ### A2DP Battery Reporting
-- **A2DP (Advanced Audio Distribution Profile)** is primarily for audio streaming, but **some devices** (e.g., certain Sony headphones) may expose battery via **A2DP vendor-specific extensions**.
-- This is **very rare** and often overlaps with AVRCP or GATT.
-- **Action:** Skip implementation for now. If users report missing battery data for A2DP devices, investigate whether they can be covered by AVRCP or GATT.
+- **A2DP (Advanced Audio Distribution Profile)** is primarily for audio streaming and **does not include battery reporting** in the standard.
+- **Realism on Windows:** Nonexistent. A2DP is not designed for battery monitoring.
+- **Action:** Skip implementation. Focus on **GATT, AVRCP, or HID** for audio devices.
 
 ### Google Fast Pair Battery Reporting
 - **Google Fast Pair** (used by Pixel Buds, some Sony/Bose headphones) exposes battery level via a **proprietary Bluetooth service**.
-- This is **Android-specific** and **not directly accessible on Windows**, but some devices may still advertise battery in a way that can be read via **BLE advertisements** or **GATT**.
-- **Action:** Skip implementation for now. If users report missing battery data for Fast Pair devices, investigate whether they broadcast battery in advertisements.
+- **Realism on Windows:** Very low (~1% of users). Fast Pair is Android-specific, and most devices also support **GATT 0x180F** or **BLE advertisements**.
+- **Action:** Skip implementation for now. If users report missing battery data for Fast Pair devices, investigate whether they broadcast battery in advertisements or support GATT.
 
 ---
 
@@ -371,17 +372,17 @@ The following table prioritizes the proposed methods based on **feasibility**, *
 |--------|--------|----------|------------|----------|-------|
 | **PnP Device Watcher** | Low | Medium | ✅ Yes | **1 (High)** | Improves device discovery; minimal changes. |
 | **HID Battery Reporting** | Medium | Medium | ❌ No | **2 (High)** | Covers keyboards/mice; aligns with existing GATT/Classic. |
-| **HFP Battery Reporting** | Medium | Low | ❌ No | **3 (Medium)** | Covers legacy headsets; uses RFCOMM + AT commands. |
-| **BLE Advertisement Scanning** | Medium | Low | ✅ Yes | **4 (Medium)** | Passive monitoring; limited to devices that broadcast battery. |
-| **AVRCP Battery Reporting** | High | Low | ❌ No | **5 (Medium)** | Audio devices only; vendor-specific. |
+| **BLE Advertisement Scanning** | Medium | Low | ✅ Yes | **3 (Medium)** | Passive monitoring; limited to devices that broadcast battery. |
+| **AVRCP Battery Reporting** | High | Low | ❌ No | **4 (Medium)** | Audio devices only; vendor-specific. |
+| **HFP Battery Reporting** | Medium | Low | ❌ No | **5 (Low)** | Legacy headsets only; optional. |
 | **Vendor-Specific APIs** | High | Low | ❌ No | **6 (Low)** | Hardware-dependent; optional. |
 
 **Recommended Implementation Order:**
 1. **PnP Device Watcher** (Quick win for device discovery).
 2. **HID Battery Reporting** (Covers common peripherals).
-3. **HFP Battery Reporting** (Covers legacy headsets).
-4. **BLE Advertisement Scanning** (Passive monitoring for wearables/beacons).
-5. **AVRCP Battery Reporting** (Audio devices).
+3. **BLE Advertisement Scanning** (Passive monitoring for wearables/beacons).
+4. **AVRCP Battery Reporting** (Audio devices).
+5. **HFP Battery Reporting** (Optional, for legacy headsets).
 6. **Vendor-Specific APIs** (Optional, for advanced users).
 
 ---
@@ -447,16 +448,16 @@ Add the following settings to `ThresholdSettings` to control the new methods:
   "Low": 20,
   "High": 80,
   "EnableHidBatteryMonitoring": true,
-  "EnableHfpBatteryMonitoring": true,
   "EnableAvrcpBatteryMonitoring": true,
   "EnableBleAdvertisementMonitoring": true,
+  "EnableHfpBatteryMonitoring": false,
   "EnableVendorBatteryMonitoring": false,
   "BleAdvertisementScanIntervalSeconds": 30
 }
 ```
 
 **Notes:**
-- All new settings default to `true` (enabled) except `EnableVendorBatteryMonitoring` (disabled by default due to dependency risks).
+- All new settings default to `true` (enabled) except `EnableHfpBatteryMonitoring` and `EnableVendorBatteryMonitoring` (disabled by default due to low realism or dependency risks).
 - `BleAdvertisementScanIntervalSeconds` allows users to adjust the frequency of BLE advertisement scanning (default: 30 seconds).
 
 ---
@@ -495,10 +496,10 @@ Add the following settings to `ThresholdSettings` to control the new methods:
 |------|---------|
 | `src/Monitoring/Hid/HidBatteryReader.cs` | HID battery monitoring. |
 | `src/Monitoring/Avrcp/AvrcpBatteryReader.cs` | AVRCP battery monitoring. |
-| `src/Monitoring/Hfp/HfpBatteryReader.cs` | HFP battery monitoring. |
+| `src/Monitoring/Hfp/HfpBatteryReader.cs` | HFP battery monitoring (optional). |
 | `src/Monitoring/BleAdvertisement/BleAdvertisementBatteryReader.cs` | BLE advertisement scanning. |
 | `src/Monitoring/DeviceWatcherService.cs` | PnP device watcher for real-time discovery. |
-| `src/Monitoring/Vendor/VendorBatteryReader.cs` | Vendor-specific battery monitoring. |
+| `src/Monitoring/Vendor/VendorBatteryReader.cs` | Vendor-specific battery monitoring (optional). |
 | `src/Monitoring/Vendor/IVendorBatteryHandler.cs` | Interface for vendor handlers. |
 | `src/Monitoring/Vendor/IntelBatteryHandler.cs` | Intel-specific handler. |
 | `src/Monitoring/Vendor/LogitechBatteryHandler.cs` | Logitech-specific handler. |
@@ -544,10 +545,10 @@ Add the following settings to `ThresholdSettings` to control the new methods:
 ## Next Steps
 1. **Implement PnP Device Watcher** (high priority, low effort).
 2. **Implement HID Battery Reporting** (high priority, medium effort).
-3. **Implement HFP Battery Reporting** (medium priority, medium effort).
-4. **Update `DeviceBatteryInfo`** to include `BatterySource`.
-5. **Add Settings** for enabling/disabling new methods.
-6. **Test and Validate** with a variety of Bluetooth devices (HID, audio, wearables).
-7. **Implement BLE Advertisement Scanning** (medium priority).
-8. **Implement AVRCP Battery Reporting** (medium priority, if time permits).
+3. **Implement BLE Advertisement Scanning** (medium priority).
+4. **Implement AVRCP Battery Reporting** (medium priority, if time permits).
+5. **Update `DeviceBatteryInfo`** to include `BatterySource`.
+6. **Add Settings** for enabling/disabling new methods.
+7. **Test and Validate** with a variety of Bluetooth devices (HID, audio, wearables).
+8. **Implement HFP Battery Reporting** (low priority, optional).
 9. **Implement Vendor-Specific APIs** (low priority, optional).
