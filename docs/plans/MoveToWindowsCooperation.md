@@ -10,10 +10,10 @@
 > *"Windows discovers the devices; we **extract** the battery—**using the correct APIs, prioritizing peripheral battery life over reconnection speed, and handling Windows Bluetooth stack quirks**."*
 
 **What This Means:**
-✅ **Use Windows’ device list** (`DeviceInformation` + PnP Watcher) as the **primary source** for Bluetooth devices.
-✅ **Read battery levels** using **transport-aware protocols** (BLE: `BluetoothLEDevice`, GATT 0x2A19).
+✅ Use Windows’ device list (`DeviceInformation` + PnP Watcher) as the **primary source** for Bluetooth devices.
+✅ Read battery levels using **transport-aware protocols** (BLE: `BluetoothLEDevice`, GATT 0x2A19).
 ✅ **Prioritize peripheral battery life** by **not caching `BluetoothLEDevice` objects** (prevents sleep blocking).
-✅ **Handle edge cases** where Windows doesn’t expose battery (e.g., vendor-specific protocols) **only if users report missing data**.
+✅ Handle edge cases where Windows doesn’t expose battery (e.g., vendor-specific protocols) **only if users report missing data**.
 ✅ **Deduplicate devices** using **ContainerId as the primary key** (MAC as fallback for RPA devices).
 ✅ **Cache capabilities, not connections** to avoid blocking peripheral low-power states.
 ✅ **Use hard timeouts** for all WinRT calls to prevent hangs.
@@ -26,10 +26,10 @@
 ❌ **Do NOT cache `BluetoothLEDevice` objects** (blocks peripheral sleep).
 
 **Why This Approach?**
-- **Lower Bluetooth radio usage** → Better battery life for the computer.
+- Lower Bluetooth radio usage → Better battery life for the computer.
 - **Peripheral-friendly** → Allows peripherals to enter low-power sleep states.
-- **Simpler code** → Less complexity, fewer bugs, easier maintenance.
-- **More reliable** → Uses Windows’ tested device enumeration + handles edge cases gracefully.
+- Simpler code → Less complexity, fewer bugs, easier maintenance.
+- More reliable → Uses Windows’ tested device enumeration + handles edge cases gracefully.
 - **Production-ready** → Addresses all expert critiques (BLE API, 0x2A1B, caching, async, lifecycle, timeouts, RPA).
 
 ---
@@ -42,8 +42,8 @@ The project currently supports:
 
 **Problem:**
 The existing approach **assumes responsibility for device discovery**, **uses incorrect APIs for BLE devices**, and **caches objects that block peripheral sleep**, which:
-- **Duplicates Windows’ work** (inefficient).
-- **Increases Bluetooth radio usage** (drains computer battery).
+- Duplicates Windows’ work (inefficient).
+- Increases Bluetooth radio usage (drains computer battery).
 - **Blocks peripheral low-power sleep** (drains peripheral battery).
 
 ### Windows’ Built-in Capabilities and Limitations
@@ -57,7 +57,7 @@ Windows **already discovers and tracks** Bluetooth devices via:
 | GATT (0x2A19) | BLE Battery Level | ✅ Yes | `GenericAttributeProfile` | **Primary source for battery %** (ADR-004). |
 
 **Critical Realities:**
-1. **Not all Bluetooth devices report battery levels** (e.g., some legacy headsets, gaming peripherals).
+1. Not all Bluetooth devices report battery levels (e.g., some legacy headsets, gaming peripherals).
 2. **0x2A1B is metadata only** (charging state) → **0x2A19 is the only percentage source** (ADR-004).
 3. **Random Private Addresses (RPA)** change MAC addresses → **Prioritize ContainerId** (ADR-005).
 4. **Caching `BluetoothLEDevice` blocks peripheral sleep** → **Cache knowledge, not objects** (ADR-014).
@@ -123,46 +123,3 @@ A single physical device may appear as **multiple `DeviceInformation` entries** 
 - Cache **only confirmed successes** (not failures).
 - **Retry after 5 minutes** for unknown/failed protocols.
 - Invalidate cache on reconnect/resume/radio state change.
-
----
-
-### ADR-007 — Minimal Bluetooth Radio Usage
-Limit radio usage to **avoid disconnections** and **save battery**.
-
-**Rule:**
-- **1 concurrent Bluetooth operation** (default, configurable up to 3).
-- **No caching of `BluetoothLEDevice` objects** (prevents peripheral sleep blocking).
-- **Cache knowledge, not objects** (e.g., "Device supports GATT 0x2A19").
-
----
-
-### ADR-008 — Graceful Degradation
-If a protocol fails to read battery for a device, the app must **continue trying other protocols** without blocking the UI or crashing.
-
-**Rule:**
-- **Never fail silently** (log warnings for debugging).
-- **Always try the next protocol** in the fallback chain.
-- **Treat missing battery data as `null`** (not an error).
-- **Skip devices after 3 consecutive failures** (configurable).
-
----
-
-### ADR-009 — Realistic Performance Targets
-Battery monitoring is **not a real-time system**. Latency is acceptable if it doesn’t block the UI.
-
-**Targets:**
-- **Ideal:** <2s (cached knowledge, no radio wakeups).
-- **Acceptable:** <5s (some uncached reads).
-- **Degraded:** <10s (skip slow protocols).
-- **Per-operation timeout:** 2s (hard limit for WinRT calls).
-
----
-
-### ADR-010 — SynchronizationContext Over Control.Invoke
-All UI updates must use `SynchronizationContext.Post`.
-
----
-
-### ADR-011 — Single Source of Alert Truth
-`PollingOrchestrator` is the **only authority** on alerts.
-
