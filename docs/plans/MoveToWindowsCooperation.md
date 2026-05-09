@@ -75,3 +75,94 @@ All data models (e.g., `DeviceBatteryInfo`) must adhere to the principle of **im
 
 **Rule:** New fields in `DeviceBatteryInfo` or related records must be added as optional constructor parameters with default values (e.g., `bool? IsCharging = null`).
 
+---
+
+### ADR-002 — Windows-First Device Discovery
+**All device discovery must rely on Windows’ built-in mechanisms** (`DeviceInformation` + PnP Watcher). Custom scanning (e.g., BLE advertisements for unpaired devices) is **explicitly out of scope**.
+
+**Rule:**
+- **Primary source:** PnP Device Watcher **maintains a live set** of devices.
+- **Secondary:** `DeviceInformation.FindAllAsync` is used **only on startup, resume, or watcher desync**.
+
+---
+
+### ADR-003 — Transport-Aware API Usage
+**BLE and Classic Bluetooth require different APIs.** Using the wrong API (e.g., `BluetoothDevice` for BLE-only devices) will cause **intermittent failures**.
+
+**Rule:**
+- Use **`BluetoothLEDevice.FromIdAsync`** for **BLE devices** (detected via `DeviceProfileClassifier`).
+- **Never use `BluetoothDevice` for BLE-only devices** (it targets Classic/dual-mode abstractions).
+- **Always prioritize BLE/GATT** for battery reading, even if a Classic interface exists (more battery-efficient for peripherals).
+
+---
+
+### ADR-004 — Correct GATT Characteristic Handling
+**0x2A19 (Battery Level) is the primary source for battery percentage.** 0x2A1B (Battery Power State) is **metadata only** (charging state, power source) and **must not be treated as a percentage source**.
+
+**Rule:**
+- **0x2A19 (Battery Level):** Primary source for battery **percentage (0–100%)**.
+- **0x2A1B (Battery Power State):** Supplemental **metadata** (charging state, power source).
+- **Do NOT** use `0x2A1B` as a fallback for battery percentage.
+
+---
+
+### ADR-005 — Physical Device Identity Normalization
+A single physical device may appear as **multiple `DeviceInformation` entries** in Windows. To avoid duplicates, we **normalize device identities** using **ContainerId as the primary key** (handles Random Private Addresses).
+
+**Rule:**
+- **Primary key:** `ContainerId` (stable across RPA changes).
+- **Secondary key:** MAC address (fallback, may change for privacy-enabled devices).
+- **Update MAC** if it changes (for RPA-enabled devices).
+
+---
+
+### ADR-006 — Success-Only Capability Caching
+**Transient failures ≠ lack of support.** Caching failures permanently is **dangerous** and can lead to **stale state**.
+
+**Rule:**
+- Cache **only confirmed successes** (not failures).
+- **Retry after 5 minutes** for unknown/failed protocols.
+- Invalidate cache on reconnect/resume/radio state change.
+
+---
+
+### ADR-007 — Minimal Bluetooth Radio Usage
+Limit radio usage to **avoid disconnections** and **save battery**.
+
+**Rule:**
+- **1 concurrent Bluetooth operation** (default, configurable up to 3).
+- **No caching of `BluetoothLEDevice` objects** (prevents peripheral sleep blocking).
+- **Cache knowledge, not objects** (e.g., "Device supports GATT 0x2A19").
+
+---
+
+### ADR-008 — Graceful Degradation
+If a protocol fails to read battery for a device, the app must **continue trying other protocols** without blocking the UI or crashing.
+
+**Rule:**
+- **Never fail silently** (log warnings for debugging).
+- **Always try the next protocol** in the fallback chain.
+- **Treat missing battery data as `null`** (not an error).
+- **Skip devices after 3 consecutive failures** (configurable).
+
+---
+
+### ADR-009 — Realistic Performance Targets
+Battery monitoring is **not a real-time system**. Latency is acceptable if it doesn’t block the UI.
+
+**Targets:**
+- **Ideal:** <2s (cached knowledge, no radio wakeups).
+- **Acceptable:** <5s (some uncached reads).
+- **Degraded:** <10s (skip slow protocols).
+- **Per-operation timeout:** 2s (hard limit for WinRT calls).
+
+---
+
+### ADR-010 — SynchronizationContext Over Control.Invoke
+All UI updates must use `SynchronizationContext.Post`.
+
+---
+
+### ADR-011 — Single Source of Alert Truth
+`PollingOrchestrator` is the **only authority** on alerts.
+
