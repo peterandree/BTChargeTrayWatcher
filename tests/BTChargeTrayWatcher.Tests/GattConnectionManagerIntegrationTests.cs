@@ -72,6 +72,14 @@ public sealed class GattConnectionManagerIntegrationTests
         var task = mgr.TryReadBatteryAsync("dev-cancel", 5000, cts.Token);
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => task);
+        try
+        {
+            await task;
+            Assert.False(true, "Expected operation to be canceled");
+        }
+        catch (OperationCanceledException)
+        {
+            // expected - includes TaskCanceledException
+        }
     }
 }

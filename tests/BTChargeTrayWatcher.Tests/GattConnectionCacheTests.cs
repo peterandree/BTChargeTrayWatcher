@@ -59,4 +59,23 @@ public sealed class GattConnectionCacheTests
         Assert.NotNull(cache.GetEndpoint("dev2"));
         Assert.False(fake2.Disposed);
     }
+
+    [Fact]
+    public void SetEndpoint_ReplacesOld_DisposesOld()
+    {
+        var cache = new GattConnectionCache();
+        var oldFake = new FakeDisposable();
+        var oldEndpoint = new CachedGattEndpoint(oldFake);
+        cache.SetEndpoint("dev1", oldEndpoint);
+
+        var newFake = new FakeDisposable();
+        var newEndpoint = new CachedGattEndpoint(newFake);
+        cache.SetEndpoint("dev1", newEndpoint);
+
+        Assert.True(oldFake.Disposed, "Old endpoint should be disposed when replaced");
+        var got = cache.GetEndpoint("dev1");
+        Assert.NotNull(got);
+        Assert.Same(newEndpoint, got);
+        Assert.False(newFake.Disposed, "New endpoint should not be disposed immediately");
+    }
 }
