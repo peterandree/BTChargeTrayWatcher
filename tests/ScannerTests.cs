@@ -19,9 +19,7 @@ public sealed class ScannerTests : IAsyncDisposable
     {
         public List<DeviceBatteryInfo> Results { get; set; } = [];
 
-        public Task<List<DeviceBatteryInfo>> ReadAsync(
-            Action<string, string, int?>? onDeviceFound,
-            CancellationToken ct) => Task.FromResult(Results);
+        public Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct) => Task.FromResult(Results);
     }
 
     private static DeviceBatteryInfo Dev(string id, string name, int? pct, bool? charging = null) =>
