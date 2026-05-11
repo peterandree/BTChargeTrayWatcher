@@ -1,4 +1,9 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 
@@ -7,15 +12,22 @@ namespace BTChargeTrayWatcher;
 public sealed class GattBatteryReader : IDisposable, IBatteryReader
 {
     private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
-    private static readonly TimeSpan PerDeviceTimeout = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan DefaultPerDeviceTimeout = TimeSpan.FromSeconds(4);
 
+    private readonly TimeSpan _perDeviceTimeout;
     private readonly SemaphoreSlim _deviceReadGate = new(PollingDefaults.GattMaxConcurrentReads, PollingDefaults.GattMaxConcurrentReads);
     private readonly GattConnectionCache _cache = new();
     private readonly GattBatteryProcessor _processor;
 
-    public GattBatteryReader()
+    public GattBatteryReader() : this(null, null)
     {
-        _processor = new GattBatteryProcessor(_cache);
+    }
+
+    // Internal constructor used by tests to inject a processor override and a custom per-device timeout.
+    internal GattBatteryReader(Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? testProcessOverride, TimeSpan? perDeviceTimeout)
+    {
+        _perDeviceTimeout = perDeviceTimeout ?? DefaultPerDeviceTimeout;
+        _processor = new GattBatteryProcessor(_cache, testProcessOverride);
     }
 
     public Task<List<DeviceBatteryInfo>> ReadAllAsync() =>
@@ -34,17 +46,27 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         catch (Exception ex) when (GattBatteryProcessor.IsExpectedBluetoothException(ex))
         {
             Debug.WriteLine($"[GattBatteryReader] Radio unavailable: {ex.Message}");
-            return [];
+            return new List<DeviceBatteryInfo>();
         }
 
-        var currentDeviceIds = new HashSet<string>(dis.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var info in dis)
+        var deviceList = dis.Select(i => (Id: i.Id, Name: i.Name)).ToList();
+        return await ReadAllAsync(deviceList, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Internal helper: process a provided device list. This enables deterministic tests
+    // without depending on WinRT device enumeration.
+    internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(IEnumerable<(string Id, string Name)> deviceInfos, CancellationToken cancellationToken)
+    {
+        var list = deviceInfos.ToList();
+
+        var currentDeviceIds = new HashSet<string>(list.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var info in list)
             currentDeviceIds.Add(info.Id);
 
         _cache.PruneStaleDevices(currentDeviceIds);
 
-        var readTasks = new List<Task<GattDeviceReadResult>>(dis.Count);
-        foreach (var info in dis)
+        var readTasks = new List<Task<GattDeviceReadResult>>(list.Count);
+        foreach (var info in list)
         {
             cancellationToken.ThrowIfCancellationRequested();
             readTasks.Add(ProcessDeviceBoundedAsync(info.Id, info.Name, cancellationToken));
@@ -52,7 +74,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
 
         var perDeviceResults = await Task.WhenAll(readTasks).ConfigureAwait(false);
 
-        var results = new List<DeviceBatteryInfo>(dis.Count);
+        var results = new List<DeviceBatteryInfo>(list.Count);
         foreach (GattDeviceReadResult r in perDeviceResults)
         {
             if (!string.IsNullOrWhiteSpace(r.Name))
@@ -70,7 +92,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(PerDeviceTimeout);
+            timeoutCts.CancelAfter(_perDeviceTimeout);
 
             try
             {
