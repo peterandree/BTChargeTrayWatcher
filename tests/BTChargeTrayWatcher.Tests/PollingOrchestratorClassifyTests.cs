@@ -22,7 +22,7 @@ public sealed class PollingOrchestratorClassifyTests
         var s = settings ?? new ThresholdSettings();
         var opts = new PollingOrchestratorOptions(
             Settings:          s,
-            Notifier:          new NullNotificationService(),
+            Notifier:          NullNotificationService.Instance,
             LastKnown:         new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase),
             Tracker:           new TaskTracker(),
             ReadDevices:       _ => Task.FromResult(new List<DeviceBatteryInfo>()),
