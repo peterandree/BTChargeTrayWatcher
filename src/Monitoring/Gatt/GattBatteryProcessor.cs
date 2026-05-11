@@ -14,15 +14,39 @@ internal sealed class GattBatteryProcessor
     private static readonly Guid BatteryPowerStateUuid  = new("00002a1b-0000-1000-8000-00805f9b34fb");
 
     private readonly GattConnectionCache _cache;
+    private readonly Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? _testProcessOverride;
 
     public GattBatteryProcessor(GattConnectionCache cache)
     {
         _cache = cache;
     }
 
+    // Internal constructor for tests that allows injecting a deterministic processor override
+    internal GattBatteryProcessor(GattConnectionCache cache, Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? testProcessOverride)
+    {
+        _cache = cache;
+        _testProcessOverride = testProcessOverride;
+    }
+
     public async Task<GattDeviceReadResult> ProcessDeviceAsync(
         string deviceId, string fallbackName, CancellationToken cancellationToken)
     {
+        if (_testProcessOverride is not null)
+        {
+            try
+            {
+                return await _testProcessOverride(deviceId, fallbackName, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GattBatteryProcessor][TestOverride] fault: {ex.Message}");
+                return new GattDeviceReadResult(deviceId, fallbackName, null);
+            }
+        }
         var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
         if (device is null)
             return new GattDeviceReadResult(deviceId, fallbackName, null);
