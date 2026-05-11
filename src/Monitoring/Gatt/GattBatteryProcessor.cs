@@ -79,7 +79,27 @@ internal sealed class GattBatteryProcessor
             catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
             {
                 Debug.WriteLine($"[GattBatteryProcessor] Cached characteristic failed: {ex.Message}");
+                // Evict the cached endpoint because it failed.
                 _cache.RemoveEndpoint(deviceId);
+
+                // Also remove any cached BluetoothLEDevice to avoid stale WinRT instances
+                // and force a fresh FromIdAsync on the subsequent attempt.
+                _cache.RemoveDevice(deviceId);
+
+                // Attempt to obtain a fresh device instance. If we cannot, give up.
+                device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
+                if (device is null)
+                    return new GattDeviceReadResult(deviceId, deviceName, null);
+
+                if (device.ConnectionStatus != Windows.Devices.Bluetooth.BluetoothConnectionStatus.Connected)
+                {
+                    // Device still not connected; evict and give up this cycle.
+                    _cache.RemoveDevice(deviceId);
+                    return new GattDeviceReadResult(deviceId, deviceName, null);
+                }
+
+                // Update display name from fresh device if available and continue with discovery.
+                deviceName = GetDeviceName(device) ?? deviceName;
             }
         }
 
