@@ -8,7 +8,7 @@ InstallerType: portable
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v2.0.0/BTChargeTrayWatcher.exe
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSha256: D6F49208DE9EC3BFA2193C7862F0D060EEAF04E277B162132DC9AD266AF298DA
     PortableCommandAlias: BTChargeTrayWatcher
 ManifestType: installer
 ManifestVersion: 1.6.0
