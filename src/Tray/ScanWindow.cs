@@ -128,12 +128,39 @@ public partial class ScanWindow : Form
         _list.Items.Add(newItem);
     }
 
-    public void OnScanComplete(int count)
+    internal void OnScanComplete(int batteryDeviceCount, IReadOnlyList<WatchedDevice> trackedDevices)
     {
         if (_scanComplete || IsDisposed) return;
         _scanComplete = true;
 
-        _status.Text = $"Scan complete. {count} device{(count == 1 ? "" : "s")} found.";
+        // Add connected tracked devices that weren't found by the battery readers.
+        int noBatteryCount = 0;
+        var shownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ListViewItem item in _list.Items)
+        {
+            if (item.Tag is string id)
+                shownIds.Add(id);
+        }
+
+        foreach (var device in trackedDevices)
+        {
+            if (!device.IsConnected) continue;
+            if (shownIds.Contains(device.DeviceId)) continue;
+
+            var newItem = new ListViewItem(device.Name) { Tag = device.DeviceId };
+            newItem.SubItems.Add("-");
+            newItem.SubItems.Add("[No battery service]");
+            newItem.ForeColor = Color.Gray;
+            _list.Items.Add(newItem);
+            noBatteryCount++;
+        }
+
+        int totalShown = _list.Items.Count;
+        string statusText = noBatteryCount > 0
+            ? $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found ({noBatteryCount} without battery service)."
+            : $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found.";
+
+        _status.Text = statusText;
         _progress.Style = ProgressBarStyle.Blocks;
         _progress.Value = 100;
     }

@@ -50,6 +50,13 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
+    /// <summary>
+    /// Returns all currently tracked devices from the device watcher (cooperation path only).
+    /// On the legacy path this returns an empty list.
+    /// </summary>
+    internal IReadOnlyList<WatchedDevice> TrackedDevices =>
+        _deviceWatcher?.CurrentDevices ?? [];
+
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
