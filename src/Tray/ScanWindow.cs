@@ -135,17 +135,22 @@ public partial class ScanWindow : Form
 
         // Add all paired tracked devices that weren't found by the battery readers.
         // This ensures sleeping BLE devices and devices without battery service are visible.
+        // Dedup by both ID and name: the same physical device can appear in the BLE watcher,
+        // Classic watcher, and battery readers with completely different device IDs.
         int noBatteryCount = 0;
         var shownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var shownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (ListViewItem item in _list.Items)
         {
             if (item.Tag is string id)
                 shownIds.Add(id);
+            shownNames.Add(item.Text);
         }
 
         foreach (var device in trackedDevices)
         {
             if (shownIds.Contains(device.DeviceId)) continue;
+            if (shownNames.Contains(device.Name)) continue;
 
             string reason = device.IsConnected
                 ? "[No battery service]"
@@ -156,6 +161,7 @@ public partial class ScanWindow : Form
             newItem.SubItems.Add(reason);
             newItem.ForeColor = Color.Gray;
             _list.Items.Add(newItem);
+            shownNames.Add(device.Name);
             noBatteryCount++;
         }
 
