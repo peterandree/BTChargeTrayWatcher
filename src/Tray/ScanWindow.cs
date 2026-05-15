@@ -133,7 +133,8 @@ public partial class ScanWindow : Form
         if (_scanComplete || IsDisposed) return;
         _scanComplete = true;
 
-        // Add connected tracked devices that weren't found by the battery readers.
+        // Add all paired tracked devices that weren't found by the battery readers.
+        // This ensures sleeping BLE devices and devices without battery service are visible.
         int noBatteryCount = 0;
         var shownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (ListViewItem item in _list.Items)
@@ -144,12 +145,15 @@ public partial class ScanWindow : Form
 
         foreach (var device in trackedDevices)
         {
-            if (!device.IsConnected) continue;
             if (shownIds.Contains(device.DeviceId)) continue;
+
+            string reason = device.IsConnected
+                ? "[No battery service]"
+                : "[Sleeping / not connected]";
 
             var newItem = new ListViewItem(device.Name) { Tag = device.DeviceId };
             newItem.SubItems.Add("-");
-            newItem.SubItems.Add("[No battery service]");
+            newItem.SubItems.Add(reason);
             newItem.ForeColor = Color.Gray;
             _list.Items.Add(newItem);
             noBatteryCount++;
@@ -157,7 +161,7 @@ public partial class ScanWindow : Form
 
         int totalShown = _list.Items.Count;
         string statusText = noBatteryCount > 0
-            ? $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found ({noBatteryCount} without battery service)."
+            ? $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found ({noBatteryCount} without battery data)."
             : $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found.";
 
         _status.Text = statusText;
