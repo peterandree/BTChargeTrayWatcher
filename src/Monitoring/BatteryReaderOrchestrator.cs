@@ -34,13 +34,18 @@ internal sealed class BatteryReaderOrchestrator
     {
         ct.ThrowIfCancellationRequested();
 
-        // Phase 1: GATT per-device reads (only for BLE devices that should be attempted)
+        // Phase 1: GATT per-device reads (only for connected BLE devices that should be attempted)
         var gattTasks = new List<Task<GattReadOutcome>>();
         foreach (var dev in watchedDevices)
         {
-            if (dev.IsBle && _capabilityCache.ShouldAttempt(dev.DeviceId))
+            if (dev.IsBle && dev.IsConnected && _capabilityCache.ShouldAttempt(dev.DeviceId))
             {
                 gattTasks.Add(SafeGattReadAsync(dev, ct));
+            }
+            else if (dev.IsBle && !dev.IsConnected)
+            {
+                Debug.WriteLine(
+                    $"[BatteryReaderOrchestrator] Skipping '{dev.Name}' — not connected (sleeping)");
             }
         }
 

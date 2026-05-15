@@ -1,20 +1,20 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using Windows.Devices.Bluetooth;
-using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 
 namespace BTChargeTrayWatcher;
 
 /// <summary>
 /// Monitors paired Bluetooth devices via WinRT <see cref="DeviceWatcher"/>.
-/// Uses two watchers (BLE GATT Battery Service + Classic BT paired) and
-/// serialises all events through a <see cref="Channel{T}"/> to avoid async void.
-/// Fires <see cref="DevicesChanged"/> when the tracked device list changes.
+/// Uses two watchers (BLE paired + Classic BT paired) and serialises all
+/// events through a <see cref="Channel{T}"/> to avoid async void.
+/// The BLE watcher requests <c>System.Devices.Aep.IsConnected</c> so we can
+/// skip sleeping peripherals without touching the radio (#78).
 /// </summary>
 internal sealed class DeviceWatcherService : IAsyncDisposable
 {
-    private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
+    private const string IsConnectedProperty = "System.Devices.Aep.IsConnected";
 
     private readonly Channel<DeviceWatcherEvent> _channel =
         Channel.CreateUnbounded<DeviceWatcherEvent>(new UnboundedChannelOptions
@@ -32,7 +32,7 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
     private DeviceWatcher? _classicWatcher;
     private volatile bool _disposed;
 
-    /// <summary>Raised (on the channel processing thread) when devices are added or removed.</summary>
+    /// <summary>Raised (on the channel processing thread) when devices are added, removed, or connection state changes.</summary>
     internal event Action? DevicesChanged;
 
     internal DeviceWatcherService()
@@ -54,9 +54,12 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Watcher 1: BLE devices exposing GATT Battery Service (0x180F)
-        string bleSelector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
-        _bleWatcher = DeviceInformation.CreateWatcher(bleSelector);
+        // Watcher 1: BLE paired devices — request IsConnected so we can skip sleeping peripherals.
+        string bleSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
+        _bleWatcher = DeviceInformation.CreateWatcher(
+            bleSelector,
+            [IsConnectedProperty],
+            DeviceInformationKind.AssociationEndpoint);
         WireWatcher(_bleWatcher, isBle: true);
         _bleWatcher.Start();
 
@@ -72,10 +75,11 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var bleSelector = GattDeviceService.GetDeviceSelectorFromUuid(BatterySvcUuid);
+        var bleSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
         var classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
 
-        var bleDevicesTask = DeviceInformation.FindAllAsync(bleSelector).AsTask(ct);
+        var bleDevicesTask = DeviceInformation.FindAllAsync(
+            bleSelector, [IsConnectedProperty], DeviceInformationKind.AssociationEndpoint).AsTask(ct);
         var classicDevicesTask = DeviceInformation.FindAllAsync(classicSelector).AsTask(ct);
 
         await Task.WhenAll(bleDevicesTask, classicDevicesTask).ConfigureAwait(false);
@@ -87,13 +91,14 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
             foreach (var d in bleDevicesTask.Result)
             {
                 string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                _devices[d.Id] = new WatchedDevice(d.Id, name, IsBle: true);
+                bool connected = ExtractIsConnected(d.Properties);
+                _devices[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected);
             }
 
             foreach (var d in classicDevicesTask.Result)
             {
                 string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false));
+                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: true));
             }
         }
 
@@ -103,11 +108,13 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
     private void WireWatcher(DeviceWatcher watcher, bool isBle)
     {
         watcher.Added += (_, d) =>
-            _channel.Writer.TryWrite(new DeviceWatcherEvent.Added(d.Id, d.Name, isBle));
+            _channel.Writer.TryWrite(new DeviceWatcherEvent.Added(
+                d.Id, d.Name, isBle, ExtractIsConnected(d.Properties)));
         watcher.Removed += (_, u) =>
             _channel.Writer.TryWrite(new DeviceWatcherEvent.Removed(u.Id));
         watcher.Updated += (_, u) =>
-            _channel.Writer.TryWrite(new DeviceWatcherEvent.Updated(u.Id));
+            _channel.Writer.TryWrite(new DeviceWatcherEvent.Updated(
+                u.Id, isBle, ExtractIsConnected(u.Properties)));
         watcher.EnumerationCompleted += (_, _) =>
             Debug.WriteLine($"[DeviceWatcherService] Enumeration completed (BLE={isBle})");
         watcher.Stopped += (_, _) =>
@@ -126,7 +133,11 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                     {
                         case DeviceWatcherEvent.Added a:
                             string name = !string.IsNullOrWhiteSpace(a.Name) ? a.Name : a.DeviceId;
-                            lock (_lock) { _devices[a.DeviceId] = new WatchedDevice(a.DeviceId, name, a.IsBle); }
+                            lock (_lock)
+                            {
+                                _devices[a.DeviceId] = new WatchedDevice(
+                                    a.DeviceId, name, a.IsBle, a.IsConnected);
+                            }
                             DevicesChanged?.Invoke();
                             break;
 
@@ -136,8 +147,23 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                             if (removed) DevicesChanged?.Invoke();
                             break;
 
-                        case DeviceWatcherEvent.Updated:
-                            // Updated events don't change our tracked data; ignore.
+                        case DeviceWatcherEvent.Updated u:
+                            bool changed = false;
+                            lock (_lock)
+                            {
+                                if (_devices.TryGetValue(u.DeviceId, out var existing))
+                                {
+                                    bool newConnected = u.IsConnected ?? existing.IsConnected;
+                                    if (newConnected != existing.IsConnected)
+                                    {
+                                        _devices[u.DeviceId] = existing with { IsConnected = newConnected };
+                                        changed = true;
+                                        Debug.WriteLine(
+                                            $"[DeviceWatcherService] '{existing.Name}' IsConnected: {existing.IsConnected} → {newConnected}");
+                                    }
+                                }
+                            }
+                            if (changed) DevicesChanged?.Invoke();
                             break;
                     }
                 }
@@ -152,6 +178,13 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
             // Normal shutdown.
         }
     }
+
+    /// <summary>
+    /// Extracts <c>System.Devices.Aep.IsConnected</c> from a property set.
+    /// Returns <c>false</c> if the property is absent (safe default for BLE devices).
+    /// </summary>
+    private static bool ExtractIsConnected(IReadOnlyDictionary<string, object> properties) =>
+        properties.TryGetValue(IsConnectedProperty, out var value) && value is true;
 
     public async ValueTask DisposeAsync()
     {
@@ -174,8 +207,8 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
 
     private abstract record DeviceWatcherEvent
     {
-        internal sealed record Added(string DeviceId, string Name, bool IsBle) : DeviceWatcherEvent;
+        internal sealed record Added(string DeviceId, string Name, bool IsBle, bool IsConnected) : DeviceWatcherEvent;
         internal sealed record Removed(string DeviceId) : DeviceWatcherEvent;
-        internal sealed record Updated(string DeviceId) : DeviceWatcherEvent;
+        internal sealed record Updated(string DeviceId, bool IsBle, bool? IsConnected) : DeviceWatcherEvent;
     }
 }

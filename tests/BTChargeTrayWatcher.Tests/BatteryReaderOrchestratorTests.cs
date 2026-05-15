@@ -144,6 +144,68 @@ public sealed class BatteryReaderOrchestratorTests
         Assert.Null(cache.GetKnownSource("classic-1"));
     }
 
+    // ── IsConnected skipping (#78) ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Disconnected_BLE_device_skipped_for_GATT_read()
+    {
+        var cache = new DeviceCapabilityCache();
+        var classicReader = new StubClassicReader([]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
+
+        var watched = new List<WatchedDevice>
+        {
+            new("ble-1", "Sleeping Mouse", IsBle: true, IsConnected: false)
+        };
+        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+
+        // Device was disconnected → no GATT attempt → no capability cache entry
+        Assert.Null(cache.GetKnownSource("ble-1"));
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task Connected_BLE_device_still_attempts_GATT()
+    {
+        var cache = new DeviceCapabilityCache();
+        var classicReader = new StubClassicReader([]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
+
+        var watched = new List<WatchedDevice>
+        {
+            new("ble-1", "Active Mouse", IsBle: true, IsConnected: true)
+        };
+        await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+
+        // GATT was attempted (will fail in test env) and RecordFailure was called,
+        // so ShouldAttempt returns false until the retry interval elapses.
+        Assert.False(cache.ShouldAttempt("ble-1"));
+    }
+
+    [Fact]
+    public async Task Classic_device_not_affected_by_IsConnected_default()
+    {
+        var classicReader = new StubClassicReader(
+        [
+            new DeviceBatteryInfo("classic-1", "Keyboard", 80)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var cache = new DeviceCapabilityCache();
+        var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
+
+        // Classic device uses default IsConnected=true
+        var watched = new List<WatchedDevice> { ClassicDevice("classic-1", "Keyboard") };
+        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.Equal("Keyboard", results[0].Name);
+    }
+
     [Fact]
     public async Task Empty_watch_list_returns_only_classic_results()
     {
