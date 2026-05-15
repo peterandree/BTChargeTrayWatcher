@@ -74,6 +74,7 @@ internal sealed class ScanCoordinator : IDisposable
     private async Task RunManualScanAsync()
     {
         Debug.WriteLine("[ScanCoordinator] Manual scan started.");
+        await _monitor.RefreshTrackedDevicesAsync().ConfigureAwait(false);
         await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
         Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
     }
@@ -113,7 +114,7 @@ internal sealed class ScanCoordinator : IDisposable
             MarshalToWindow(window, () => window.OnDeviceFound(deviceId, name, battery));
 
         void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
-            MarshalToWindow(window, () => window.OnScanComplete(results.Count));
+            MarshalToWindow(window, () => window.OnScanComplete(results.Count, _monitor.TrackedDevices));
 
         _monitor.DeviceFound += OnFound;
         _monitor.ManualScanCompleted += OnCompleted;

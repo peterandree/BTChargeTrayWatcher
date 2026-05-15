@@ -128,12 +128,49 @@ public partial class ScanWindow : Form
         _list.Items.Add(newItem);
     }
 
-    public void OnScanComplete(int count)
+    internal void OnScanComplete(int batteryDeviceCount, IReadOnlyList<WatchedDevice> trackedDevices)
     {
         if (_scanComplete || IsDisposed) return;
         _scanComplete = true;
 
-        _status.Text = $"Scan complete. {count} device{(count == 1 ? "" : "s")} found.";
+        // Add all paired tracked devices that weren't found by the battery readers.
+        // This ensures sleeping BLE devices and devices without battery service are visible.
+        // Dedup by both ID and name: the same physical device can appear in the BLE watcher,
+        // Classic watcher, and battery readers with completely different device IDs.
+        int noBatteryCount = 0;
+        var shownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var shownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ListViewItem item in _list.Items)
+        {
+            if (item.Tag is string id)
+                shownIds.Add(id);
+            shownNames.Add(item.Text);
+        }
+
+        foreach (var device in trackedDevices)
+        {
+            if (shownIds.Contains(device.DeviceId)) continue;
+            if (shownNames.Contains(device.Name)) continue;
+
+            string reason = device.IsConnected
+                ? "[No battery service]"
+                : "[Sleeping / not connected]";
+
+            var newItem = new ListViewItem(device.Name) { Tag = device.DeviceId };
+            newItem.SubItems.Add("-");
+            newItem.SubItems.Add(reason);
+            newItem.ForeColor = Color.Gray;
+            _list.Items.Add(newItem);
+            shownNames.Add(device.Name);
+            noBatteryCount++;
+        }
+
+        int totalShown = _list.Items.Count;
+        string statusText = noBatteryCount > 0
+            ? $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found ({noBatteryCount} without battery data)."
+            : $"Scan complete. {totalShown} device{(totalShown == 1 ? "" : "s")} found.";
+
+        _status.Text = statusText;
         _progress.Style = ProgressBarStyle.Blocks;
         _progress.Value = 100;
     }

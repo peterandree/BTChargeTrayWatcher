@@ -40,11 +40,20 @@ internal static class Program
                 ntfyChannel
             ]);
 
-            var monitor       = new BluetoothBatteryMonitor(settings, dispatcher);
+            // Cooperation stack: device watcher + GATT connection manager + capability cache.
+            var capabilityCache       = new DeviceCapabilityCache();
+            var gattConnectionManager = new GattConnectionManager();
+            var classicReader         = new ClassicBatteryReader();
+            var orchestrator          = new BatteryReaderOrchestrator(gattConnectionManager, classicReader, capabilityCache);
+            var deviceWatcher         = new DeviceWatcherService();
+
+            var monitor = new BluetoothBatteryMonitor(
+                settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache);
             var laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
             try
             {
+                deviceWatcher.Start();
                 using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
 
                 app.StartBackgroundScan();
