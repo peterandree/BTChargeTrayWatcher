@@ -74,6 +74,7 @@ internal sealed class ScanCoordinator : IDisposable
     private async Task RunManualScanAsync()
     {
         Debug.WriteLine("[ScanCoordinator] Manual scan started.");
+        await _monitor.RefreshTrackedDevicesAsync().ConfigureAwait(false);
         await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
         Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
     }

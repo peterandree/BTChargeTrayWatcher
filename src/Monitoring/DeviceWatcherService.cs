@@ -63,9 +63,9 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
         WireWatcher(_bleWatcher, isBle: true);
         _bleWatcher.Start();
 
-        // Watcher 2: Classic Bluetooth paired devices
+        // Watcher 2: Classic Bluetooth paired devices — also request IsConnected.
         string classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
-        _classicWatcher = DeviceInformation.CreateWatcher(classicSelector);
+        _classicWatcher = DeviceInformation.CreateWatcher(classicSelector, [IsConnectedProperty]);
         WireWatcher(_classicWatcher, isBle: false);
         _classicWatcher.Start();
     }
@@ -80,9 +80,12 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
 
         var bleDevicesTask = DeviceInformation.FindAllAsync(
             bleSelector, [IsConnectedProperty], DeviceInformationKind.AssociationEndpoint).AsTask(ct);
-        var classicDevicesTask = DeviceInformation.FindAllAsync(classicSelector).AsTask(ct);
+        var classicDevicesTask = DeviceInformation.FindAllAsync(
+            classicSelector, [IsConnectedProperty]).AsTask(ct);
 
         await Task.WhenAll(bleDevicesTask, classicDevicesTask).ConfigureAwait(false);
+
+        Debug.WriteLine($"[DeviceWatcherService] Refresh: {bleDevicesTask.Result.Count} BLE, {classicDevicesTask.Result.Count} Classic devices");
 
         lock (_lock)
         {
@@ -93,12 +96,15 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                 string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
                 bool connected = ExtractIsConnected(d.Properties);
                 _devices[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected);
+                Debug.WriteLine($"[DeviceWatcherService]   BLE: '{name}' connected={connected} id={d.Id}");
             }
 
             foreach (var d in classicDevicesTask.Result)
             {
                 string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: true));
+                bool connected = ExtractIsConnected(d.Properties);
+                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: connected));
+                Debug.WriteLine($"[DeviceWatcherService]   Classic: '{name}' connected={connected} id={d.Id}");
             }
         }
 
@@ -133,6 +139,8 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                     {
                         case DeviceWatcherEvent.Added a:
                             string name = !string.IsNullOrWhiteSpace(a.Name) ? a.Name : a.DeviceId;
+                            Debug.WriteLine(
+                                $"[DeviceWatcherService] Added: '{name}' BLE={a.IsBle} connected={a.IsConnected} id={a.DeviceId}");
                             lock (_lock)
                             {
                                 _devices[a.DeviceId] = new WatchedDevice(

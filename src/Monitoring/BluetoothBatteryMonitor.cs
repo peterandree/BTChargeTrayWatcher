@@ -57,6 +57,16 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     internal IReadOnlyList<WatchedDevice> TrackedDevices =>
         _deviceWatcher?.CurrentDevices ?? [];
 
+    /// <summary>
+    /// Forces a fresh re-enumeration of all paired Bluetooth devices.
+    /// Called before manual scans to ensure the device list is up to date.
+    /// </summary>
+    internal async Task RefreshTrackedDevicesAsync(CancellationToken ct = default)
+    {
+        if (_deviceWatcher is not null)
+            await _deviceWatcher.RefreshAsync(ct).ConfigureAwait(false);
+    }
+
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
