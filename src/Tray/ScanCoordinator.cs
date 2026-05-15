@@ -123,11 +123,21 @@ internal sealed class ScanCoordinator : IDisposable
         _monitor.ManualScanCompleted += OnCompleted;
         _monitor.ScanStarted += OnStarted;
 
+        // Feat 61: Auto-refresh integration
+        EventHandler? autoRefreshHandler = null;
+        autoRefreshHandler = (_, _) =>
+        {
+            if (_monitor.IsScanning) return;
+            FireAndForget(RunManualScanAsync(), "Auto-refresh scan");
+        };
+        window.AutoRefreshRequested += autoRefreshHandler;
+
         window.FormClosed += (_, _) =>
         {
             _monitor.DeviceFound -= OnFound;
             _monitor.ManualScanCompleted -= OnCompleted;
             _monitor.ScanStarted -= OnStarted;
+            window.AutoRefreshRequested -= autoRefreshHandler!;
             if (ReferenceEquals(_scanWindow, window))
                 _scanWindow = null;
         };

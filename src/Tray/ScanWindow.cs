@@ -15,8 +15,24 @@ public partial class ScanWindow : Form
     private readonly Dictionary<string, int> _previousBattery = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _currentScanValues = new(StringComparer.OrdinalIgnoreCase);
 
+    // Feat 61: Auto-refresh timer
+    private readonly System.Windows.Forms.Timer _autoRefreshTimer = new();
+    private int _autoRefreshCountdown = AutoRefreshIntervalSeconds;
+    private const int AutoRefreshIntervalSeconds = 30; // Default interval (can be adjusted)
+    private readonly CheckBox _autoRefreshCheckBox = new() {
+        Text = "Auto-refresh",
+        Checked = true,
+        AutoSize = true,
+        Dock = DockStyle.Left,
+        Margin = new Padding(0, 0, 8, 0)
+    };
+
+    // Event for ScanCoordinator to subscribe to
+    public event EventHandler? AutoRefreshRequested;
+
     public ScanWindow(ThresholdSettings settings)
     {
+    // (All duplicate/partial class and constructor fragments removed)
         _settings = settings;
 
         Text = "BT Battery Scan";
@@ -76,6 +92,7 @@ public partial class ScanWindow : Form
         };
         _closeBtn.Click += (_, _) => Close();
 
+
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -83,6 +100,7 @@ public partial class ScanWindow : Form
             AutoSize = true
         };
         buttonPanel.Controls.Add(_closeBtn);
+        buttonPanel.Controls.Add(_autoRefreshCheckBox);
 
         layout.Controls.Add(_status, 0, 0);
         layout.Controls.Add(_list, 0, 1);
@@ -92,6 +110,88 @@ public partial class ScanWindow : Form
         Controls.Add(layout);
 
         Resize += (_, _) => AdjustColumns();
+
+
+        // Feat 61: Start auto-refresh timer when window is shown
+        Shown += (_, _) =>
+        {
+            _autoRefreshCountdown = AutoRefreshIntervalSeconds;
+            _autoRefreshTimer.Interval = 1000; // 1 second tick
+            _autoRefreshTimer.Tick += AutoRefreshTimer_Tick;
+            if (_autoRefreshCheckBox.Checked)
+                _autoRefreshTimer.Start();
+        };
+
+        _autoRefreshCheckBox.CheckedChanged += (_, _) =>
+        {
+            if (_autoRefreshCheckBox.Checked)
+            {
+                _autoRefreshCountdown = AutoRefreshIntervalSeconds;
+                _autoRefreshTimer.Start();
+                UpdateStatusWithCountdown();
+            }
+            else
+            {
+                _autoRefreshTimer.Stop();
+                _status.Text = "Scan complete. Auto-refresh is off.";
+            }
+        };
+
+        // Stop and dispose timer on window close
+        FormClosed += (_, _) =>
+        {
+            _autoRefreshTimer.Stop();
+            _autoRefreshTimer.Dispose();
+        };
+    }
+
+    // Called every second by the timer
+    private void AutoRefreshTimer_Tick(object? sender, EventArgs e)
+    {
+        if (IsDisposed)
+        {
+            _autoRefreshTimer.Stop();
+            return;
+        }
+
+        if (!_autoRefreshCheckBox.Checked)
+        {
+            _autoRefreshTimer.Stop();
+            return;
+        }
+
+        if (_scanComplete)
+        {
+            _autoRefreshCountdown--;
+            if (_autoRefreshCountdown <= 0)
+            {
+                // Trigger a rescan (simulate manual scan button)
+                _autoRefreshCountdown = AutoRefreshIntervalSeconds;
+                // Raise a custom event or call a callback here if needed
+                // For now, raise a public event if subscribed
+                AutoRefreshRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else
+        {
+            // If a scan is running, reset countdown
+            _autoRefreshCountdown = AutoRefreshIntervalSeconds;
+        }
+
+        // Update status label with countdown
+        UpdateStatusWithCountdown();
+    }
+
+    private void UpdateStatusWithCountdown()
+    {
+        if (_scanComplete)
+        {
+            if (_autoRefreshCheckBox.Checked)
+                _status.Text = $"Scan complete. Auto-refresh in {_autoRefreshCountdown}s.";
+            else
+                _status.Text = "Scan complete. Auto-refresh is off.";
+        }
+        // else: status is managed by scan events
     }
 
     public void OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null)
