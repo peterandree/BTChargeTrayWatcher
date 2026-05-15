@@ -65,7 +65,8 @@ public sealed class ClassicBatteryReader : IBatteryReader
                     c.InstanceId,
                     c.Name,
                     props.Battery == 0 && !batteryMap.ContainsKey(c.InstanceId) ? null : props.Battery,
-                    props.IsCharging);
+                    props.IsCharging,
+                    BatterySource.Classic);
             })
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)
             .ToList();

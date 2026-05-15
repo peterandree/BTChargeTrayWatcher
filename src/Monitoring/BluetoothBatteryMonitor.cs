@@ -19,6 +19,11 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     private readonly PollingOrchestrator _poller;
     private readonly Scanner _scanner;
 
+    // Cooperation stack (null when using legacy constructor)
+    private readonly DeviceWatcherService? _deviceWatcher;
+    private readonly GattConnectionManager? _gattConnectionManager;
+    private readonly DeviceCapabilityCache? _capabilityCache;
+
     private volatile bool _disposeStarted;
     private volatile bool _isDisposed;
 
@@ -47,6 +52,28 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
+
+    /// <summary>
+    /// Creates a monitor using the Windows Cooperation stack: device watcher for live
+    /// device tracking, GATT connection manager for per-device reads, and capability
+    /// cache for protocol fallback optimisation.
+    /// </summary>
+    internal BluetoothBatteryMonitor(
+        ThresholdSettings settings,
+        INotificationService notifier,
+        DeviceWatcherService deviceWatcher,
+        BatteryReaderOrchestrator orchestrator,
+        GattConnectionManager gattConnectionManager,
+        DeviceCapabilityCache capabilityCache)
+        : this(settings, notifier,
+               new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher),
+               NullBatteryReader.Instance)
+    {
+        _deviceWatcher = deviceWatcher;
+        _gattConnectionManager = gattConnectionManager;
+        _capabilityCache = capabilityCache;
+        _deviceWatcher.DevicesChanged += OnDevicesChanged;
+    }
 
     public BluetoothBatteryMonitor(
         ThresholdSettings settings,
@@ -138,14 +165,26 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         }
     }
 
+    private void OnDevicesChanged()
+    {
+        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
+        _poller.OnTimerTick();
+    }
+
     private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
         if (_disposeStarted || _isDisposed) return;
 
         if (e.Mode == PowerModes.Suspend)
+        {
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
         else if (e.Mode == PowerModes.Resume)
+        {
+            _capabilityCache?.InvalidateAll();
+            _gattConnectionManager?.InvalidateAll();
             _timer.Change(PollingDefaults.ResumeDelay, PollingDefaults.PollingInterval);
+        }
     }
 
     private void Settings_Changed()
@@ -172,6 +211,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
         _settings.Changed -= Settings_Changed;
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
+        if (_deviceWatcher is not null)
+            _deviceWatcher.DevicesChanged -= OnDevicesChanged;
 
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _taskTracker.Stop();
@@ -196,6 +237,9 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
         if (_gattReader is IDisposable gd) gd.Dispose();
         if (_classicReader is IDisposable cd) cd.Dispose();
+        _gattConnectionManager?.Dispose();
+        if (_deviceWatcher is not null)
+            await _deviceWatcher.DisposeAsync().ConfigureAwait(false);
 
         _isDisposed = true;
         GC.SuppressFinalize(this);

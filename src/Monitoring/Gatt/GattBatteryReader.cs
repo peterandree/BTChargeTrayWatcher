@@ -56,7 +56,7 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         foreach (GattDeviceReadResult r in perDeviceResults)
         {
             if (!string.IsNullOrWhiteSpace(r.Name))
-                results.Add(new DeviceBatteryInfo(r.DeviceId, r.Name, r.Battery, r.IsCharging));
+                results.Add(new DeviceBatteryInfo(r.DeviceId, r.Name, r.Battery, r.IsCharging, BatterySource.Gatt));
         }
 
         return results;
