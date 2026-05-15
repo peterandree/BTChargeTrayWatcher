@@ -112,13 +112,8 @@ public partial class ScanWindow : Form
                 else if (battery.HasValue)
                 {
                     // Compute trend arrow using previous snapshot (only show ↑ / ↓)
-                    string arrow = "";
-                    Color arrowColor = SystemColors.WindowText;
-                    if (_previousBattery.TryGetValue(deviceId, out var prev))
-                    {
-                        if (battery.Value > prev) { arrow = "↑"; arrowColor = Color.Green; }
-                        else if (battery.Value < prev) { arrow = "↓"; arrowColor = Color.Red; }
-                    }
+                    string arrow = BatteryTrendHelper.GetArrow(_previousBattery.TryGetValue(deviceId, out var prev) ? prev : null, battery.Value);
+                    Color arrowColor = arrow == "↑" ? Color.Green : arrow == "↓" ? Color.Red : SystemColors.WindowText;
 
                     string batteryText = arrow.Length > 0
                         ? $"{FormatBattery(battery.Value, isCharging)} {arrow}"
