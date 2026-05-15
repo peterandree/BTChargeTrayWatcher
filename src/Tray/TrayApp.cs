@@ -161,8 +161,7 @@ public sealed class TrayApp : IDisposable
             bool alert = d.Battery.Value <= _settings.GetLow(d.Name)
                       || d.Battery.Value >= _settings.GetHigh(d.Name);
             if (alert) sb.Append("! ");
-            sb.Append(d.Name).Append(' ').Append(d.Battery.Value).Append('%');
-            if (d.IsCharging == true) sb.Append(" \u26a1");
+            sb.Append(d.Name).Append(' ').Append(BatteryDisplay.FormatBattery(d.Battery.Value, d.IsCharging));
         }
 
         if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
@@ -171,7 +170,7 @@ public sealed class TrayApp : IDisposable
             bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
                             || laptop.BatteryPercent >= _settings.LaptopHigh;
             if (laptopAlert) sb.Append("! ");
-            sb.Append("Laptop ").Append(laptop.BatteryPercent).Append('%');
+            sb.Append("Laptop ").Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
             if (laptop.IsCharging) sb.Append(" (charging)");
         }
 
@@ -208,11 +207,11 @@ public sealed class TrayApp : IDisposable
             return;
         }
 
-        string charge = info.IsCharging ? " \u26a1 Charging"
-            : info.IsOnAcPower ? " \U0001f50c Plugged in"
-            : " On battery";
+        string chargeExtra = info.IsOnAcPower && !info.IsCharging ? " \U0001f50c Plugged in"
+            : !info.IsOnAcPower ? " On battery"
+            : string.Empty;
 
-        _laptopMenuItem.Text = $"\U0001f4bb Laptop: {info.BatteryPercent}%{charge}";
+        _laptopMenuItem.Text = $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
     }
 
     private void OnScanStarted()

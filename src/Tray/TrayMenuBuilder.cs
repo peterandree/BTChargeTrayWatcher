@@ -139,7 +139,7 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
                     : string.Empty;
 
             string label = device.Battery.HasValue
-                ? $"{device.Name}   {device.Battery.Value}%  {BatteryDisplay.Bar(device.Battery.Value)}{statusTag}"
+                ? $"{device.Name}   {BatteryDisplay.FormatBattery(device.Battery.Value, device.IsCharging)}  {BatteryDisplay.Bar(device.Battery.Value)}{statusTag}"
                 : $"{device.Name}   N/A{statusTag}";
 
             var item = new ToolStripMenuItem(label);

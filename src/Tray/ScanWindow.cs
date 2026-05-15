@@ -116,8 +116,8 @@ public partial class ScanWindow : Form
                     Color arrowColor = arrow == "↑" ? Color.Green : arrow == "↓" ? Color.Red : SystemColors.WindowText;
 
                     string batteryText = arrow.Length > 0
-                        ? $"{FormatBattery(battery.Value, isCharging)} {arrow}"
-                        : FormatBattery(battery.Value, isCharging);
+                        ? $"{BatteryDisplay.FormatBattery(battery.Value, isCharging)} {arrow}"
+                        : BatteryDisplay.FormatBattery(battery.Value, isCharging);
 
                     item.SubItems[1].Text = batteryText;
                     item.SubItems[1].ForeColor = arrowColor;
@@ -151,8 +151,8 @@ public partial class ScanWindow : Form
             }
 
             pct = arrow.Length > 0
-                ? $"{FormatBattery(battery.Value, isCharging)} {arrow}"
-                : FormatBattery(battery.Value, isCharging);
+                ? $"{BatteryDisplay.FormatBattery(battery.Value, isCharging)} {arrow}"
+                : BatteryDisplay.FormatBattery(battery.Value, isCharging);
 
             bar = BatteryDisplay.Bar(battery.Value);
             tooltip = arrow.Length > 0 ? $"{arrow} {name}" : name;
@@ -240,14 +240,6 @@ public partial class ScanWindow : Form
             _previousBattery[kvp.Key] = kvp.Value;
         _currentScanValues.Clear();
     }
-
-    /// <summary>
-    /// Formats the battery percentage cell text.
-    /// Appends " \u26a1" (⚡) only when charging is confirmed true.
-    /// Unknown (null) renders as plain percentage — absence of data is not shown as a state.
-    /// </summary>
-    private static string FormatBattery(int battery, bool? isCharging) =>
-        isCharging == true ? $"{battery}% \u26a1" : $"{battery}%";
 
     private void AdjustColumns()
     {
