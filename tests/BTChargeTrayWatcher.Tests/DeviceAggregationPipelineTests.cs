@@ -10,15 +10,15 @@ public sealed class DeviceAggregationPipelineTests
 {
     // ── Stub reader ─────────────────────────────────────────────────────────────────────
 
-    private sealed class StubReader(IReadOnlyList<DeviceBatteryInfo> results) : IBatteryReader
+    private sealed class StubReader(List<DeviceBatteryInfo> results) : IBatteryReader
     {
-        public Task<IReadOnlyList<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
+        public Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
             => Task.FromResult(results);
     }
 
     private sealed class ThrowingReader : IBatteryReader
     {
-        public Task<IReadOnlyList<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
+        public Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken ct)
             => throw new InvalidOperationException("reader fault");
     }
 

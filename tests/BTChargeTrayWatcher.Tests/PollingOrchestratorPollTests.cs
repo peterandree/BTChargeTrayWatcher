@@ -26,6 +26,9 @@ public sealed class PollingOrchestratorPollTests
     private static DeviceBatteryInfo Dev(string id, string name, int battery, bool? charging = null)
         => new(id, name, battery, charging);
 
+    private static Task<List<DeviceBatteryInfo>> Result(params DeviceBatteryInfo[] devices)
+        => Task.FromResult(new List<DeviceBatteryInfo>(devices));
+
     private static (PollingOrchestrator orchestrator, NotificationSpy spy, ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown)
         Build(
             Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices,
@@ -53,7 +56,7 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task New_device_below_low_fires_NotifyLow()
     {
-        var (o, spy, _) = Build(_ => Task.FromResult([Dev("id1", "Headphones", 10)]));
+        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 10)));
         await o.PollAsync();
         Assert.Contains("Low:Headphones:10", spy.Calls);
     }
@@ -61,7 +64,7 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task New_device_above_high_fires_NotifyHigh()
     {
-        var (o, spy, _) = Build(_ => Task.FromResult([Dev("id1", "Headphones", 90)]));
+        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 90)));
         await o.PollAsync();
         Assert.Contains("High:Headphones:90", spy.Calls);
     }
@@ -69,7 +72,7 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task New_device_in_normal_range_fires_no_notification()
     {
-        var (o, spy, _) = Build(_ => Task.FromResult([Dev("id1", "Headphones", 50)]));
+        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
         await o.PollAsync();
         Assert.Empty(spy.Calls);
     }
@@ -78,7 +81,7 @@ public sealed class PollingOrchestratorPollTests
     public async Task Same_battery_value_on_second_poll_fires_no_notification()
     {
         // First poll: normal range
-        var (o, spy, _) = Build(_ => Task.FromResult([Dev("id1", "Headphones", 50)]));
+        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
         await o.PollAsync();
         spy.Calls.Clear();
 
@@ -95,7 +98,7 @@ public sealed class PollingOrchestratorPollTests
         {
             call++;
             int battery = call == 1 ? 50 : 15;
-            return Task.FromResult([Dev("id1", "Keyboard", battery)]);
+            return Result(Dev("id1", "Keyboard", battery));
         });
 
         await o.PollAsync(); // battery=50, Normal
@@ -113,7 +116,7 @@ public sealed class PollingOrchestratorPollTests
         {
             call++;
             int battery = call == 1 ? 50 : 90;
-            return Task.FromResult([Dev("id1", "Mouse", battery, charging: false)]);
+            return Result(Dev("id1", "Mouse", battery, charging: false));
         });
 
         await o.PollAsync();
@@ -129,7 +132,7 @@ public sealed class PollingOrchestratorPollTests
         var settings = new ThresholdSettings();
         settings.ToggleIgnoreDevice("Headphones");
         var (o, spy, _) = Build(
-            _ => Task.FromResult([Dev("id1", "Headphones", 5)]),
+            _ => Result(Dev("id1", "Headphones", 5)),
             settings: settings);
 
         await o.PollAsync();
@@ -139,8 +142,7 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Device_with_null_battery_is_skipped()
     {
-        var (o, spy, last) = Build(_ => Task.FromResult(
-            [new DeviceBatteryInfo("id1", "Dev", null)]));
+        var (o, spy, last) = Build(_ => Result(new DeviceBatteryInfo("id1", "Dev", null)));
 
         await o.PollAsync();
         Assert.Empty(spy.Calls);
@@ -157,7 +159,7 @@ public sealed class PollingOrchestratorPollTests
         var (o, spy, _) = Build(_ =>
         {
             call++;
-            return Task.FromResult([Dev("id1", "Dev", 85, charging: false)]);
+            return Result(Dev("id1", "Dev", 85, charging: false));
         });
 
         await o.PollAsync();
@@ -186,7 +188,7 @@ public sealed class PollingOrchestratorPollTests
         var (o, _, last) = Build(_ =>
         {
             call++;
-            if (call == 1) return Task.FromResult([Dev("id1", "Dev", 50)]);
+            if (call == 1) return Result(Dev("id1", "Dev", 50));
             return Task.FromResult(new List<DeviceBatteryInfo>()); // absent
         });
 
@@ -207,7 +209,7 @@ public sealed class PollingOrchestratorPollTests
         var (o, _, last) = Build(_ =>
         {
             call++;
-            if (call == 1) return Task.FromResult([Dev("id1", "Dev", 50)]);
+            if (call == 1) return Result(Dev("id1", "Dev", 50));
             return Task.FromResult(new List<DeviceBatteryInfo>());
         });
 
@@ -226,7 +228,7 @@ public sealed class PollingOrchestratorPollTests
     {
         IReadOnlyList<DeviceBatteryInfo>? received = null;
         var (o, _, _) = Build(
-            _ => Task.FromResult([Dev("id1", "A", 50), Dev("id2", "B", 60)]),
+            _ => Result(Dev("id1", "A", 50), Dev("id2", "B", 60)),
             onScanCompleted: list => received = list);
 
         await o.PollAsync();
@@ -240,7 +242,7 @@ public sealed class PollingOrchestratorPollTests
     {
         bool? lastAlert = null;
         var (o, _, _) = Build(
-            _ => Task.FromResult([Dev("id1", "Dev", 10)]),
+            _ => Result(Dev("id1", "Dev", 10)),
             onAlertStateChanged: v => lastAlert = v);
 
         await o.PollAsync();
@@ -252,7 +254,7 @@ public sealed class PollingOrchestratorPollTests
     {
         bool? lastAlert = null;
         var (o, _, _) = Build(
-            _ => Task.FromResult([Dev("id1", "Dev", 50)]),
+            _ => Result(Dev("id1", "Dev", 50)),
             onAlertStateChanged: v => lastAlert = v);
 
         await o.PollAsync();
