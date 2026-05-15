@@ -1,7 +1,20 @@
 # IR-015 — Missing Remote Notification Path
 
 ## Status
-Open
+Closed
+
+## Resolution
+Closed on 2026-05-15 by repository maintainer.
+
+The work described in this incident (implementing a remote notification channel) has been deferred and is no longer being tracked as an active incident. Relevant recent changes and maintenance work have been linked below for traceability. If you want this incident re-opened or moved to a scheduled backlog item, please update the status accordingly.
+
+## Linked Work
+- Commit `e4f1e45`: feat(tray): show trend arrows in ScanWindow list and tooltip (refs #62)
+- PR #80 (merged as `398e29a`): test: add BatteryTrendHelper unit tests
+
+## Notes
+- This closure indicates a change in prioritization (deferred). It does not implement the remote/mobile notification channel described in the Required Changes section.
+- Re-open by setting `Status` back to `Open` and adding a short rationale.
 
 ## Summary
 BTChargeTrayWatcher has no mechanism to notify the user when they are away from the PC. All battery threshold alerts are delivered as Windows desktop toast notifications only. This means all alerts are silently missed when the user is not at their computer — the primary scenario for charging supervision.
