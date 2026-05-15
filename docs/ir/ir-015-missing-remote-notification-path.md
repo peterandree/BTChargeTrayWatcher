@@ -1,20 +1,26 @@
 # IR-015 — Missing Remote Notification Path
 
 ## Status
-Closed
+Closed (Implemented)
 
 ## Resolution
-Closed on 2026-05-15 by repository maintainer.
-
-The work described in this incident (implementing a remote notification channel) has been deferred and is no longer being tracked as an active incident. Relevant recent changes and maintenance work have been linked below for traceability. If you want this incident re-opened or moved to a scheduled backlog item, please update the status accordingly.
+Implemented on 2026-05-15. The repository now includes an ntfy-based remote notification integration that publishes battery alerts to the public `ntfy.sh` service. The integration was delivered in PR #55 ("feat: ntfy mobile push notifications") and is present in the main branch.
 
 ## Linked Work
-- Commit `e4f1e45`: feat(tray): show trend arrows in ScanWindow list and tooltip (refs #62)
-- PR #80 (merged as `398e29a`): test: add BatteryTrendHelper unit tests
+- PR #55 (merged): feat: ntfy mobile push notifications (commit 37a35ac1)
+- Files added/updated (selected):
+	- `src/Notifications/NtfyNotificationChannel.cs`
+	- `src/Notifications/NtfyTopicGenerator.cs`
+	- `src/Notifications/NtfyIntegrationSettings.cs`
+	- `src/Tray/NtfyMobileNotificationsMenuBuilder.cs`
+	- `src/Settings/ThresholdSettings.cs` (ntfy settings hooks)
+	- `src/Settings/SettingsPersistence.cs` (persisting ntfy settings)
+	- `docs/manual/ntfy-integration-setup.md` and platform guides
+	- Winget/manifest locale notes (2.0.0 mentions ntfy support)
 
 ## Notes
-- This closure indicates a change in prioritization (deferred). It does not implement the remote/mobile notification channel described in the Required Changes section.
-- Re-open by setting `Status` back to `Open` and adding a short rationale.
+- Acceptance criteria from this IR (mobile setup, topic generation, test notification, and alerts published) have been implemented; verify end-to-end by enabling ntfy in the tray menu and sending a test notification to a phone subscribed to the generated topic.
+- If you want the IR re-opened or sequenced into the backlog for additional improvements (e.g., private server support, authentication, analytics), re-open with details.
 
 ## Summary
 BTChargeTrayWatcher has no mechanism to notify the user when they are away from the PC. All battery threshold alerts are delivered as Windows desktop toast notifications only. This means all alerts are silently missed when the user is not at their computer — the primary scenario for charging supervision.
