@@ -12,6 +12,8 @@ public partial class ScanWindow : Form
     private readonly ProgressBar _progress;
     private readonly Button _closeBtn;
     private bool _scanComplete;
+    private readonly Dictionary<string, int> _previousBattery = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _currentScanValues = new(StringComparer.OrdinalIgnoreCase);
 
     public ScanWindow(ThresholdSettings settings)
     {
@@ -52,6 +54,7 @@ public partial class ScanWindow : Form
             Dock = DockStyle.Fill,
             FullRowSelect = true,
             GridLines = true,
+            ShowItemToolTips = true,
             Margin = new Padding(0, 0, 0, 8)
         };
 
@@ -104,28 +107,91 @@ public partial class ScanWindow : Form
                     item.SubItems[1].Text = "-";
                     item.SubItems[2].Text = "[Ignored]";
                     item.ForeColor = Color.Gray;
+                    item.ToolTipText = name;
                 }
                 else if (battery.HasValue)
                 {
-                    item.SubItems[1].Text = FormatBattery(battery.Value, isCharging);
+                    // Compute trend arrow using previous snapshot (only show ↑ / ↓)
+                    string arrow = "";
+                    Color arrowColor = SystemColors.WindowText;
+                    if (_previousBattery.TryGetValue(deviceId, out var prev))
+                    {
+                        if (battery.Value > prev) { arrow = "↑"; arrowColor = Color.Green; }
+                        else if (battery.Value < prev) { arrow = "↓"; arrowColor = Color.Red; }
+                    }
+
+                    string batteryText = arrow.Length > 0
+                        ? $"{FormatBattery(battery.Value, isCharging)} {arrow}"
+                        : FormatBattery(battery.Value, isCharging);
+
+                    item.SubItems[1].Text = batteryText;
+                    item.SubItems[1].ForeColor = arrowColor;
                     item.SubItems[2].Text = BatteryDisplay.Bar(battery.Value);
                     item.ForeColor = SystemColors.WindowText;
+                    item.ToolTipText = arrow.Length > 0 ? $"{arrow} {name}" : name;
+
+                    _currentScanValues[deviceId] = battery.Value;
                 }
                 return;
             }
         }
 
-        string pct = isIgnored ? "-" : (battery.HasValue ? FormatBattery(battery.Value, isCharging) : "N/A");
-        string bar = isIgnored ? "[Ignored]" : (battery.HasValue ? BatteryDisplay.Bar(battery.Value) : "");
+        string pct;
+        string bar;
+        string tooltip;
+        if (isIgnored)
+        {
+            pct = "-";
+            bar = "[Ignored]";
+            tooltip = name;
+        }
+        else if (battery.HasValue)
+        {
+            string arrow = "";
+            Color arrowColor = SystemColors.WindowText;
+            if (_previousBattery.TryGetValue(deviceId, out var prev))
+            {
+                if (battery.Value > prev) { arrow = "↑"; arrowColor = Color.Green; }
+                else if (battery.Value < prev) { arrow = "↓"; arrowColor = Color.Red; }
+            }
+
+            pct = arrow.Length > 0
+                ? $"{FormatBattery(battery.Value, isCharging)} {arrow}"
+                : FormatBattery(battery.Value, isCharging);
+
+            bar = BatteryDisplay.Bar(battery.Value);
+            tooltip = arrow.Length > 0 ? $"{arrow} {name}" : name;
+        }
+        else
+        {
+            pct = "N/A";
+            bar = "";
+            tooltip = name;
+        }
+
         var newItem = new ListViewItem(name);
         newItem.Tag = deviceId;
         newItem.SubItems.Add(pct);
         newItem.SubItems.Add(bar);
+        newItem.ToolTipText = tooltip;
 
         if (isIgnored)
             newItem.ForeColor = Color.Gray;
 
         _list.Items.Add(newItem);
+
+        if (battery.HasValue)
+            _currentScanValues[deviceId] = battery.Value;
+    }
+
+    internal void OnScanStarted()
+    {
+        if (IsDisposed) return;
+        _scanComplete = false;
+        _currentScanValues.Clear();
+        _status.Text = "Scanning for Bluetooth devices...";
+        _progress.Style = ProgressBarStyle.Marquee;
+        _progress.Value = 0;
     }
 
     internal void OnScanComplete(int batteryDeviceCount, IReadOnlyList<WatchedDevice> trackedDevices)
@@ -173,6 +239,11 @@ public partial class ScanWindow : Form
         _status.Text = statusText;
         _progress.Style = ProgressBarStyle.Blocks;
         _progress.Value = 100;
+
+        // After rendering the scan results, promote current readings to previous snapshot
+        foreach (var kvp in _currentScanValues)
+            _previousBattery[kvp.Key] = kvp.Value;
+        _currentScanValues.Clear();
     }
 
     /// <summary>
