@@ -14,33 +14,37 @@ internal static class StartupRegistration
         {
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(RunKey, false);
-                var stored = key?.GetValue(AppName) as string;
-                if (string.IsNullOrWhiteSpace(stored)) return false;
+                var value = Registry.GetValue($"HKEY_CURRENT_USER\\{RunKey}", AppName, null) as string;
+                if (string.IsNullOrWhiteSpace(value)) return false;
                 string expected = $"\"{Application.ExecutablePath}\"";
-                return string.Equals(stored, expected, StringComparison.OrdinalIgnoreCase);
+                return string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
             }
-            catch
-            {
-                return false;
-            }
+            catch { return false; }
         }
-        set
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(RunKey, true);
-                if (key == null) return;
+    }
 
-                if (value)
-                    key.SetValue(AppName, $"\"{Application.ExecutablePath}\"");
-                else
-                    key.DeleteValue(AppName, false);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[StartupRegistration] Fault: {ex}");
-            }
+    public static void Enable()
+    {
+        try
+        {
+            Registry.SetValue($"HKEY_CURRENT_USER\\{RunKey}", AppName, $"\"{Application.ExecutablePath}\"");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[StartupRegistration] Enable Fault: {ex}");
+        }
+    }
+
+    public static void Disable()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, true);
+            key?.DeleteValue(AppName, false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[StartupRegistration] Disable Fault: {ex}");
         }
     }
 }

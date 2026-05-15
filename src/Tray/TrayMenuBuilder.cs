@@ -35,13 +35,17 @@ internal sealed class TrayMenuBuilder(ThresholdSettings settings)
         menu.Items.Add(mobileNotificationsMenu);
         menu.Items.Add(new ToolStripSeparator());
 
+
         var autostartItem = new ToolStripMenuItem("Run on startup")
         {
             Checked = StartupRegistration.IsEnabled
         };
         autostartItem.Click += (_, _) =>
         {
-            StartupRegistration.IsEnabled = !StartupRegistration.IsEnabled;
+            if (StartupRegistration.IsEnabled)
+                StartupRegistration.Disable();
+            else
+                StartupRegistration.Enable();
             autostartItem.Checked = StartupRegistration.IsEnabled;
         };
         menu.Items.Add(autostartItem);
