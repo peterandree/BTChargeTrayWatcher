@@ -13,7 +13,7 @@ public sealed class TrayApp : IDisposable
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
     private readonly LaptopBatteryMonitor _laptopMonitor;
-    private readonly NotificationService _notifier;
+    private readonly INotificationService _notifier;
     private readonly NotifyIcon _trayIcon;
     private readonly TrayIconRenderer _iconRenderer;
     private readonly ScanCoordinator _scanner;
@@ -29,11 +29,10 @@ public sealed class TrayApp : IDisposable
     private bool _hasLaptopAlert;
 
     public TrayApp(
-        ThresholdSettings        settings,
-        BluetoothBatteryMonitor  monitor,
-        NotificationService      notifier,
-        LaptopBatteryMonitor     laptopMonitor,
-        NtfyNotificationChannel  ntfyChannel)
+        ThresholdSettings       settings,
+        BluetoothBatteryMonitor monitor,
+        INotificationService    notifier,
+        LaptopBatteryMonitor    laptopMonitor)
     {
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");

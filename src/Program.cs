@@ -62,7 +62,7 @@ internal static class Program
             };
 
             deviceWatcher.Start();
-            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
+            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor);
 
             app.StartBackgroundScan();
 
