@@ -73,6 +73,14 @@ internal sealed class SettingsPersistence
                 }
             }
 
+            var pollIntervals = dto.DevicePollIntervals != null
+                ? new Dictionary<string, int>(dto.DevicePollIntervals, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            var displayAliases = dto.DeviceDisplayNameAliases != null
+                ? new Dictionary<string, string>(dto.DeviceDisplayNameAliases, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             var ntfy = new NtfyIntegrationSettings
             {
                 IsEnabled = dto.NtfyEnabled,
@@ -87,6 +95,8 @@ internal sealed class SettingsPersistence
                     ignored, excluded,
                     dto.ExcludeLaptopFromTrayIconOverlay,
                     overrides,
+                    pollIntervals,
+                    displayAliases,
                     ntfy));
             }
             finally
@@ -105,7 +115,7 @@ internal sealed class SettingsPersistence
     private void Save()
     {
         var s = _settings.Snapshot();
-        var dto = new SettingsDto
+            var dto = new SettingsDto
         {
             Version = 1,
             Low = s.Low,
@@ -116,6 +126,8 @@ internal sealed class SettingsPersistence
             TrayIconOverlayExcludedDevices = [.. s.TrayIconOverlayExcludedDevices],
             ExcludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay,
             DeviceOverrides = new Dictionary<string, DeviceThresholds>(s.DeviceOverrides, StringComparer.OrdinalIgnoreCase),
+            DevicePollIntervals = new Dictionary<string, int>(s.DevicePollIntervals, StringComparer.OrdinalIgnoreCase),
+            DeviceDisplayNameAliases = new Dictionary<string, string>(s.DeviceDisplayNameAliases, StringComparer.OrdinalIgnoreCase),
             NtfyEnabled = s.Ntfy.IsEnabled,
             NtfyTopic   = s.Ntfy.Topic
         };
@@ -135,7 +147,7 @@ internal sealed class SettingsPersistence
 
     // ── DTO ──────────────────────────────────────────────────────────────────
 
-    private sealed record SettingsDto
+        private sealed record SettingsDto
     {
         public int Version { get; set; } = 1;
         public int Low { get; set; }
@@ -145,7 +157,9 @@ internal sealed class SettingsPersistence
         public List<string>? IgnoredDevices { get; set; }
         public List<string>? TrayIconOverlayExcludedDevices { get; set; }
         public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
-        public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
+            public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
+            public Dictionary<string, int>? DevicePollIntervals { get; set; }
+            public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }
         public bool    NtfyEnabled { get; set; }
         public string? NtfyTopic   { get; set; }
     }

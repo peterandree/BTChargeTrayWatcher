@@ -74,8 +74,9 @@ public partial class ScanWindow : Form
             Margin = new Padding(0, 0, 0, 8)
         };
 
-        _list.Columns.Add("Device", 500);
-        _list.Columns.Add("Battery", 120);
+        _list.Columns.Add("Device", 420);
+        _list.Columns.Add("Battery", 100);
+        _list.Columns.Add("Poll (s)", 80);
         _list.Columns.Add("Level", 160);
 
         _progress = new ProgressBar
@@ -196,7 +197,7 @@ public partial class ScanWindow : Form
 
     public void OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null)
     {
-        bool isIgnored = _settings.IgnoredDevices.Contains(name);
+        bool isIgnored = _settings.IsIgnored(deviceId, name);
 
         foreach (ListViewItem item in _list.Items)
         {
@@ -221,7 +222,11 @@ public partial class ScanWindow : Form
 
                     item.SubItems[1].Text = batteryText;
                     item.SubItems[1].ForeColor = arrowColor;
-                    item.SubItems[2].Text = BatteryDisplay.Bar(battery.Value);
+                    // show effective poll interval
+                    int poll = _settings.GetPollIntervalForDevice(deviceId, name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds;
+                    if (item.SubItems.Count > 2)
+                        item.SubItems[2].Text = poll.ToString();
+                    item.SubItems[3].Text = BatteryDisplay.Bar(battery.Value);
                     item.ForeColor = SystemColors.WindowText;
                     item.ToolTipText = arrow.Length > 0 ? $"{arrow} {name}" : name;
 
@@ -267,6 +272,9 @@ public partial class ScanWindow : Form
         var newItem = new ListViewItem(name);
         newItem.Tag = deviceId;
         newItem.SubItems.Add(pct);
+        // Poll interval column
+        int pollInterval = _settings.GetPollIntervalForDevice(deviceId, name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds;
+        newItem.SubItems.Add(pollInterval.ToString());
         newItem.SubItems.Add(bar);
         newItem.ToolTipText = tooltip;
 

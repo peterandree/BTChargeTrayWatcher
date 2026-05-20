@@ -55,18 +55,19 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        var devicesMenu             = menuBuilder.BuildDevicesMenu(() => monitor.LastKnownDevices);
         var mobileNotificationsMenu = new NtfyMobileNotificationsMenuBuilder(
             settings, ntfyChannel, monitor, laptopMonitor).Build();
 
         _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
+            _settings,
             _laptopMenuItem,
-            devicesMenu,
+            () => monitor.LastKnownDevices,
             _scanMenuItem,
             _lowMenu,
             _highMenu,
             mobileNotificationsMenu,
-            onExit: () => _ = ExitAsync());
+            onExit: () => _ = ExitAsync(),
+            onOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(_settings, _monitor));
 
         _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
@@ -154,12 +155,12 @@ public sealed class TrayApp : IDisposable
     {
         var sb = new System.Text.StringBuilder();
 
-        foreach (var d in _monitor.LastKnownDevices)
+            foreach (var d in _monitor.LastKnownDevices)
         {
             if (d.Battery is null) continue;
             if (sb.Length > 0) sb.Append('\n');
-            bool alert = d.Battery.Value <= _settings.GetLow(d.Name)
-                      || d.Battery.Value >= _settings.GetHigh(d.Name);
+                bool alert = d.Battery.Value <= _settings.GetLowForDevice(d.DeviceId, d.Name)
+                          || d.Battery.Value >= _settings.GetHighForDevice(d.DeviceId, d.Name);
             if (alert) sb.Append("! ");
             sb.Append(d.Name).Append(' ').Append(BatteryDisplay.FormatBattery(d.Battery.Value, d.IsCharging));
         }

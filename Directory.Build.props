@@ -27,6 +27,12 @@
     <_Vs17BuildToolsAppxToolsPath>C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</_Vs17BuildToolsAppxToolsPath>
   </PropertyGroup>
 
+  <!-- Suppress CA1416 (platform compatibility) globally: this is a Windows-only app (win-x64).
+       See: https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca1416 -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == '' and Exists('$(_Vs18CommunityAppxToolsPath)Microsoft.Build.Packaging.Pri.Tasks.dll')">
     <AppxMSBuildToolsPath>$(_Vs18CommunityAppxToolsPath)</AppxMSBuildToolsPath>
   </PropertyGroup>

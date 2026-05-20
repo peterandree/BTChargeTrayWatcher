@@ -40,7 +40,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Low,
-            o.ClassifyBatteryState("Dev", 20, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 20, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Low,
-            o.ClassifyBatteryState("Dev", 5, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 5, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 21, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 21, BatteryAlertState.Normal, null));
     }
 
     // ── High threshold ───────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 80, BatteryAlertState.Normal, false));
+            o.ClassifyBatteryState("Dev", "Dev", 80, BatteryAlertState.Normal, false));
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 95, BatteryAlertState.Normal, false));
+            o.ClassifyBatteryState("Dev", "Dev", 95, BatteryAlertState.Normal, false));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class PollingOrchestratorClassifyTests
         // null charging = unknown; must NOT suppress the High alert
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 80, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 80, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class PollingOrchestratorClassifyTests
         // Confirmed charging suppresses the High alert (ADR-004)
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 80, BatteryAlertState.Normal, true));
+            o.ClassifyBatteryState("Dev", "Dev", 80, BatteryAlertState.Normal, true));
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 95, BatteryAlertState.Normal, true));
+            o.ClassifyBatteryState("Dev", "Dev", 95, BatteryAlertState.Normal, true));
     }
 
     // ── Normal zone (between thresholds) ───────────────────────────────────────────────
@@ -110,7 +110,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 50, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 50, BatteryAlertState.Normal, null));
     }
 
     // ── Hysteresis ────────────────────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ public sealed class PollingOrchestratorClassifyTests
         // battery=22 == low+hysteresis; still inside Low band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Low,
-            o.ClassifyBatteryState("Dev", 22, BatteryAlertState.Low, null));
+            o.ClassifyBatteryState("Dev", "Dev", 22, BatteryAlertState.Low, null));
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class PollingOrchestratorClassifyTests
         // battery=23 > low+hysteresis; exits Low band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 23, BatteryAlertState.Low, null));
+            o.ClassifyBatteryState("Dev", "Dev", 23, BatteryAlertState.Low, null));
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class PollingOrchestratorClassifyTests
         // battery=78 == high-hysteresis; still inside High band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 78, BatteryAlertState.High, false));
+            o.ClassifyBatteryState("Dev", "Dev", 78, BatteryAlertState.High, false));
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class PollingOrchestratorClassifyTests
         // battery=77 < high-hysteresis; exits High band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 77, BatteryAlertState.High, null));
+            o.ClassifyBatteryState("Dev", "Dev", 77, BatteryAlertState.High, null));
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public sealed class PollingOrchestratorClassifyTests
         // Confirmed charging suppresses High even inside the hysteresis band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 78, BatteryAlertState.High, true));
+            o.ClassifyBatteryState("Dev", "Dev", 78, BatteryAlertState.High, true));
     }
 
     // ── Ignored devices ──────────────────────────────────────────────────────────────────
@@ -173,9 +173,9 @@ public sealed class PollingOrchestratorClassifyTests
         var o = BuildOrchestrator(settings);
 
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Headphones", 5, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Headphones", "Headphones", 5, BatteryAlertState.Normal, null));
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Headphones", 95, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Headphones", "Headphones", 95, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class PollingOrchestratorClassifyTests
         var o = BuildOrchestrator(settings);
 
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("HEADPHONES", 5, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("HEADPHONES", "HEADPHONES", 5, BatteryAlertState.Normal, null));
     }
 
     // ── Negative battery (guard) ───────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", -1, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", -1, BatteryAlertState.Normal, null));
     }
 
     // ── Per-device overrides ───────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ public sealed class PollingOrchestratorClassifyTests
 
         // battery=25 is above global Low=20 but below custom Low=30
         Assert.Equal(BatteryAlertState.Low,
-            o.ClassifyBatteryState("Keyboard", 25, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Keyboard", "Keyboard", 25, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class PollingOrchestratorClassifyTests
 
         // battery=75 is below global High=80 but above custom High=70
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Mouse", 75, BatteryAlertState.Normal, false));
+            o.ClassifyBatteryState("Mouse", "Mouse", 75, BatteryAlertState.Normal, false));
     }
 
     // ── Threshold-boundary edge cases ─────────────────────────────────────────────────
@@ -232,7 +232,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Low,
-            o.ClassifyBatteryState("Dev", 0, BatteryAlertState.Normal, null));
+            o.ClassifyBatteryState("Dev", "Dev", 0, BatteryAlertState.Normal, null));
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 100, BatteryAlertState.Normal, false));
+            o.ClassifyBatteryState("Dev", "Dev", 100, BatteryAlertState.Normal, false));
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
-            o.ClassifyBatteryState("Dev", 100, BatteryAlertState.Normal, true));
+            o.ClassifyBatteryState("Dev", "Dev", 100, BatteryAlertState.Normal, true));
     }
 
     [Fact]
@@ -257,6 +257,6 @@ public sealed class PollingOrchestratorClassifyTests
         // Simulates a device that jumps from 10% directly to 95% (e.g. reconnect after charge)
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
-            o.ClassifyBatteryState("Dev", 95, BatteryAlertState.Low, false));
+            o.ClassifyBatteryState("Dev", "Dev", 95, BatteryAlertState.Low, false));
     }
 }

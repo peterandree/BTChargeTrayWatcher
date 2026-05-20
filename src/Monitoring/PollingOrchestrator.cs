@@ -27,6 +27,10 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly ConcurrentDictionary<string, int> _missCount =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // Timestamp of last processed update per device (UTC)
+    private readonly ConcurrentDictionary<string, DateTime> _lastProcessed =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private volatile int _thresholdsChanged;
     private volatile bool _disposed;
 
@@ -60,7 +64,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
     private async Task SafePollAsync(CancellationToken ct)
     {
-        try { await PollAsync(ct).ConfigureAwait(false); }
+        try { await PollInternalAsync(ct, honorPerDeviceIntervals: true).ConfigureAwait(false); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (_disposed) { }
         catch (Exception ex)
@@ -71,7 +75,9 @@ internal sealed class PollingOrchestrator : IDisposable
 
     public Task PollAsync() => PollAsync(_shutdownToken);
 
-    public async Task PollAsync(CancellationToken ct)
+    public Task PollAsync(CancellationToken ct) => PollInternalAsync(ct, honorPerDeviceIntervals: false);
+
+    private async Task PollInternalAsync(CancellationToken ct, bool honorPerDeviceIntervals)
     {
         ct.ThrowIfCancellationRequested();
         await _pollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -102,18 +108,40 @@ internal sealed class PollingOrchestrator : IDisposable
                 int prev = prevInfo?.Battery ?? 0;
                 bool isNew = prevInfo is null;
 
-                _lastKnown[device.DeviceId] = device;
+                // Reset miss count for presence tracking regardless of whether the
+                // reading is processed (honours presence detection while allowing
+                // per-device throttling of updates/alerts).
                 _missCount[device.DeviceId] = 0;
+
+                bool due = !honorPerDeviceIntervals;
+                if (honorPerDeviceIntervals)
+                {
+                    int intervalSec = (int)(_settings.GetPollIntervalForDevice(device.DeviceId, device.Name)
+                        ?? (int)PollingDefaults.PollingInterval.TotalSeconds);
+                    if (!_lastProcessed.TryGetValue(device.DeviceId, out var last)) due = true;
+                    else if ((DateTime.UtcNow - last).TotalSeconds >= intervalSec) due = true;
+                }
+
+                if (!due)
+                {
+                    // Still update presence; skip processing/notifications for now.
+                    continue;
+                }
+
+                // Mark processed timestamp
+                _lastProcessed[device.DeviceId] = DateTime.UtcNow;
+
+                _lastKnown[device.DeviceId] = device;
                 _onBatteryRead(device.Name, device.Battery);
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
                     ? es
-                    : ClassifyBatteryState(device.Name, prev, BatteryAlertState.Normal, device.IsCharging);
+                    : ClassifyBatteryState(device.DeviceId, device.Name, prev, BatteryAlertState.Normal, device.IsCharging);
 
                 BatteryAlertState currentState =
-                    ClassifyBatteryState(device.Name, device.Battery.Value, previousState, device.IsCharging);
+                    ClassifyBatteryState(device.DeviceId, device.Name, device.Battery.Value, previousState, device.IsCharging);
 
-                if (_settings.IgnoredDevices.Contains(device.Name))
+                if (_settings.IsIgnored(device.DeviceId, device.Name))
                 {
                     _alertStates[device.DeviceId] = BatteryAlertState.Normal;
                     continue;
@@ -169,7 +197,7 @@ internal sealed class PollingOrchestrator : IDisposable
     {
         BatteryAlertState existing = _alertStates.TryGetValue(deviceId, out var s)
             ? s : BatteryAlertState.Normal;
-        _alertStates[deviceId] = ClassifyBatteryState(name, battery, existing, isCharging: null);
+        _alertStates[deviceId] = ClassifyBatteryState(deviceId, name, battery, existing, isCharging: null);
     }
 
     /// <summary>
@@ -180,13 +208,13 @@ internal sealed class PollingOrchestrator : IDisposable
     /// Low alerts are never suppressed (ADR-004 extension).
     /// </summary>
     internal BatteryAlertState ClassifyBatteryState(
-        string name, int battery, BatteryAlertState previousState, bool? isCharging)
+        string deviceId, string name, int battery, BatteryAlertState previousState, bool? isCharging)
     {
-        if (battery < 0 || _settings.IgnoredDevices.Contains(name))
+        if (battery < 0 || _settings.IsIgnored(deviceId, name))
             return BatteryAlertState.Normal;
 
-        int low = _settings.GetLow(name);
-        int high = _settings.GetHigh(name);
+        int low = _settings.GetLowForDevice(deviceId, name);
+        int high = _settings.GetHighForDevice(deviceId, name);
         int hysteresis = PollingDefaults.Hysteresis;
 
         if (battery <= low) return BatteryAlertState.Low;

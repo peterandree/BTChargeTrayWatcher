@@ -260,4 +260,29 @@ public sealed class PollingOrchestratorPollTests
         await o.PollAsync();
         Assert.False(lastAlert);
     }
+
+    [Fact]
+    public async Task Per_device_poll_interval_is_respected()
+    {
+        var settings = new ThresholdSettings();
+        // Set a long poll interval for device id1 so second immediate poll is skipped
+        settings.SetPollIntervalForDevice("id1", 3600);
+
+        int call = 0;
+        var (o, spy, _) = Build(_ =>
+        {
+            call++;
+            int battery = call == 1 ? 50 : 10; // second poll would normally trigger Low
+            return Result(Dev("id1", "Headset", battery));
+        }, settings: settings);
+
+        await o.PollAsync(); // first poll processed
+        spy.Calls.Clear();
+
+        // Trigger a scheduled poll path which enforces per-device intervals
+        o.OnTimerTick();
+        await Task.WhenAll(o.PollLock.WaitAsync(CancellationToken.None).ContinueWith(_ => o.PollLock.Release()));
+
+        Assert.Empty(spy.Calls);
+    }
 }
