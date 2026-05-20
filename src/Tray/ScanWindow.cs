@@ -89,7 +89,10 @@ public partial class ScanWindow : Form
         _closeBtn = new Button
         {
             Text = "Close",
-            Dock = DockStyle.Right
+            Size = new Size(140, 32),
+            AutoSize = false,
+            Margin = new Padding(0, 8, 0, 0),
+            UseVisualStyleBackColor = true
         };
         _closeBtn.Click += (_, _) => Close();
 
@@ -98,7 +101,10 @@ public partial class ScanWindow : Form
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = true
+            AutoSize = false,
+            Height = 44,
+            WrapContents = false,
+            Padding = new Padding(0)
         };
         buttonPanel.Controls.Add(_closeBtn);
         buttonPanel.Controls.Add(_autoRefreshCheckBox);

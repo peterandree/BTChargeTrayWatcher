@@ -10,7 +10,6 @@ namespace BTChargeTrayWatcher.Tray
         private readonly TabPage devicesTab;
         private readonly TabPage notificationsTab;
         private readonly TabPage generalTab;
-        private readonly Button testNotificationBtn;
         // ntfy controls
         private readonly CheckBox ntfyEnabledCheck;
         private readonly TextBox ntfyTopicTextBox;
@@ -79,45 +78,95 @@ namespace BTChargeTrayWatcher.Tray
             devicesTab.Controls.Add(resetAllBtn);
 
 
-            // Notifications tab
+
+            // Redesigned Notifications tab layout
             notificationsTab = new TabPage("Notifications");
-            testNotificationBtn = new Button
+            var notifLayout = new TableLayoutPanel
             {
-                Text = "Test Notification",
-                Dock = DockStyle.Top,
-                Height = 36,
-                Margin = new Padding(16),
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(12),
+                RowCount = 4,
+                ColumnCount = 1,
             };
-            testNotificationBtn.Click += (_, _) =>
-            {
-                _notifier?.NotifyLow("Test Device", 42);
-            };
-            // ntfy group
+            notifLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // ntfy controls
+            notifLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 8)); // spacing
+            notifLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // help
+            notifLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
+
+            // ntfy controls group
             var ntfyGroup = new GroupBox
             {
                 Text = "Mobile notifications (ntfy.sh)",
                 Dock = DockStyle.Top,
-                Height = 120,
-                Padding = new Padding(8),
+                Padding = new Padding(10),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
             };
-
             ntfyEnabledCheck = new CheckBox { Text = "Enable ntfy notifications", AutoSize = true, Dock = DockStyle.Top };
-
             var topicPanel = new Panel { Dock = DockStyle.Top, Height = 30 };
             var topicLabel = new Label { Text = "Topic:", AutoSize = true, Width = 40, Dock = DockStyle.Left };
             ntfyTopicTextBox = new TextBox { ReadOnly = true, Dock = DockStyle.Fill };
-            regenerateTopicBtn = new Button { Text = "Regenerate topic", Width = 140, Dock = DockStyle.Right };
             topicPanel.Controls.Add(ntfyTopicTextBox);
             topicPanel.Controls.Add(topicLabel);
-            topicPanel.Controls.Add(regenerateTopicBtn);
 
-            sendNtfyTestBtn = new Button { Text = "Send ntfy test", Dock = DockStyle.Top, Height = 32, Margin = new Padding(0,8,0,0) };
-            ntfyGroup.Controls.Add(sendNtfyTestBtn);
+            regenerateTopicBtn = new Button { Text = "Regenerate topic", Width = 140, Height = 32, Margin = new Padding(0,0,8,0) };
+            sendNtfyTestBtn = new Button { Text = "Send ntfy test", Width = 140, Height = 32, Margin = new Padding(0,0,0,0) };
+
+            // Horizontal panel for ntfy action buttons
+            var ntfyButtonPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                Margin = new Padding(0, 8, 0, 0),
+                Padding = new Padding(0)
+            };
+            ntfyButtonPanel.Controls.Add(sendNtfyTestBtn);
+            ntfyButtonPanel.Controls.Add(regenerateTopicBtn);
+
+            ntfyGroup.Controls.Add(ntfyButtonPanel);
             ntfyGroup.Controls.Add(topicPanel);
             ntfyGroup.Controls.Add(ntfyEnabledCheck);
+            notifLayout.Controls.Add(ntfyGroup, 0, 0);
 
-            notificationsTab.Controls.Add(ntfyGroup);
-            notificationsTab.Controls.Add(testNotificationBtn);
+            // spacing
+            notifLayout.Controls.Add(new Panel { Height = 8, Dock = DockStyle.Top }, 0, 1);
+
+            // ntfy setup instructions/help (scrollable, clickable)
+            var ntfyHelpBox = new GroupBox
+            {
+                Text = "ntfy mobile setup instructions",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(8),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            };
+            var ntfyHelpText = new RichTextBox
+            {
+                ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                Dock = DockStyle.Fill,
+                BackColor = SystemColors.Control,
+                DetectUrls = true,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                Margin = new Padding(0),
+                Text = "To receive push notifications on your phone:\n\n" +
+                       "1. Install the ntfy app on your device:\n" +
+                       "   • Android: https://docs.ntfy.sh/subscribe/phone/\n" +
+                       "   • iPhone: https://docs.ntfy.sh/subscribe/phone/\n" +
+                       "2. Open the app and subscribe to your topic (shown above) using server ntfy.sh.\n" +
+                       "3. For more info, see: https://ntfy.sh"
+            };
+            ntfyHelpText.LinkClicked += (s, e) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = e.LinkText, UseShellExecute = true });
+            ntfyHelpBox.Controls.Add(ntfyHelpText);
+            notifLayout.Controls.Add(ntfyHelpBox, 0, 2);
+
+            notifLayout.Controls.Add(new Panel { Height = 8, Dock = DockStyle.Top }, 0, 3);
+
+            notificationsTab.Controls.Add(notifLayout);
 
 
             // General tab
