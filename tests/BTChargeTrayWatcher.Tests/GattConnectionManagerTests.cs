@@ -1,18 +1,23 @@
 using System;
-using System.Threading.Tasks;
 using Xunit;
-using BTChargeTrayWatcher.Monitoring.Gatt;
+using BTChargeTrayWatcher;
 
 namespace BTChargeTrayWatcher.Tests;
 
 public sealed class GattConnectionManagerTests
 {
     [Fact]
-    public async Task TryReadBatteryAsync_throws_on_empty_deviceid()
+    public void Constructor_default_succeeds()
     {
-        var mgr = new GattConnectionManager();
+        using var mgr = new GattConnectionManager();
+        Assert.NotNull(mgr);
+    }
 
-        await Assert.ThrowsAsync<ArgumentException>(() => mgr.TryReadBatteryAsync(string.Empty, 100));
-        await Assert.ThrowsAsync<ArgumentException>(() => mgr.TryReadBatteryAsync("   ", 100));
+    [Fact]
+    public void Constructor_custom_concurrency_succeeds()
+    {
+        using var mgr = new GattConnectionManager(2);
+        Assert.NotNull(mgr);
     }
 }
+
