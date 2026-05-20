@@ -36,7 +36,7 @@
             ▲                        │                       │
             │               ┌────────┴───────────────────────┘
             │               ▼
-            │   DeviceAggregationPipeline
+            │   BatteryReaderOrchestrator
             │   (parallel read + dedup merge)
             │               │
             │               ▼
@@ -73,7 +73,7 @@ Owns the `NotifyIcon` and the WinForms message loop context. Receives events fro
 
 ### ScanCoordinator
 
-Bridges the background monitor and the UI. Owns the `ScanWindow` lifetime. Routes `ManualScanCompleted` and `BackgroundRefreshCompleted` events to the UI thread and re-evaluates the alert state on each result set by comparing device batteries against per-device thresholds.
+Bridges the background monitor and the UI. Owns the `ScanWindow` lifetime. Routes `ManualScanCompleted` and `AlertStateChanged` events to the UI thread. Alert state is driven exclusively by `PollingOrchestrator`'s classified, hysteresis-consistent state (ADR-011).
 
 ### BluetoothBatteryMonitor
 
@@ -81,15 +81,15 @@ Public facade. Owns the 60-second polling `Timer`, reacts to `PowerModeChanged` 
 
 ### Scanner
 
-Executes full device scans (used at startup and on user request). Calls `DeviceAggregationPipeline.ReadMergedAsync`, then writes results into the shared `_lastKnown` dictionary under the `PollingOrchestrator`'s lock so that background polls and manual scans cannot interleave.
+Executes full device scans (used at startup and on user request). Delegates to `BatteryReaderOrchestrator.ReadMergedAsync`, then writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
 
-### DeviceAggregationPipeline
+### BatteryReaderOrchestrator
 
 Issues `GattBatteryReader.ReadAllAsync` and `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication by `DeviceId` (GATT wins on collision). Faults in either reader are logged and treated as empty results so the other source is still used.
 
 ### PollingOrchestrator
 
-Holds the `BatteryAlertState` finite state machine per device (`Normal`, `Low`, `High`). On each poll it re-reads devices via `DeviceAggregationPipeline` (quiet read — no UI events), updates `_lastKnown`, evaluates threshold transitions with hysteresis, and calls `NotificationService.NotifyLow` / `NotifyHigh` on state changes. Tracks consecutive miss-count per device and evicts absent devices after `PollingDefaults.MissCountThreshold` (3) misses.
+Holds the `BatteryAlertState` finite state machine per device (`Normal`, `Low`, `High`). On each poll it re-reads devices via the injected `ReadDevices` delegate (backed by `BatteryReaderOrchestrator`), updates `_lastKnown`, evaluates threshold transitions with hysteresis, and calls `NotificationService.NotifyLow` / `NotifyHigh` on state changes. Tracks consecutive miss-count per device and evicts absent devices after `PollingDefaults.MissCountThreshold` (3) misses. Fires `AlertStateChanged` (bool) as the authoritative tray-overlay signal.
 
 ### GattBatteryReader
 
@@ -125,14 +125,14 @@ All configuration in one class. Persists to `%LOCALAPPDATA%\BTChargeTrayWatcher\
 Timer tick (every 60 s)
   └─► PollingOrchestrator.OnTimerTick
         └─► TaskTracker.Start(SafePollAsync)
-              └─► DeviceAggregationPipeline.ReadMergedAsync (quiet)
+              └─► BatteryReaderOrchestrator.ReadMergedAsync (quiet)
                     ├─► GattBatteryReader.ReadAllAsync
                     └─► ClassicBatteryReader.ReadAllAsync
               └─► for each device:
                     update _lastKnown
                     classify BatteryAlertState (with hysteresis)
                     if state changed → NotificationService.Notify*
-              └─► fire BackgroundRefreshCompleted
+              └─► fire AlertStateChanged(bool)
                     └─► ScanCoordinator → TrayApp: update tooltip + icon
 ```
 
@@ -143,10 +143,10 @@ User clicks tray → ScanCoordinator.OpenScanWindowAndTriggerScan
   └─► ScanWindow shown
   └─► BluetoothBatteryMonitor.StartTrackedScanAsync
         └─► Scanner.ScanNowAsync
-              └─► DeviceAggregationPipeline.ReadMergedAsync (raises DeviceFound events)
+              └─► BatteryReaderOrchestrator.ReadMergedAsync (raises DeviceFound events)
                     ├─► GattBatteryReader.ReadAllAsync
                     └─► ClassicBatteryReader.ReadAllAsync
-              └─► update _lastKnown under PollingOrchestrator.PollLock
+              └─► update _lastKnown
               └─► fire ManualScanCompleted
                     └─► ScanWindow.OnScanComplete
                     └─► ScanCoordinator → TrayApp: update icon

@@ -6,11 +6,16 @@ namespace BTChargeTrayWatcher;
 /// Owns all JSON serialisation, file-path construction, and atomic disk writes
 /// for <see cref="ThresholdSettings"/>. The domain class is kept free of I/O.
 /// </summary>
-internal sealed class SettingsPersistence
+internal sealed class SettingsPersistence : IDisposable
 {
     private const string AppName = "BTChargeTrayWatcher";
+    private const int SaveDebounceMs = 300;
+
     private readonly string _settingsFilePath;
     private readonly ThresholdSettings _settings;
+
+    private CancellationTokenSource? _saveCts;
+    private readonly object _saveLock = new();
 
     public SettingsPersistence(ThresholdSettings settings)
     {
@@ -24,9 +29,32 @@ internal sealed class SettingsPersistence
         _settings.Changed += OnChanged;
     }
 
-    private void OnChanged() => Save();
+    /// <summary>
+    /// Schedules a debounced save. Rapid successive mutations collapse into a
+    /// single write 300 ms after the last change, preventing both UI-thread stalls
+    /// and unnecessary disk I/O (fixes S7 / #91).
+    /// </summary>
+    private void OnChanged()
+    {
+        CancellationTokenSource cts;
+        lock (_saveLock)
+        {
+            _saveCts?.Cancel();
+            _saveCts?.Dispose();
+            _saveCts = new CancellationTokenSource();
+            cts = _saveCts;
+        }
 
-    // ── Public API ───────────────────────────────────────────────────────────
+        var token = cts.Token;
+        _ = Task.Delay(SaveDebounceMs, token)
+            .ContinueWith(
+                _ => Save(),
+                token,
+                TaskContinuationOptions.NotOnCanceled,
+                TaskScheduler.Default);
+    }
+
+    // ── Public API ─────────────────────────────────────────────────────
 
     public void Load()
     {
@@ -69,7 +97,8 @@ internal sealed class SettingsPersistence
                             $"[SettingsPersistence] Dropping invalid override for '{kvp.Key}': Low={t.Low}, High={t.High}");
                         continue;
                     }
-                    overrides[kvp.Key] = t;
+                    // Use init-only construction (fixes B1 / #81 — no mutable reference escapes).
+                    overrides[kvp.Key] = new DeviceThresholds { Low = t.Low, High = t.High };
                 }
             }
 
@@ -110,12 +139,23 @@ internal sealed class SettingsPersistence
         }
     }
 
-    // ── Private ──────────────────────────────────────────────────────────────
+    public void Dispose()
+    {
+        _settings.Changed -= OnChanged;
+        lock (_saveLock)
+        {
+            _saveCts?.Cancel();
+            _saveCts?.Dispose();
+            _saveCts = null;
+        }
+    }
+
+    // ── Private ────────────────────────────────────────────────────────
 
     private void Save()
     {
         var s = _settings.Snapshot();
-            var dto = new SettingsDto
+        var dto = new SettingsDto
         {
             Version = 1,
             Low = s.Low,
@@ -145,9 +185,9 @@ internal sealed class SettingsPersistence
         }
     }
 
-    // ── DTO ──────────────────────────────────────────────────────────────────
+    // ── DTO ───────────────────────────────────────────────────────────────
 
-        private sealed record SettingsDto
+    private sealed record SettingsDto
     {
         public int Version { get; set; } = 1;
         public int Low { get; set; }
@@ -157,9 +197,9 @@ internal sealed class SettingsPersistence
         public List<string>? IgnoredDevices { get; set; }
         public List<string>? TrayIconOverlayExcludedDevices { get; set; }
         public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
-            public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
-            public Dictionary<string, int>? DevicePollIntervals { get; set; }
-            public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }
+        public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
+        public Dictionary<string, int>? DevicePollIntervals { get; set; }
+        public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }
         public bool    NtfyEnabled { get; set; }
         public string? NtfyTopic   { get; set; }
     }

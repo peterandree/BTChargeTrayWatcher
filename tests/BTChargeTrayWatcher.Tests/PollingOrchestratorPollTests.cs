@@ -21,6 +21,7 @@ public sealed class PollingOrchestratorPollTests
         public void NotifyHigh(string deviceName, int battery)  => Calls.Add($"High:{deviceName}:{battery}");
         public void NotifyLaptopLow(int battery)                => Calls.Add($"LaptopLow:{battery}");
         public void NotifyLaptopHigh(int battery)               => Calls.Add($"LaptopHigh:{battery}");
+        public event Action? OnNotificationClicked { add { } remove { } }
     }
 
     private static DeviceBatteryInfo Dev(string id, string name, int battery, bool? charging = null)

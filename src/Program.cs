@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
@@ -19,6 +20,9 @@ internal static class Program
             _mutex.Dispose();
             return;
         }
+
+        BluetoothBatteryMonitor? monitor       = null;
+        LaptopBatteryMonitor?    laptopMonitor = null;
 
         try
         {
@@ -47,27 +51,32 @@ internal static class Program
             var orchestrator          = new BatteryReaderOrchestrator(gattConnectionManager, classicReader, capabilityCache);
             var deviceWatcher         = new DeviceWatcherService();
 
-            var monitor = new BluetoothBatteryMonitor(
+            monitor       = new BluetoothBatteryMonitor(
                 settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache);
-            var laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
+            laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
-            try
-            {
-                deviceWatcher.Start();
-                using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
+            deviceWatcher.Start();
+            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor);
 
-                app.StartBackgroundScan();
+            app.StartBackgroundScan();
 
-                TrayApp.Run();
-            }
-            finally
-            {
-                monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                laptopMonitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
+            TrayApp.Run();
         }
         finally
         {
+            // The WinForms message pump has stopped at this point — no active
+            // SynchronizationContext exists on this thread. Task.Run moves the
+            // await onto a pool thread where no WinForms context can be captured,
+            // eliminating the deadlock risk that existed when disposal ran inside
+            // the ApplicationExit handler.
+            if (monitor is not null)
+                Task.Run(async () => await monitor.DisposeAsync().ConfigureAwait(false))
+                    .GetAwaiter().GetResult();
+
+            if (laptopMonitor is not null)
+                Task.Run(async () => await laptopMonitor.DisposeAsync().ConfigureAwait(false))
+                    .GetAwaiter().GetResult();
+
             if (createdNew) _mutex.ReleaseMutex();
             _mutex.Dispose();
         }

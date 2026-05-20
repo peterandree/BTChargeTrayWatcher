@@ -11,4 +11,10 @@ public interface INotificationService
     void NotifyHigh(string deviceName, int battery);
     void NotifyLaptopLow(int battery);
     void NotifyLaptopHigh(int battery);
+
+    /// <summary>
+    /// Raised when the user clicks/activates a delivered notification.
+    /// Implementations that do not support activation may leave this event unsubscribed.
+    /// </summary>
+    event Action? OnNotificationClicked;
 }

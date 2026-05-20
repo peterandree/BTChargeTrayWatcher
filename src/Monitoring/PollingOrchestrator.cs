@@ -34,6 +34,11 @@ internal sealed class PollingOrchestrator : IDisposable
     private volatile int _thresholdsChanged;
     private volatile bool _disposed;
 
+    /// <summary>
+    /// Exposes the internal poll lock for test-only synchronisation.
+    /// Only accessible to the test assembly via InternalsVisibleTo.
+    /// Production code must never acquire this lock directly.
+    /// </summary>
     internal SemaphoreSlim PollLock => _pollLock;
 
     public PollingOrchestrator(PollingOrchestratorOptions options)
@@ -83,7 +88,9 @@ internal sealed class PollingOrchestrator : IDisposable
         await _pollLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            ct.ThrowIfCancellationRequested();
+            // Re-check after acquiring the lock: Dispose() may have run between the
+            // pre-WaitAsync guard in OnTimerTick and this point (TOCTOU window).
+            if (_disposed || ct.IsCancellationRequested) return;
 
             bool thresholdsChanged = Interlocked.Exchange(ref _thresholdsChanged, 0) == 1;
             if (thresholdsChanged)

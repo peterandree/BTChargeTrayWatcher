@@ -7,7 +7,7 @@
 internal static class PollingDefaults
 {
     /// <summary>Delay before the very first poll after startup.</summary>
-    public static readonly TimeSpan StartupDelay = TimeSpan.Zero;
+    public static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(5);
 
     /// <summary>Regular interval between background polls.</summary>
     public static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(60);

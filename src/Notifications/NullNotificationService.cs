@@ -15,4 +15,8 @@ internal sealed class NullNotificationService : INotificationService
     public void NotifyHigh(string deviceName, int battery) { }
     public void NotifyLaptopLow(int battery) { }
     public void NotifyLaptopHigh(int battery) { }
+
+    /// <inheritdoc/>
+    /// Never raised — null implementation has no notification delivery.
+    public event Action? OnNotificationClicked { add { } remove { } }
 }

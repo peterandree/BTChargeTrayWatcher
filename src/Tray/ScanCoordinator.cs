@@ -35,7 +35,6 @@ internal sealed class ScanCoordinator : IDisposable
 
         _monitor.ScanStarted += Monitor_ScanStarted;
         _monitor.ManualScanCompleted += Monitor_ManualScanCompleted;
-        _monitor.BackgroundRefreshCompleted += Monitor_BackgroundRefreshCompleted;
 
         // Alert state is now driven exclusively by the orchestrator's classified,
         // hysteresis-consistent state (ADR-011, fixes #44).
@@ -84,9 +83,6 @@ internal sealed class ScanCoordinator : IDisposable
 
     private void Monitor_ManualScanCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
         PostToUi(() => ScanCompleted?.Invoke(results));
-
-    private void Monitor_BackgroundRefreshCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
-        PostToUi(() => { /* results available for future extension */ });
 
     private void Monitor_AlertStateChanged(bool hasAlert) =>
         PostToUi(() => AlertStateChanged?.Invoke(hasAlert));
@@ -201,7 +197,6 @@ internal sealed class ScanCoordinator : IDisposable
 
         _monitor.ScanStarted -= Monitor_ScanStarted;
         _monitor.ManualScanCompleted -= Monitor_ManualScanCompleted;
-        _monitor.BackgroundRefreshCompleted -= Monitor_BackgroundRefreshCompleted;
         _monitor.AlertStateChanged -= Monitor_AlertStateChanged;
 
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
