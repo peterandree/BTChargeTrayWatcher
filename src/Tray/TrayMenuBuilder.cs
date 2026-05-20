@@ -62,24 +62,7 @@ internal sealed class TrayMenuBuilder
         };
         menu.Items.Add(optionsMenuItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(lowMenu);
-        menu.Items.Add(highMenu);
-        menu.Items.Add(new ToolStripSeparator());
-        // ntfy mobile notifications menu removed; now in Options dialog
-        var autostartItem = new ToolStripMenuItem("Run on startup")
-        {
-            Checked = StartupRegistration.IsEnabled
-        };
-        autostartItem.Click += (_, _) =>
-        {
-            if (StartupRegistration.IsEnabled)
-                StartupRegistration.Disable();
-            else
-                StartupRegistration.Enable();
-            autostartItem.Checked = StartupRegistration.IsEnabled;
-        };
-        menu.Items.Add(autostartItem);
-        menu.Items.Add(new ToolStripSeparator());
+        // Removed: Low threshold, High threshold, and Run on startup (now in Options dialog)
         menu.Items.Add("Exit", null, (_, _) => onExit());
         return menu;
     }
