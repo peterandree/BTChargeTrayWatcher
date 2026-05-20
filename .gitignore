@@ -229,6 +229,9 @@ _pkginfo.txt
 # but keep track of directories ending in .cache
 !?*.[Cc]ache/
 
+# Visual Studio language server cache (machine-specific, must not be tracked)
+*.lscache
+
 # Others
 ClientBin/
 ~$*
