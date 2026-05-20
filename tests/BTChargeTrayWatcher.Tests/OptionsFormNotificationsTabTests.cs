@@ -1,4 +1,3 @@
-using System;
 using System.Windows.Forms;
 using BTChargeTrayWatcher;
 using BTChargeTrayWatcher.Tray;
@@ -9,34 +8,26 @@ namespace BTChargeTrayWatcher.Tests
     public sealed class OptionsFormNotificationsTabTests
     {
         [StaFact]
-        public void TestNotificationButton_invokes_notifier()
+        public void NotificationsTab_controls_reflect_ntfy_settings()
         {
             var settings = new ThresholdSettings();
-            var monitor = new BluetoothBatteryMonitor(settings, null!);
-            var called = false;
-            var notifier = new TestNotifier(() => called = true);
-            var form = new OptionsForm();
-            form.Initialize(settings, monitor, notifier);
-
-            var btn = GetButton(form, "testNotificationBtn");
-            btn.PerformClick();
-            if (!called)
+            settings.UpdateNtfySettings(s =>
             {
-                // Fallback: directly invoke OnClick if PerformClick does not work
-                var onClick = btn.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                onClick?.Invoke(btn, new object[] { EventArgs.Empty });
-            }
-            Assert.True(called);
-        }
+                s.IsEnabled = true;
+                s.Topic = "topic-123";
+            });
 
-        private sealed class TestNotifier : INotificationService
-        {
-            private readonly Action _onNotify;
-            public TestNotifier(Action onNotify) => _onNotify = onNotify;
-            public void NotifyLow(string deviceName, int battery) => _onNotify();
-            public void NotifyHigh(string deviceName, int battery) => throw new NotImplementedException();
-            public void NotifyLaptopLow(int battery) => throw new NotImplementedException();
-            public void NotifyLaptopHigh(int battery) => throw new NotImplementedException();
+            var monitor = new BluetoothBatteryMonitor(settings, null!);
+            var form = new OptionsForm();
+            form.Initialize(settings, monitor);
+
+            var enabledCheck = GetCheckBox(form, "ntfyEnabledCheck");
+            var topicTextBox = GetTextBox(form, "ntfyTopicTextBox");
+            var sendButton = GetButton(form, "sendNtfyTestBtn");
+
+            Assert.True(enabledCheck.Checked);
+            Assert.Equal("topic-123", topicTextBox.Text);
+            Assert.Equal("Send ntfy test", sendButton.Text);
         }
 
         private static Button GetButton(Form form, string field)
@@ -44,6 +35,20 @@ namespace BTChargeTrayWatcher.Tests
             var f = form.GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(f);
             return (Button)f!.GetValue(form)!;
+        }
+
+        private static CheckBox GetCheckBox(Form form, string field)
+        {
+            var f = form.GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(f);
+            return (CheckBox)f!.GetValue(form)!;
+        }
+
+        private static TextBox GetTextBox(Form form, string field)
+        {
+            var f = form.GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(f);
+            return (TextBox)f!.GetValue(form)!;
         }
     }
 }

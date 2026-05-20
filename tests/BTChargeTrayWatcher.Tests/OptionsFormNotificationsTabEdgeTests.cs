@@ -1,4 +1,3 @@
-using System;
 using System.Windows.Forms;
 using BTChargeTrayWatcher;
 using BTChargeTrayWatcher.Tray;
@@ -9,22 +8,31 @@ namespace BTChargeTrayWatcher.Tests
     public sealed class OptionsFormNotificationsTabEdgeTests
     {
         [StaFact]
-        public void TestNotificationButton_null_notifier_does_not_throw()
+        public void NotificationsTab_enable_toggle_updates_settings_without_notifier()
         {
             var settings = new ThresholdSettings();
+            settings.UpdateNtfySettings(s =>
+            {
+                s.IsEnabled = false;
+                s.Topic = "topic-123";
+            });
+
             var monitor = new BluetoothBatteryMonitor(settings, null!);
             var form = new OptionsForm();
             form.Initialize(settings, monitor, null);
-            var btn = GetButton(form, "testNotificationBtn");
-            var ex = Record.Exception(() => btn.PerformClick());
+
+            var enabledCheck = GetCheckBox(form, "ntfyEnabledCheck");
+            var ex = Record.Exception(() => enabledCheck.Checked = true);
+
             Assert.Null(ex);
+            Assert.True(settings.GetNtfySettings().IsEnabled);
         }
 
-        private static Button GetButton(Form form, string field)
+        private static CheckBox GetCheckBox(Form form, string field)
         {
             var f = form.GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(f);
-            return (Button)f!.GetValue(form)!;
+            return (CheckBox)f!.GetValue(form)!;
         }
     }
 }
