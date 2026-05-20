@@ -13,9 +13,20 @@ public sealed class NotificationDispatcher : INotificationService
 {
     private readonly IReadOnlyList<INotificationChannel> _channels;
 
+    /// <inheritdoc/>
+    /// Aggregated from all channels that expose a compatible clicked event.
+    /// Channels that do not support activation never raise this event.
+    public event Action? OnNotificationClicked;
+
     public NotificationDispatcher(IReadOnlyList<INotificationChannel> channels)
     {
         _channels = channels;
+
+        foreach (var channel in _channels)
+        {
+            if (channel is INotificationClickSource clickSource)
+                clickSource.NotificationClicked += () => OnNotificationClicked?.Invoke();
+        }
     }
 
     public void NotifyLow(string deviceName, int battery)
