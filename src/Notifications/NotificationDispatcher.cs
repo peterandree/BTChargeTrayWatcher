@@ -14,20 +14,22 @@ public sealed class NotificationDispatcher : INotificationService
     private readonly IReadOnlyList<INotificationChannel> _channels;
 
     /// <inheritdoc/>
-    /// Aggregated from all channels that expose a compatible clicked event.
-    /// Channels that do not support activation never raise this event.
+    /// Raised when the user clicks/activates a delivered notification.
+    /// Subscribe from the call site (e.g. TrayApp) after construction
+    /// by wiring up the concrete channel that supports activation.
     public event Action? OnNotificationClicked;
 
     public NotificationDispatcher(IReadOnlyList<INotificationChannel> channels)
     {
         _channels = channels;
-
-        foreach (var channel in _channels)
-        {
-            if (channel is INotificationClickSource clickSource)
-                clickSource.NotificationClicked += () => OnNotificationClicked?.Invoke();
-        }
     }
+
+    /// <summary>
+    /// Raises <see cref="OnNotificationClicked"/>. Call this from the
+    /// concrete notification channel (e.g. ToastNotificationChannel) when
+    /// the user activates a toast.
+    /// </summary>
+    public void RaiseNotificationClicked() => OnNotificationClicked?.Invoke();
 
     public void NotifyLow(string deviceName, int battery)
         => Dispatch(c => c.NotifyLow(deviceName, battery));

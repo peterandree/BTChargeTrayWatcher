@@ -20,7 +20,7 @@ public sealed class ThresholdSettings
     // Optional user-specified display name aliases keyed by device id
     private Dictionary<string, string> _displayNameAliases = new(StringComparer.OrdinalIgnoreCase);
 
-    // ── Per-device poll interval (legacy name-keyed API) ─────────────────────
+    // ── Per-device poll interval (legacy name-keyed API) ─────────────────────────────
     // Prefer GetPollIntervalForDevice / SetPollIntervalForDevice (device-id-keyed).
 
     [Obsolete("Use GetPollIntervalForDevice(deviceId, displayName) instead.")]
@@ -50,7 +50,7 @@ public sealed class ThresholdSettings
             return _devicePollIntervals.ContainsKey(deviceName);
     }
 
-    // ── Device-id-aware APIs (preferred) ───────────────────────────────────
+    // ── Device-id-aware APIs (preferred) ────────────────────────────────────────────
 
     public int GetLowForDevice(string deviceId, string displayName)
     {
@@ -156,9 +156,7 @@ public sealed class ThresholdSettings
     public bool IsIgnored(string deviceId, string displayName)
     {
         lock (_thresholdLock)
-        {
             return _ignoredDevices.Contains(deviceId) || _ignoredDevices.Contains(displayName);
-        }
     }
 
     public void SetIgnoredDevicesByIds(IEnumerable<string> devices)
@@ -179,7 +177,7 @@ public sealed class ThresholdSettings
         _laptopHigh = 80;
     }
 
-    // ── Global thresholds ────────────────────────────────────────────────────
+    // ── Global thresholds ────────────────────────────────────────────────────────────
 
     public int Low
     {
@@ -243,7 +241,7 @@ public sealed class ThresholdSettings
         }
     }
 
-    // ── Tray icon overlay exclusion ──────────────────────────────────────────
+    // ── Tray icon overlay exclusion ──────────────────────────────────────────────────
 
     public bool ExcludeLaptopFromTrayIconOverlay
     {
@@ -273,7 +271,64 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── ntfy integration ─────────────────────────────────────────────────────
+    // ── Device sets ──────────────────────────────────────────────────────────────────
+
+    public IReadOnlyCollection<string> IgnoredDevices
+    {
+        get { lock (_thresholdLock) return new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices
+    {
+        get { lock (_thresholdLock) return new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    public void SetIgnoredDevices(IEnumerable<string> devices)
+    {
+        lock (_thresholdLock)
+            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        Changed?.Invoke();
+    }
+
+    public void SetDisplayNameAlias(string deviceId, string? alias)
+    {
+        lock (_thresholdLock)
+        {
+            if (string.IsNullOrWhiteSpace(alias))
+                _displayNameAliases.Remove(deviceId);
+            else
+                _displayNameAliases[deviceId] = alias!;
+        }
+        Changed?.Invoke();
+    }
+
+    public string GetDisplayName(string deviceId, string defaultName)
+    {
+        lock (_thresholdLock)
+            return _displayNameAliases.TryGetValue(deviceId, out var a) ? a : defaultName;
+    }
+
+    public void ToggleIgnoreDevice(string deviceName)
+    {
+        lock (_thresholdLock)
+        {
+            if (!_ignoredDevices.Remove(deviceName))
+                _ignoredDevices.Add(deviceName);
+        }
+        Changed?.Invoke();
+    }
+
+    public void ToggleExcludeFromTrayIconOverlay(string deviceName)
+    {
+        lock (_thresholdLock)
+        {
+            if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
+                _trayIconOverlayExcludedDevices.Add(deviceName);
+        }
+        Changed?.Invoke();
+    }
+
+    // ── ntfy integration ─────────────────────────────────────────────────────────────
 
     /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
     public NtfyIntegrationSettings GetNtfySettings()
@@ -287,7 +342,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Per-device overrides (legacy name-keyed API) ──────────────────────────
+    // ── Per-device overrides (legacy name-keyed API) ─────────────────────────────────
     // Prefer SetLowForDevice / SetHighForDevice (device-id-keyed).
 
     [Obsolete("Use GetLowForDevice(deviceId, displayName) instead.")]
@@ -378,7 +433,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Snapshot / restore ───────────────────────────────────────────────────
+    // ── Snapshot / restore ───────────────────────────────────────────────────────────
 
     internal SettingsSnapshot Snapshot()
     {
@@ -421,7 +476,7 @@ public sealed class ThresholdSettings
     }
 }
 
-// ── Shared types ─────────────────────────────────────────────────────────────
+// ── Shared types ─────────────────────────────────────────────────────────────────────
 
 /// <summary>
 /// Per-device low/high battery threshold overrides.

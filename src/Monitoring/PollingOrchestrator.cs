@@ -34,6 +34,13 @@ internal sealed class PollingOrchestrator : IDisposable
     private volatile int _thresholdsChanged;
     private volatile bool _disposed;
 
+    /// <summary>
+    /// Exposes the internal poll lock for test-only synchronisation.
+    /// Only accessible to the test assembly via InternalsVisibleTo.
+    /// Production code must never acquire this lock directly.
+    /// </summary>
+    internal SemaphoreSlim PollLock => _pollLock;
+
     public PollingOrchestrator(PollingOrchestratorOptions options)
     {
         _settings = options.Settings;
