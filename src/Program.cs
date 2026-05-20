@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher;
@@ -51,20 +52,21 @@ internal static class Program
                 settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache);
             var laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
-            try
+            // Register disposal on ApplicationExit so we never block the STA message-pump
+            // thread on an async operation (deadlock risk when continuations capture the
+            // WinForms SynchronizationContext). Task.Run moves the await onto a pool thread.
+            Application.ApplicationExit += (_, _) =>
             {
-                deviceWatcher.Start();
-                using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
+                Task.Run(async () => await monitor.DisposeAsync()).GetAwaiter().GetResult();
+                Task.Run(async () => await laptopMonitor.DisposeAsync()).GetAwaiter().GetResult();
+            };
 
-                app.StartBackgroundScan();
+            deviceWatcher.Start();
+            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, ntfyChannel);
 
-                TrayApp.Run();
-            }
-            finally
-            {
-                monitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                laptopMonitor.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
+            app.StartBackgroundScan();
+
+            TrayApp.Run();
         }
         finally
         {
