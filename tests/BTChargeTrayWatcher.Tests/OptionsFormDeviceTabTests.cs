@@ -29,7 +29,7 @@ namespace BTChargeTrayWatcher.Tests
             dict[deviceId] = device;
             Assert.Single(monitor.LastKnownDevices);
             Assert.Equal(deviceId, monitor.LastKnownDevices[0].DeviceId);
-            var form = new OptionsForm();
+            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
             form.Initialize(settings, monitor);
 
             // Debug: print actual column names

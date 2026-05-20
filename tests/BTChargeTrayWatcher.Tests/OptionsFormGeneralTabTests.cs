@@ -13,7 +13,7 @@ namespace BTChargeTrayWatcher.Tests
         {
             var settings = new ThresholdSettings();
             var monitor = new BluetoothBatteryMonitor(settings, null!); // null for IBatteryReader aggregation
-            var form = new OptionsForm();
+            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
             form.Initialize(settings, monitor);
 
             // Simulate user changing global thresholds

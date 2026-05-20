@@ -13,7 +13,7 @@ namespace BTChargeTrayWatcher.Tests
         {
             var settings = new ThresholdSettings();
             var monitor = new BluetoothBatteryMonitor(settings, null!);
-            var form = new OptionsForm();
+            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK); // Suppress MessageBox in test
             form.Initialize(settings, monitor);
 
             var lowField = GetNumeric(form, "lowNumeric");

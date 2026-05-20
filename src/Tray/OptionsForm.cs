@@ -6,6 +6,8 @@ namespace BTChargeTrayWatcher.Tray
 {
     public sealed class OptionsForm : Form
     {
+        public delegate DialogResult MessageBoxHandler(IWin32Window? owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon);
+        private readonly MessageBoxHandler _messageBoxHandler;
         private readonly TabControl tabControl;
         private readonly TabPage devicesTab;
         private readonly TabPage notificationsTab;
@@ -38,8 +40,9 @@ namespace BTChargeTrayWatcher.Tray
         private ThresholdSettings? _settings;
         private BluetoothBatteryMonitor? _monitor;
 
-        public OptionsForm()
+        public OptionsForm(MessageBoxHandler? messageBoxHandler = null)
         {
+            _messageBoxHandler = messageBoxHandler ?? ((owner, text, caption, buttons, icon) => MessageBox.Show(owner, text, caption, buttons, icon));
             Text = "Options";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -229,22 +232,22 @@ namespace BTChargeTrayWatcher.Tray
             lowNumeric.ValueChanged += (_, _) =>
             {
                 try { settings.Low = (int)lowNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); lowNumeric.Value = settings.Low; }
+                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); lowNumeric.Value = settings.Low; }
             };
             highNumeric.ValueChanged += (_, _) =>
             {
                 try { settings.High = (int)highNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); highNumeric.Value = settings.High; }
+                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); highNumeric.Value = settings.High; }
             };
             laptopLowNumeric.ValueChanged += (_, _) =>
             {
                 try { settings.LaptopLow = (int)laptopLowNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopLowNumeric.Value = settings.LaptopLow; }
+                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopLowNumeric.Value = settings.LaptopLow; }
             };
             laptopHighNumeric.ValueChanged += (_, _) =>
             {
                 try { settings.LaptopHigh = (int)laptopHighNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopHighNumeric.Value = settings.LaptopHigh; }
+                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopHighNumeric.Value = settings.LaptopHigh; }
             };
             excludeLaptopOverlayCheck.CheckedChanged += (_, _) => settings.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
 
@@ -266,7 +269,7 @@ namespace BTChargeTrayWatcher.Tray
                     s.Topic = topic;
                     s.IsEnabled = false; // require explicit re-enable after regen
                 });
-                MessageBox.Show(this,
+                _messageBoxHandler(this,
                     $"New topic generated:\n\n{topic}\n\nSubscribe to this topic in the ntfy app on your phone using server ntfy.sh, then enable the integration.",
                     "Mobile notifications — new topic",
                     MessageBoxButtons.OK,
@@ -285,11 +288,11 @@ namespace BTChargeTrayWatcher.Tray
                 if (this.InvokeRequired)
                 {
                     this.Invoke(new Action(() =>
-                        MessageBox.Show(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning)));
+                        _messageBoxHandler(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning)));
                 }
                 else
                 {
-                    MessageBox.Show(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    _messageBoxHandler(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 }
             };
 
@@ -347,7 +350,7 @@ namespace BTChargeTrayWatcher.Tray
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(this, $"Failed to set alias: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _messageBoxHandler(this, $"Failed to set alias: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     LoadDeviceRows();
                 }
             }
@@ -359,7 +362,7 @@ namespace BTChargeTrayWatcher.Tray
                 }
                 catch (ArgumentOutOfRangeException ex)
                 {
-                    MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     LoadDeviceRows();
                 }
             }
@@ -371,7 +374,7 @@ namespace BTChargeTrayWatcher.Tray
                 }
                 catch (ArgumentOutOfRangeException ex)
                 {
-                    MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     LoadDeviceRows();
                 }
             }
@@ -386,7 +389,7 @@ namespace BTChargeTrayWatcher.Tray
             {
                 if (row.PollInterval.HasValue && row.PollInterval.Value <= 0)
                 {
-                    MessageBox.Show(this, "Poll interval must be a positive integer.", "Invalid value", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _messageBoxHandler(this, "Poll interval must be a positive integer.", "Invalid value", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     LoadDeviceRows();
                 }
                 else
@@ -416,7 +419,7 @@ namespace BTChargeTrayWatcher.Tray
         private void ResetAllBtn_Click(object? sender, EventArgs e)
         {
             if (_settings == null) return;
-            var confirm = MessageBox.Show(this, "Reset all device thresholds and poll intervals to defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            var confirm = _messageBoxHandler(this, "Reset all device thresholds and poll intervals to defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm == DialogResult.Yes)
             {
                 foreach (var row in deviceRows)

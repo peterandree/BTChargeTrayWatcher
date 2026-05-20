@@ -18,7 +18,7 @@ namespace BTChargeTrayWatcher.Tests
             });
 
             var monitor = new BluetoothBatteryMonitor(settings, null!);
-            var form = new OptionsForm();
+            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
             form.Initialize(settings, monitor, null);
 
             var enabledCheck = GetCheckBox(form, "ntfyEnabledCheck");
