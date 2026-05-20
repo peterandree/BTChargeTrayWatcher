@@ -7,7 +7,7 @@ namespace BTChargeTrayWatcher.Tray
     {
         private static OptionsForm? _instance;
 
-        public static void ShowOptionsForm(ThresholdSettings? settings = null, BluetoothBatteryMonitor? monitor = null)
+        public static void ShowOptionsForm(ThresholdSettings? settings = null, BluetoothBatteryMonitor? monitor = null, INotificationService? notifier = null)
         {
             if (_instance != null && !_instance.IsDisposed)
             {
@@ -18,7 +18,7 @@ namespace BTChargeTrayWatcher.Tray
 
             _instance = new OptionsForm();
             if (settings != null && monitor != null)
-                _instance.Initialize(settings, monitor);
+                _instance.Initialize(settings, monitor, notifier);
             _instance.FormClosed += (_, _) => _instance = null;
             _instance.Show();
         }

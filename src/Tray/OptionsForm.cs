@@ -10,6 +10,13 @@ namespace BTChargeTrayWatcher.Tray
         private readonly TabPage devicesTab;
         private readonly TabPage notificationsTab;
         private readonly TabPage generalTab;
+        private readonly Button testNotificationBtn;
+        private readonly NumericUpDown lowNumeric;
+        private readonly NumericUpDown highNumeric;
+        private readonly NumericUpDown laptopLowNumeric;
+        private readonly NumericUpDown laptopHighNumeric;
+        private readonly CheckBox excludeLaptopOverlayCheck;
+        private INotificationService? _notifier;
 
         private class DeviceRow
         {
@@ -66,8 +73,58 @@ namespace BTChargeTrayWatcher.Tray
             resetAllBtn = new Button { Text = "Reset All Devices", Dock = DockStyle.Bottom, Height = 32 };
             devicesTab.Controls.Add(resetAllBtn);
 
+
+            // Notifications tab
             notificationsTab = new TabPage("Notifications");
+            testNotificationBtn = new Button
+            {
+                Text = "Test Notification",
+                Dock = DockStyle.Top,
+                Height = 36,
+                Margin = new Padding(16),
+            };
+            testNotificationBtn.Click += (_, _) =>
+            {
+                _notifier?.NotifyLow("Test Device", 42);
+            };
+            notificationsTab.Controls.Add(testNotificationBtn);
+
+
+            // General tab
             generalTab = new TabPage("General");
+            var generalPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 5,
+                AutoSize = true,
+                Padding = new Padding(16),
+            };
+            generalPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+            generalPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+
+            // Global thresholds
+            generalPanel.Controls.Add(new Label { Text = "Global Low %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+            lowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+            generalPanel.Controls.Add(lowNumeric, 1, 0);
+            generalPanel.Controls.Add(new Label { Text = "Global High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+            highNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+            generalPanel.Controls.Add(highNumeric, 1, 1);
+
+            // Laptop thresholds
+            generalPanel.Controls.Add(new Label { Text = "Laptop Low %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+            laptopLowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+            generalPanel.Controls.Add(laptopLowNumeric, 1, 2);
+            generalPanel.Controls.Add(new Label { Text = "Laptop High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+            laptopHighNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+            generalPanel.Controls.Add(laptopHighNumeric, 1, 3);
+
+            // Exclude laptop from tray icon overlay
+            excludeLaptopOverlayCheck = new CheckBox { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
+            generalPanel.Controls.Add(excludeLaptopOverlayCheck, 0, 4);
+            generalPanel.SetColumnSpan(excludeLaptopOverlayCheck, 2);
+
+            generalTab.Controls.Add(generalPanel);
 
             tabControl.TabPages.Add(devicesTab);
             tabControl.TabPages.Add(notificationsTab);
@@ -78,10 +135,40 @@ namespace BTChargeTrayWatcher.Tray
             // Defer data wiring until settings/monitor are injected
         }
 
-        public void Initialize(ThresholdSettings settings, BluetoothBatteryMonitor monitor)
+        public void Initialize(ThresholdSettings settings, BluetoothBatteryMonitor monitor, INotificationService? notifier = null)
         {
             _settings = settings;
             _monitor = monitor;
+            _notifier = notifier;
+            // Wire up general tab controls to settings
+            lowNumeric.Value = settings.Low;
+            highNumeric.Value = settings.High;
+            laptopLowNumeric.Value = settings.LaptopLow;
+            laptopHighNumeric.Value = settings.LaptopHigh;
+            excludeLaptopOverlayCheck.Checked = settings.ExcludeLaptopFromTrayIconOverlay;
+
+            lowNumeric.ValueChanged += (_, _) =>
+            {
+                try { settings.Low = (int)lowNumeric.Value; }
+                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); lowNumeric.Value = settings.Low; }
+            };
+            highNumeric.ValueChanged += (_, _) =>
+            {
+                try { settings.High = (int)highNumeric.Value; }
+                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); highNumeric.Value = settings.High; }
+            };
+            laptopLowNumeric.ValueChanged += (_, _) =>
+            {
+                try { settings.LaptopLow = (int)laptopLowNumeric.Value; }
+                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopLowNumeric.Value = settings.LaptopLow; }
+            };
+            laptopHighNumeric.ValueChanged += (_, _) =>
+            {
+                try { settings.LaptopHigh = (int)laptopHighNumeric.Value; }
+                catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopHighNumeric.Value = settings.LaptopHigh; }
+            };
+            excludeLaptopOverlayCheck.CheckedChanged += (_, _) => settings.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+
             LoadDeviceRows();
             devicesGrid.CellValueChanged += DevicesGrid_CellValueChanged;
             devicesGrid.CellContentClick += DevicesGrid_CellContentClick;

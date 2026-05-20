@@ -67,7 +67,7 @@ public sealed class TrayApp : IDisposable
             _highMenu,
             mobileNotificationsMenu,
             onExit: () => _ = ExitAsync(),
-            onOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(_settings, _monitor));
+            onOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(_settings, _monitor, _notifier));
 
         _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
