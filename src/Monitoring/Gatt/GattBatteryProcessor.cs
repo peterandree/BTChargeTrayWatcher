@@ -14,15 +14,39 @@ internal sealed class GattBatteryProcessor
     private static readonly Guid BatteryPowerStateUuid  = new("00002a1b-0000-1000-8000-00805f9b34fb");
 
     private readonly GattConnectionCache _cache;
+    private readonly Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? _testProcessOverride;
 
     public GattBatteryProcessor(GattConnectionCache cache)
     {
         _cache = cache;
     }
 
+    // Internal constructor for tests that allows injecting a deterministic processor override
+    internal GattBatteryProcessor(GattConnectionCache cache, Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? testProcessOverride)
+    {
+        _cache = cache;
+        _testProcessOverride = testProcessOverride;
+    }
+
     public async Task<GattDeviceReadResult> ProcessDeviceAsync(
         string deviceId, string fallbackName, CancellationToken cancellationToken)
     {
+        if (_testProcessOverride is not null)
+        {
+            try
+            {
+                return await _testProcessOverride(deviceId, fallbackName, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GattBatteryProcessor][TestOverride] fault: {ex.Message}");
+                return new GattDeviceReadResult(deviceId, fallbackName, null);
+            }
+        }
         var device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
         if (device is null)
             return new GattDeviceReadResult(deviceId, fallbackName, null);
@@ -55,7 +79,27 @@ internal sealed class GattBatteryProcessor
             catch (Exception ex) when (IsExpectedBluetoothException(ex) || ex is ObjectDisposedException)
             {
                 Debug.WriteLine($"[GattBatteryProcessor] Cached characteristic failed: {ex.Message}");
+                // Evict the cached endpoint because it failed.
                 _cache.RemoveEndpoint(deviceId);
+
+                // Also remove any cached BluetoothLEDevice to avoid stale WinRT instances
+                // and force a fresh FromIdAsync on the subsequent attempt.
+                _cache.RemoveDevice(deviceId);
+
+                // Attempt to obtain a fresh device instance. If we cannot, give up.
+                device = await GetOrCreateDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
+                if (device is null)
+                    return new GattDeviceReadResult(deviceId, deviceName, null);
+
+                if (device.ConnectionStatus != Windows.Devices.Bluetooth.BluetoothConnectionStatus.Connected)
+                {
+                    // Device still not connected; evict and give up this cycle.
+                    _cache.RemoveDevice(deviceId);
+                    return new GattDeviceReadResult(deviceId, deviceName, null);
+                }
+
+                // Update display name from fresh device if available and continue with discovery.
+                deviceName = GetDeviceName(device) ?? deviceName;
             }
         }
 
