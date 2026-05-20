@@ -179,6 +179,7 @@ internal sealed class PollingOrchestrator : IDisposable
                         _lastKnown.TryRemove(id, out _);
                         _alertStates.TryRemove(id, out _);
                         _missCount.TryRemove(id, out _);
+                        _lastProcessed.TryRemove(id, out _);
                     }
                 }
             }
