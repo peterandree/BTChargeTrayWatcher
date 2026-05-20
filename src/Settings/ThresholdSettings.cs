@@ -19,16 +19,18 @@ public sealed class ThresholdSettings
     private Dictionary<string, int> _devicePollIntervals = new(StringComparer.OrdinalIgnoreCase);
     // Optional user-specified display name aliases keyed by device id
     private Dictionary<string, string> _displayNameAliases = new(StringComparer.OrdinalIgnoreCase);
-    // Backwards-compatible: device overrides and poll intervals may be keyed by
-    // either display name or stable device id. New APIs prefer device id.
-    // ── Per-device poll interval ─────────────────────────────────────────────
 
+    // ── Per-device poll interval (legacy name-keyed API) ─────────────────────
+    // Prefer GetPollIntervalForDevice / SetPollIntervalForDevice (device-id-keyed).
+
+    [Obsolete("Use GetPollIntervalForDevice(deviceId, displayName) instead.")]
     public int? GetPollInterval(string deviceName)
     {
         lock (_thresholdLock)
             return _devicePollIntervals.TryGetValue(deviceName, out var interval) ? interval : (int?)null;
     }
 
+    [Obsolete("Use SetPollIntervalForDevice(deviceId, interval) instead.")]
     public void SetPollInterval(string deviceName, int? interval)
     {
         lock (_thresholdLock)
@@ -41,6 +43,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
+    [Obsolete("Use HasCustomPollIntervalForDevice(deviceId) instead.")]
     public bool HasCustomPollInterval(string deviceName)
     {
         lock (_thresholdLock)
@@ -88,7 +91,8 @@ public sealed class ThresholdSettings
                         $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceId}'.");
             }
 
-            t.Low = value;
+            t = t with { Low = value };
+            _deviceOverrides[deviceId] = t;
             if (!t.Low.HasValue && !t.High.HasValue)
                 _deviceOverrides.Remove(deviceId);
         }
@@ -114,7 +118,8 @@ public sealed class ThresholdSettings
                         $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceId}'.");
             }
 
-            t.High = value;
+            t = t with { High = value };
+            _deviceOverrides[deviceId] = t;
             if (!t.Low.HasValue && !t.High.HasValue)
                 _deviceOverrides.Remove(deviceId);
         }
@@ -238,114 +243,7 @@ public sealed class ThresholdSettings
         }
     }
 
-    // ── ntfy integration ─────────────────────────────────────────────────────
-
-    /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
-    public NtfyIntegrationSettings GetNtfySettings()
-    {
-        lock (_thresholdLock) return _ntfy.Clone();
-    }
-
-    public void UpdateNtfySettings(Action<NtfyIntegrationSettings> mutate)
-    {
-        lock (_thresholdLock) mutate(_ntfy);
-        Changed?.Invoke();
-    }
-
-    // ── Per-device overrides ─────────────────────────────────────────────────
-
-    public int GetLow(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
-    }
-
-    public int GetHigh(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
-    }
-
-    public bool HasCustomLow(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
-    }
-
-    public bool HasCustomHigh(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
-    }
-
-    public void SetLow(string deviceName, int? value)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
-            {
-                if (value == null) return;
-                t = new DeviceThresholds();
-                _deviceOverrides[deviceName] = t;
-            }
-
-            if (value.HasValue)
-            {
-                int effectiveHigh = GetHigh(deviceName);
-                if (value.Value >= effectiveHigh)
-                    throw new ArgumentOutOfRangeException(nameof(value),
-                        $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
-            }
-
-            t.Low = value;
-            CleanupEmptyOverrides(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    public void SetHigh(string deviceName, int? value)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
-            {
-                if (value == null) return;
-                t = new DeviceThresholds();
-                _deviceOverrides[deviceName] = t;
-            }
-
-            if (value.HasValue)
-            {
-                int effectiveLow = GetLow(deviceName);
-                if (value.Value <= effectiveLow)
-                    throw new ArgumentOutOfRangeException(nameof(value),
-                        $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
-            }
-
-            t.High = value;
-            CleanupEmptyOverrides(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    private void CleanupEmptyOverrides(string deviceName)
-    {
-        if (_deviceOverrides.TryGetValue(deviceName, out var t))
-            if (!t.Low.HasValue && !t.High.HasValue)
-                _deviceOverrides.Remove(deviceName);
-    }
-
-    // ── Device sets ──────────────────────────────────────────────────────────
-
-    public IReadOnlyCollection<string> IgnoredDevices
-    {
-        get { lock (_thresholdLock) return new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase); }
-    }
-
-    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices
-    {
-        get { lock (_thresholdLock) return new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase); }
-    }
+    // ── Tray icon overlay exclusion ──────────────────────────────────────────
 
     public bool ExcludeLaptopFromTrayIconOverlay
     {
@@ -361,65 +259,143 @@ public sealed class ThresholdSettings
         }
     }
 
-    public void SetIgnoredDevices(IEnumerable<string> devices)
+    public bool IsTrayIconOverlayExcluded(string deviceId, string displayName)
     {
         lock (_thresholdLock)
-            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+            return _trayIconOverlayExcludedDevices.Contains(deviceId)
+                || _trayIconOverlayExcludedDevices.Contains(displayName);
+    }
+
+    public void SetTrayIconOverlayExcludedDevices(IEnumerable<string> devices)
+    {
+        lock (_thresholdLock)
+            _trayIconOverlayExcludedDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
         Changed?.Invoke();
     }
 
-    public void SetDisplayNameAlias(string deviceId, string? alias)
+    // ── ntfy integration ─────────────────────────────────────────────────────
+
+    /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
+    public NtfyIntegrationSettings GetNtfySettings()
+    {
+        lock (_thresholdLock) return _ntfy.Clone();
+    }
+
+    public void UpdateNtfySettings(Action<NtfyIntegrationSettings> mutate)
+    {
+        lock (_thresholdLock) mutate(_ntfy);
+        Changed?.Invoke();
+    }
+
+    // ── Per-device overrides (legacy name-keyed API) ──────────────────────────
+    // Prefer SetLowForDevice / SetHighForDevice (device-id-keyed).
+
+    [Obsolete("Use GetLowForDevice(deviceId, displayName) instead.")]
+    public int GetLow(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
+    }
+
+    [Obsolete("Use GetHighForDevice(deviceId, displayName) instead.")]
+    public int GetHigh(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
+    }
+
+    [Obsolete("Use GetLowForDevice(deviceId, displayName) to check for a custom value.")]
+    public bool HasCustomLow(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
+    }
+
+    [Obsolete("Use GetHighForDevice(deviceId, displayName) to check for a custom value.")]
+    public bool HasCustomHigh(string deviceName)
+    {
+        lock (_thresholdLock)
+            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
+    }
+
+    [Obsolete("Use SetLowForDevice(deviceId, value) instead.")]
+    public void SetLow(string deviceName, int? value)
     {
         lock (_thresholdLock)
         {
-            if (string.IsNullOrWhiteSpace(alias))
-                _displayNameAliases.Remove(deviceId);
-            else
-                _displayNameAliases[deviceId] = alias!;
+            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+            {
+                if (value == null) return;
+                t = new DeviceThresholds();
+                _deviceOverrides[deviceName] = t;
+            }
+
+            if (value.HasValue)
+            {
+#pragma warning disable CS0618
+                int effectiveHigh = GetHigh(deviceName);
+#pragma warning restore CS0618
+                if (value.Value >= effectiveHigh)
+                    throw new ArgumentOutOfRangeException(nameof(value),
+                        $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
+            }
+
+            t = t with { Low = value };
+            _deviceOverrides[deviceName] = t;
+            if (!t.Low.HasValue && !t.High.HasValue)
+                _deviceOverrides.Remove(deviceName);
         }
         Changed?.Invoke();
     }
 
-    public string GetDisplayName(string deviceId, string defaultName)
+    [Obsolete("Use SetHighForDevice(deviceId, value) instead.")]
+    public void SetHigh(string deviceName, int? value)
     {
         lock (_thresholdLock)
         {
-            return _displayNameAliases.TryGetValue(deviceId, out var a) ? a : defaultName;
-        }
-    }
+            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
+            {
+                if (value == null) return;
+                t = new DeviceThresholds();
+                _deviceOverrides[deviceName] = t;
+            }
 
-    public void ToggleIgnoreDevice(string deviceName)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_ignoredDevices.Remove(deviceName))
-                _ignoredDevices.Add(deviceName);
+            if (value.HasValue)
+            {
+#pragma warning disable CS0618
+                int effectiveLow = GetLow(deviceName);
+#pragma warning restore CS0618
+                if (value.Value <= effectiveLow)
+                    throw new ArgumentOutOfRangeException(nameof(value),
+                        $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
+            }
+
+            t = t with { High = value };
+            _deviceOverrides[deviceName] = t;
+            if (!t.Low.HasValue && !t.High.HasValue)
+                _deviceOverrides.Remove(deviceName);
         }
         Changed?.Invoke();
     }
 
-    public void ToggleExcludeFromTrayIconOverlay(string deviceName)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
-                _trayIconOverlayExcludedDevices.Add(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    // ── Internal snapshot used by SettingsPersistence ────────────────────────
+    // ── Snapshot / restore ───────────────────────────────────────────────────
 
     internal SettingsSnapshot Snapshot()
     {
         lock (_thresholdLock)
         {
+            // Deep-copy DeviceOverrides so callers cannot mutate stored instances.
+            var overridesCopy = new Dictionary<string, DeviceThresholds>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in _deviceOverrides)
+                overridesCopy[kvp.Key] = kvp.Value with { }; // record copy
+
             return new SettingsSnapshot(
                 _low, _high, _laptopLow, _laptopHigh,
                 new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase),
                 _excludeLaptopFromTrayIconOverlay,
-                new Dictionary<string, DeviceThresholds>(_deviceOverrides, StringComparer.OrdinalIgnoreCase),
+                overridesCopy,
                 new Dictionary<string, int>(_devicePollIntervals, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(_displayNameAliases, StringComparer.OrdinalIgnoreCase),
                 _ntfy.Clone());
@@ -447,10 +423,14 @@ public sealed class ThresholdSettings
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
+/// <summary>
+/// Per-device low/high battery threshold overrides.
+/// Use init-only setters to preserve value semantics; mutate via 'with' expressions.
+/// </summary>
 public sealed record DeviceThresholds
 {
-    public int? Low  { get; set; }
-    public int? High { get; set; }
+    public int? Low  { get; init; }
+    public int? High { get; init; }
 }
 
 internal sealed record SettingsSnapshot(
