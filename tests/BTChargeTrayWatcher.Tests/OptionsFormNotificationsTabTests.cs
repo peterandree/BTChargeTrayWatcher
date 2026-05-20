@@ -19,15 +19,12 @@ namespace BTChargeTrayWatcher.Tests
             form.Initialize(settings, monitor, notifier);
 
             var btn = GetButton(form, "testNotificationBtn");
-            // Directly invoke the click handler for headless test reliability
             btn.PerformClick();
             if (!called)
             {
-                // Fallback: directly invoke click event handler if PerformClick did not work (headless)
-                var clickEvent = btn.GetType().GetEvent("Click");
-                var method = typeof(OptionsForm).GetMethod("<OptionsForm>b__0_0", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (method != null)
-                    method.Invoke(form, new object[] { btn, EventArgs.Empty });
+                // Fallback: directly invoke OnClick if PerformClick does not work
+                var onClick = btn.GetType().GetMethod("OnClick", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                onClick?.Invoke(btn, new object[] { EventArgs.Empty });
             }
             Assert.True(called);
         }
