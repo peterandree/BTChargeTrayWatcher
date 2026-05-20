@@ -187,3 +187,22 @@ Location: `%LOCALAPPDATA%\BTChargeTrayWatcher\settings.json`
 ```
 
 The file is written atomically. Corrupt or missing files reset to defaults (20 / 80) without crashing.
+
+---
+
+## Recent architectural enhancements (ADR-015 to ADR-019)
+
+### Device alias migration & heuristics (ADR-015)
+To improve resilience to device re-pairing and renaming, `ThresholdSettings` now includes an alias/history mapping (`AliasMap`) that links historical display-name variants to a canonical name. The `DeviceAggregationPipeline` applies a multi-stage alias resolution pipeline (exact match, alias lookup, normalized equivalence, and high-confidence fuzzy match). Only high-confidence matches are auto-applied; fuzzy matches are surfaced as suggestions in the UI for user confirmation. The Options UI exposes a surface for managing and confirming alias mappings.
+
+### Device class/type filtering policy (ADR-016)
+`DeviceAggregationPipeline` now filters out devices that do not expose battery data or are not in a known battery-bearing category (audio, keyboard, mouse, gamepad, wearable). Users can override this in the Options UI to show or include filtered devices. The default category list is conservative and can be extended via an advanced setting.
+
+### Passive Windows.Devices.Enumeration reader (ADR-017)
+An optional `EnumerationBatteryReader` (if present) passively enumerates Bluetooth devices using `Windows.Devices.Enumeration` without opening connections or waking radios. Its results are merged at lower precedence than GATT or Classic. This increases device coverage without additional battery impact.
+
+### Centralized discovery logging (ADR-018)
+All device discovery and aggregation operations now log to a structured, centralized `DiscoveryLogger`. Logs are local-only (Debug.WriteLine or optional file sink) and use compact JSON with error codes for easier debugging and support.
+
+### Manual "Deep Scan" UX & operational limits (ADR-019)
+The Scan UI now exposes a "Deep Scan" action for diagnostic purposes. Deep scans are user-initiated, timeboxed, and cancellable, and never increase background scan frequency. They allow users to resolve recognition issues, confirm alias suggestions, and include filtered devices, all without increasing long-term battery impact.

@@ -6,7 +6,25 @@ Guidance for AI coding agents (Copilot, Claude, Cursor, etc.) working in this re
 
 `BTChargeTrayWatcher` is a single-project, Windows-only .NET 10 WinForms system-tray application that monitors the battery levels of connected Bluetooth devices and the host laptop, then fires Windows Toast notifications when configurable low / high thresholds are crossed.
 
+
 See [`docs/architecture.md`](docs/architecture.md) for the full structural picture.
+
+---
+
+## Recent ADRs and agent boundaries
+
+### New ADRs (015–019)
+- **ADR-015:** Device alias migration & heuristics — agents must not bypass alias resolution or propose settings changes that ignore the alias pipeline or UI confirmation requirements.
+- **ADR-016:** Device class/type filtering — agents must respect the default filtering policy and only propose code/UI changes that allow user override as described.
+- **ADR-017:** Passive enumeration reader — if present, agents must treat it as a lower-precedence source and not introduce active device wakeups.
+- **ADR-018:** Centralized discovery logging — all new device discovery or aggregation code must use `DiscoveryLogger` for structured, local-only logs.
+- **ADR-019:** Manual deep scan — agents must not increase background scan frequency or bypass user confirmation for deep scans; deep scan logic must remain user-initiated and timeboxed.
+
+### Agent boundaries for new features
+- Do not bypass or remove alias, filtering, or logging logic.
+- Do not introduce new background polling or device wakeups outside the documented scan intervals and deep scan UX.
+- When adding new readers or device sources, follow the IBatteryReader pattern and update the aggregation pipeline and UI as per ADR-002, ADR-015, ADR-016, and ADR-017.
+- All changes to device recognition, filtering, or logging must be justified with a new ADR or explicit documentation.
 
 ---
 
@@ -24,7 +42,8 @@ Do **not** introduce cross-platform abstractions, Linux or macOS code paths, or 
 
 ---
 
-## Source layout
+
+## Source layout (see also new folders for ADR-017/ADR-018)
 
 ```
 src/
