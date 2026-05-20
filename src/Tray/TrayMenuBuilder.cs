@@ -22,7 +22,6 @@ internal sealed class TrayMenuBuilder
         ToolStripMenuItem scanMenuItem,
         ToolStripMenuItem lowMenu,
         ToolStripMenuItem highMenu,
-        ToolStripMenuItem mobileNotificationsMenu,
         Action onExit,
         Action? onOptions = null)
     {
@@ -66,8 +65,7 @@ internal sealed class TrayMenuBuilder
         menu.Items.Add(lowMenu);
         menu.Items.Add(highMenu);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(mobileNotificationsMenu);
-        menu.Items.Add(new ToolStripSeparator());
+        // ntfy mobile notifications menu removed; now in Options dialog
         var autostartItem = new ToolStripMenuItem("Run on startup")
         {
             Checked = StartupRegistration.IsEnabled

@@ -11,6 +11,11 @@ namespace BTChargeTrayWatcher.Tray
         private readonly TabPage notificationsTab;
         private readonly TabPage generalTab;
         private readonly Button testNotificationBtn;
+        // ntfy controls
+        private readonly CheckBox ntfyEnabledCheck;
+        private readonly TextBox ntfyTopicTextBox;
+        private readonly Button regenerateTopicBtn;
+        private readonly Button sendNtfyTestBtn;
         private readonly NumericUpDown lowNumeric;
         private readonly NumericUpDown highNumeric;
         private readonly NumericUpDown laptopLowNumeric;
@@ -87,6 +92,31 @@ namespace BTChargeTrayWatcher.Tray
             {
                 _notifier?.NotifyLow("Test Device", 42);
             };
+            // ntfy group
+            var ntfyGroup = new GroupBox
+            {
+                Text = "Mobile notifications (ntfy.sh)",
+                Dock = DockStyle.Top,
+                Height = 120,
+                Padding = new Padding(8),
+            };
+
+            ntfyEnabledCheck = new CheckBox { Text = "Enable ntfy notifications", AutoSize = true, Dock = DockStyle.Top };
+
+            var topicPanel = new Panel { Dock = DockStyle.Top, Height = 30 };
+            var topicLabel = new Label { Text = "Topic:", AutoSize = true, Width = 40, Dock = DockStyle.Left };
+            ntfyTopicTextBox = new TextBox { ReadOnly = true, Dock = DockStyle.Fill };
+            regenerateTopicBtn = new Button { Text = "Regenerate topic", Width = 140, Dock = DockStyle.Right };
+            topicPanel.Controls.Add(ntfyTopicTextBox);
+            topicPanel.Controls.Add(topicLabel);
+            topicPanel.Controls.Add(regenerateTopicBtn);
+
+            sendNtfyTestBtn = new Button { Text = "Send ntfy test", Dock = DockStyle.Top, Height = 32, Margin = new Padding(0,8,0,0) };
+            ntfyGroup.Controls.Add(sendNtfyTestBtn);
+            ntfyGroup.Controls.Add(topicPanel);
+            ntfyGroup.Controls.Add(ntfyEnabledCheck);
+
+            notificationsTab.Controls.Add(ntfyGroup);
             notificationsTab.Controls.Add(testNotificationBtn);
 
 
@@ -168,6 +198,51 @@ namespace BTChargeTrayWatcher.Tray
                 catch (ArgumentOutOfRangeException ex) { MessageBox.Show(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopHighNumeric.Value = settings.LaptopHigh; }
             };
             excludeLaptopOverlayCheck.CheckedChanged += (_, _) => settings.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+
+            // ntfy controls wiring
+            var ntfy = settings.GetNtfySettings();
+            ntfyEnabledCheck.Checked = ntfy.IsEnabled;
+            ntfyTopicTextBox.Text = ntfy.Topic ?? string.Empty;
+
+            ntfyEnabledCheck.CheckedChanged += (_, _) =>
+            {
+                settings.UpdateNtfySettings(s => s.IsEnabled = ntfyEnabledCheck.Checked);
+            };
+
+            regenerateTopicBtn.Click += (_, _) =>
+            {
+                string topic = NtfyTopicGenerator.Generate();
+                settings.UpdateNtfySettings(s =>
+                {
+                    s.Topic = topic;
+                    s.IsEnabled = false; // require explicit re-enable after regen
+                });
+                MessageBox.Show(this,
+                    $"New topic generated:\n\n{topic}\n\nSubscribe to this topic in the ntfy app on your phone using server ntfy.sh, then enable the integration.",
+                    "Mobile notifications — new topic",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                ntfyTopicTextBox.Text = topic;
+                ntfyEnabledCheck.Checked = false;
+            };
+
+            sendNtfyTestBtn.Click += async (_, _) =>
+            {
+                var channel = new NtfyNotificationChannel(settings.GetNtfySettings());
+                bool ok = await channel.SendTestNotificationAsync().ConfigureAwait(false);
+                string msg = ok
+                    ? "Test notification sent. Check your phone."
+                    : "Failed to send test notification. Check your internet connection and verify the topic is correct.";
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(new Action(() =>
+                        MessageBox.Show(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning)));
+                }
+                else
+                {
+                    MessageBox.Show(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                }
+            };
 
             LoadDeviceRows();
             devicesGrid.CellValueChanged += DevicesGrid_CellValueChanged;

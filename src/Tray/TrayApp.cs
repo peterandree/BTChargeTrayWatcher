@@ -55,9 +55,6 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        var mobileNotificationsMenu = new NtfyMobileNotificationsMenuBuilder(
-            settings, ntfyChannel, monitor, laptopMonitor).Build();
-
         _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
             _settings,
             _laptopMenuItem,
@@ -65,7 +62,6 @@ public sealed class TrayApp : IDisposable
             _scanMenuItem,
             _lowMenu,
             _highMenu,
-            mobileNotificationsMenu,
             onExit: () => _ = ExitAsync(),
             onOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(_settings, _monitor, _notifier));
 
