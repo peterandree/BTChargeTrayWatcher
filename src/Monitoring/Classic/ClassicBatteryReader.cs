@@ -56,15 +56,17 @@ public sealed class ClassicBatteryReader : IBatteryReader
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
         }, cancellationToken).ConfigureAwait(false);
 
-        // DeviceId = InstanceId (stable SetupAPI identity); Name is display-only
+        // DeviceId = InstanceId (stable SetupAPI identity); Name is display-only.
+        // TryGetValue returns false for devices the property reader could not read;
+        // those get null battery so they are filtered out downstream.
         return connected
             .Select(c =>
             {
-                batteryMap.TryGetValue(c.InstanceId, out var props);
+                bool found = batteryMap.TryGetValue(c.InstanceId, out var props);
                 return new DeviceBatteryInfo(
                     c.InstanceId,
                     c.Name,
-                    props.Battery == 0 && !batteryMap.ContainsKey(c.InstanceId) ? null : props.Battery,
+                    found ? props.Battery : null,
                     props.IsCharging,
                     BatterySource.Classic);
             })
