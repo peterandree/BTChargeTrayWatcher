@@ -1,5 +1,28 @@
 namespace BTChargeTrayWatcher;
 
+/// <summary>
+/// Reads and merges battery results from a GATT reader and a Classic reader.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Execution path: legacy IBatteryReader path only.</b>
+/// This class is used by <see cref="Scanner"/> when it is constructed with explicit
+/// <see cref="IBatteryReader"/> instances — i.e. via the deprecated 2-argument and
+/// 4-argument <see cref="BluetoothBatteryMonitor"/> constructors.
+/// </para>
+/// <para>
+/// <b>This class is NOT on the production path.</b> <c>Program.cs</c> exclusively uses
+/// the 6-argument internal cooperation-stack constructor, which wires
+/// <see cref="OrchestratorBatteryReaderAdapter"/> as the GATT reader and
+/// <see cref="NullBatteryReader"/> as the Classic reader. On that path,
+/// <see cref="BatteryReaderOrchestrator"/> performs all aggregation and merging.
+/// </para>
+/// <para>
+/// Future work (tracked in issue #100): once the legacy constructors are removed,
+/// this class and its test file (<c>DeviceAggregationPipelineTests.cs</c>) can be
+/// deleted. Until then, it is retained to keep <c>ScannerTests</c> green.
+/// </para>
+/// </remarks>
 internal sealed class DeviceAggregationPipeline
 {
     private readonly IBatteryReader _gattReader;

@@ -44,19 +44,19 @@
             │   (threshold evaluation, hysteresis, miss-count)
             └───────────────┘  fires NotifyLow / NotifyHigh
 
-┌────────────────────────────────────────────────────────────┐
-│  LaptopBatteryMonitor  (separate from BT pipeline)          │
-│  – polls System.Windows.Forms.PowerStatus + WMI             │
-│  – fires BatteryUpdated → TrayApp updates menu + icon       │
-└────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  LaptopBatteryMonitor  (separate from BT pipeline)                  │
+│  – polls System.Windows.Forms.PowerStatus + WMI                     │
+│  – fires BatteryUpdated → TrayApp updates menu + icon               │
+└────────────────────────────────────────────────────────────────────┘
 
-┌────────────────────────────────────────────────────────────┐
-│  ThresholdSettings  (shared read/write state)               │
-│  – JSON file in %LOCALAPPDATA%\BTChargeTrayWatcher\         │
-│  – per-device threshold overrides                           │
-│  – ignored-device and tray-overlay-excluded-device lists    │
-│  – raises Changed event on any mutation                     │
-└────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  ThresholdSettings  (shared read/write state)                       │
+│  – JSON file in %LOCALAPPDATA%\BTChargeTrayWatcher\                 │
+│  – per-device threshold overrides                                   │
+│  – ignored-device and tray-overlay-excluded-device lists            │
+│  – raises Changed event on any mutation                             │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -66,6 +66,8 @@
 ### Program.cs
 
 Entry point. Enforces single-instance via a named `Mutex`. Constructs all objects in dependency order (`ThresholdSettings` → `NotificationService` → readers → `BluetoothBatteryMonitor` → `LaptopBatteryMonitor` → `TrayApp`) and calls `Application.Run()`. Disposes monitors on exit.
+
+Always uses the 6-argument internal `BluetoothBatteryMonitor` cooperation-stack constructor. The legacy 2-argument and 4-argument constructors are deprecated and not called by `Program.cs`.
 
 ### TrayApp
 
@@ -79,13 +81,23 @@ Bridges the background monitor and the UI. Owns the `ScanWindow` lifetime. Route
 
 Public facade. Owns the 60-second polling `Timer`, reacts to `PowerModeChanged` (suspends/resumes the timer), and delegates actual reading to `Scanner` and `PollingOrchestrator`. Manages cooperative shutdown via `CancellationTokenSource` and `TaskTracker`.
 
+The production entry point is the 6-argument internal constructor, wired in `Program.cs`, which accepts the full cooperation stack (`DeviceWatcherService`, `BatteryReaderOrchestrator`, `GattConnectionManager`, `DeviceCapabilityCache`). The public 2-argument and 4-argument constructors are deprecated (`[Obsolete]`) and bypass the cooperation stack.
+
 ### Scanner
 
-Executes full device scans (used at startup and on user request). Delegates to `BatteryReaderOrchestrator.ReadMergedAsync`, then writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
+Executes full device scans (used at startup and on user request). On the cooperation-stack path, the injected GATT reader is `OrchestratorBatteryReaderAdapter` (which delegates to `BatteryReaderOrchestrator`) and the Classic reader is `NullBatteryReader`. Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
 
 ### BatteryReaderOrchestrator
 
-Issues `GattBatteryReader.ReadAllAsync` and `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication by `DeviceId` (GATT wins on collision). Faults in either reader are logged and treated as empty results so the other source is still used.
+**Cooperation-stack (production) path only.** Issues `GattBatteryReader.ReadAllAsync` (per-device via `GattConnectionManager`) and `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication (GATT wins on name/ID collision, Classic tagged with `BatterySource.Classic`). Updates `DeviceCapabilityCache` after each GATT attempt. Faults in either reader are logged and treated as empty results.
+
+All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (discovery logging) implementations that affect aggregation live here.
+
+### DeviceAggregationPipeline
+
+**Legacy IBatteryReader path only — not reached by `Program.cs`.** Used by `Scanner` when constructed with explicit `IBatteryReader` instances via the deprecated 2-argument/4-argument `BluetoothBatteryMonitor` constructors. Performs the same parallel-read-and-merge responsibility as `BatteryReaderOrchestrator` but without the cooperation-stack features (no `GattConnectionManager`, no `DeviceCapabilityCache`, no per-device GATT connection reuse).
+
+Retained only to keep `ScannerTests` and `DeviceAggregationPipelineTests` green. Will be removed when the legacy constructors are eliminated (issue #100 follow-up).
 
 ### PollingOrchestrator
 
@@ -125,8 +137,8 @@ All configuration in one class. Persists to `%LOCALAPPDATA%\BTChargeTrayWatcher\
 Timer tick (every 60 s)
   └─► PollingOrchestrator.OnTimerTick
         └─► TaskTracker.Start(SafePollAsync)
-              └─► BatteryReaderOrchestrator.ReadMergedAsync (quiet)
-                    ├─► GattBatteryReader.ReadAllAsync
+              └─► BatteryReaderOrchestrator.ReadAllAsync (quiet, via OrchestratorBatteryReaderAdapter)
+                    ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
                     └─► ClassicBatteryReader.ReadAllAsync
               └─► for each device:
                     update _lastKnown
@@ -143,9 +155,10 @@ User clicks tray → ScanCoordinator.OpenScanWindowAndTriggerScan
   └─► ScanWindow shown
   └─► BluetoothBatteryMonitor.StartTrackedScanAsync
         └─► Scanner.ScanNowAsync
-              └─► BatteryReaderOrchestrator.ReadMergedAsync (raises DeviceFound events)
-                    ├─► GattBatteryReader.ReadAllAsync
-                    └─► ClassicBatteryReader.ReadAllAsync
+              └─► OrchestratorBatteryReaderAdapter.ReadAllAsync
+                    └─► BatteryReaderOrchestrator.ReadAllAsync (raises DeviceFound events)
+                          ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
+                          └─► ClassicBatteryReader.ReadAllAsync
               └─► update _lastKnown
               └─► fire ManualScanCompleted
                     └─► ScanWindow.OnScanComplete
@@ -193,16 +206,22 @@ The file is written atomically. Corrupt or missing files reset to defaults (20 /
 ## Recent architectural enhancements (ADR-015 to ADR-019)
 
 ### Device alias migration & heuristics (ADR-015)
-To improve resilience to device re-pairing and renaming, `ThresholdSettings` now includes an alias/history mapping (`AliasMap`) that links historical display-name variants to a canonical name. The `DeviceAggregationPipeline` applies a multi-stage alias resolution pipeline (exact match, alias lookup, normalized equivalence, and high-confidence fuzzy match). Only high-confidence matches are auto-applied; fuzzy matches are surfaced as suggestions in the UI for user confirmation. The Options UI exposes a surface for managing and confirming alias mappings.
+To improve resilience to device re-pairing and renaming, `ThresholdSettings` now includes an alias/history mapping (`AliasMap`) that links historical display-name variants to a canonical name. `BatteryReaderOrchestrator` (production path) applies a multi-stage alias resolution pipeline (exact match, alias lookup, normalized equivalence, and high-confidence fuzzy match). Only high-confidence matches are auto-applied; fuzzy matches are surfaced as suggestions in the UI for user confirmation. The Options UI exposes a surface for managing and confirming alias mappings.
+
+> **Note:** `DeviceAggregationPipeline` is the legacy-path counterpart and is not reached by `Program.cs`. ADR-015 alias resolution applies to `BatteryReaderOrchestrator` only.
 
 ### Device class/type filtering policy (ADR-016)
-`DeviceAggregationPipeline` now filters out devices that do not expose battery data or are not in a known battery-bearing category (audio, keyboard, mouse, gamepad, wearable). Users can override this in the Options UI to show or include filtered devices. The default category list is conservative and can be extended via an advanced setting.
+`BatteryReaderOrchestrator` (production path) filters out devices that do not expose battery data or are not in a known battery-bearing category (audio, keyboard, mouse, gamepad, wearable). Users can override this in the Options UI to show or include filtered devices. The default category list is conservative and can be extended via an advanced setting.
+
+> **Note:** ADR-016 filtering applies to `BatteryReaderOrchestrator` only, not `DeviceAggregationPipeline`.
 
 ### Passive Windows.Devices.Enumeration reader (ADR-017)
 An optional `EnumerationBatteryReader` (if present) passively enumerates Bluetooth devices using `Windows.Devices.Enumeration` without opening connections or waking radios. Its results are merged at lower precedence than GATT or Classic. This increases device coverage without additional battery impact.
 
 ### Centralized discovery logging (ADR-018)
-All device discovery and aggregation operations now log to a structured, centralized `DiscoveryLogger`. Logs are local-only (Debug.WriteLine or optional file sink) and use compact JSON with error codes for easier debugging and support.
+All device discovery and aggregation operations in `BatteryReaderOrchestrator` now log to a structured, centralized `DiscoveryLogger`. Logs are local-only (Debug.WriteLine or optional file sink) and use compact JSON with error codes for easier debugging and support.
+
+> **Note:** ADR-018 logging applies to `BatteryReaderOrchestrator` only, not `DeviceAggregationPipeline`.
 
 ### Manual "Deep Scan" UX & operational limits (ADR-019)
 The Scan UI now exposes a "Deep Scan" action for diagnostic purposes. Deep scans are user-initiated, timeboxed, and cancellable, and never increase background scan frequency. They allow users to resolve recognition issues, confirm alias suggestions, and include filtered devices, all without increasing long-term battery impact.

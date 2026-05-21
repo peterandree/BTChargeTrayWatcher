@@ -8,6 +8,21 @@ namespace BTChargeTrayWatcher;
 /// then Classic batch reader runs as fallback. Results are merged with GATT winning on conflicts.
 /// Capability cache prevents repeated GATT attempts on devices known to lack the battery service.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Execution path: cooperation-stack (production) path only.</b>
+/// This class is the sole production-path aggregator. It is used exclusively by
+/// <see cref="OrchestratorBatteryReaderAdapter"/>, which is injected into <see cref="Scanner"/>
+/// via the 6-argument internal <see cref="BluetoothBatteryMonitor"/> constructor wired in
+/// <c>Program.cs</c>.
+/// </para>
+/// <para>
+/// All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018
+/// (discovery logging) implementations that affect aggregation live here, not in
+/// <see cref="DeviceAggregationPipeline"/> (which is legacy-path only and not reached
+/// by <c>Program.cs</c>).
+/// </para>
+/// </remarks>
 internal sealed class BatteryReaderOrchestrator
 {
     private readonly GattConnectionManager _gattManager;
