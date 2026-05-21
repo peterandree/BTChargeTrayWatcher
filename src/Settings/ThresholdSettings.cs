@@ -24,10 +24,65 @@ public sealed class ThresholdSettings
     private bool _categoryFilterEnabled = true;
     private HashSet<string> _categoryFilterOverrides = new(StringComparer.OrdinalIgnoreCase);
 
+    // ADR-015: alias map — historical name variant (any casing) → canonical DeviceId
+    private Dictionary<string, string> _aliasMap = new(StringComparer.OrdinalIgnoreCase);
+
+    // ── ADR-015: alias map ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a snapshot of the alias map (historical name variant → canonical DeviceId).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> AliasMap
+    {
+        get
+        {
+            lock (_thresholdLock)
+                return new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Replaces the alias map wholesale. Pass an empty enumerable to clear all aliases.
+    /// </summary>
+    public void SetAliasMap(IEnumerable<KeyValuePair<string, string>> entries)
+    {
+        lock (_thresholdLock)
+        {
+            _aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in entries)
+                if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                    _aliasMap[kv.Key] = kv.Value;
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Adds or updates a single alias entry. Raises <see cref="Changed"/>.
+    /// </summary>
+    public void AddAlias(string nameVariant, string canonicalDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(nameVariant)) throw new ArgumentException("Name variant must not be empty.", nameof(nameVariant));
+        if (string.IsNullOrWhiteSpace(canonicalDeviceId)) throw new ArgumentException("Canonical device ID must not be empty.", nameof(canonicalDeviceId));
+        lock (_thresholdLock)
+            _aliasMap[nameVariant] = canonicalDeviceId;
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Removes an alias entry by its name variant key. No-op if the key is absent.
+    /// </summary>
+    public void RemoveAlias(string nameVariant)
+    {
+        bool changed;
+        lock (_thresholdLock)
+            changed = _aliasMap.Remove(nameVariant);
+        if (changed) Changed?.Invoke();
+    }
+
     // ── ADR-016: category filter ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// When <c>true</c> (default), <see cref="DeviceAggregationPipeline"/> excludes devices
+    /// When <c>true</c> (default), <see cref="BatteryReaderOrchestrator"/> excludes devices
     /// whose <see cref="DeviceBatteryInfo.Category"/> is a known but non-battery-bearing
     /// category. Set to <c>false</c> to pass all devices through regardless of category.
     /// </summary>
@@ -504,7 +559,8 @@ public sealed class ThresholdSettings
                 new Dictionary<string, string>(_displayNameAliases, StringComparer.OrdinalIgnoreCase),
                 _ntfy.Clone(),
                 _categoryFilterEnabled,
-                new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase));
+                new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase));
         }
     }
 
@@ -525,6 +581,7 @@ public sealed class ThresholdSettings
             _ntfy = s.Ntfy;
             _categoryFilterEnabled = s.CategoryFilterEnabled;
             _categoryFilterOverrides = s.CategoryFilterOverrides;
+            _aliasMap = s.AliasMap;
         }
     }
 }
@@ -554,4 +611,5 @@ internal sealed record SettingsSnapshot(
     Dictionary<string, string> DeviceDisplayNameAliases,
     NtfyIntegrationSettings Ntfy,
     bool CategoryFilterEnabled,
-    HashSet<string> CategoryFilterOverrides);
+    HashSet<string> CategoryFilterOverrides,
+    Dictionary<string, string> AliasMap);
