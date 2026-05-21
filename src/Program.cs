@@ -48,7 +48,7 @@ internal static class Program
             var capabilityCache       = new DeviceCapabilityCache();
             var gattConnectionManager = new GattConnectionManager();
             var classicReader         = new ClassicBatteryReader();
-            var orchestrator          = new BatteryReaderOrchestrator(gattConnectionManager, classicReader, capabilityCache);
+            var orchestrator          = new BatteryReaderOrchestrator(gattConnectionManager, classicReader, capabilityCache, settings);
             var deviceWatcher         = new DeviceWatcherService();
 
             monitor       = new BluetoothBatteryMonitor(
