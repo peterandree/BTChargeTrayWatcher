@@ -20,7 +20,9 @@ namespace BTChargeTrayWatcher.Tests
         public void DeviceTab_editing_updates_settings()
         {
             var settings = new ThresholdSettings();
+#pragma warning disable CS0618 // Legacy constructor used intentionally in tests — cooperation stack not required here
             var monitor = new BluetoothBatteryMonitor(settings, null!);
+#pragma warning restore CS0618
             var deviceId = "dev-xyz";
             var device = new DeviceBatteryInfo(deviceId, "Test Device", 50, null, BatterySource.Gatt);
             var field = typeof(BluetoothBatteryMonitor).GetField("_lastKnown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

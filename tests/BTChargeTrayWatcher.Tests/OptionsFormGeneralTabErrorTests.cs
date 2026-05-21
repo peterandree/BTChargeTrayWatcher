@@ -12,7 +12,9 @@ namespace BTChargeTrayWatcher.Tests
         public void GeneralTab_invalid_thresholds_show_error_and_revert()
         {
             var settings = new ThresholdSettings();
+#pragma warning disable CS0618 // Legacy constructor used intentionally in tests — cooperation stack not required here
             var monitor = new BluetoothBatteryMonitor(settings, null!);
+#pragma warning restore CS0618
             var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK); // Suppress MessageBox in test
             form.Initialize(settings, monitor);
 
