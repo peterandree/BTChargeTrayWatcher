@@ -1,10 +1,12 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 
 namespace BTChargeTrayWatcher;
 
 internal sealed class Scanner
 {
-    private readonly DeviceAggregationPipeline _aggregationPipeline;
+    private readonly IBatteryReader _gattReader;
+    private readonly IBatteryReader _classicReader;
+    private readonly Action<string, string, int?> _onDeviceFound;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
     private readonly TaskTracker _tracker;
@@ -21,18 +23,54 @@ internal sealed class Scanner
 
     public Scanner(ScannerOptions options)
     {
-        _aggregationPipeline = new DeviceAggregationPipeline(
-            options.GattReader,
-            options.ClassicReader,
-            options.OnDeviceFound);
-        _lastKnown = options.LastKnown;
-        _poller = options.Poller;
-        _tracker = options.Tracker;
-        _shutdownToken = options.ShutdownToken;
-        _onBatteryRead = options.OnBatteryRead;
-        _onScanStarted = options.OnScanStarted;
+        _gattReader     = options.GattReader;
+        _classicReader  = options.ClassicReader;
+        _onDeviceFound  = options.OnDeviceFound;
+        _lastKnown      = options.LastKnown;
+        _poller         = options.Poller;
+        _tracker        = options.Tracker;
+        _shutdownToken  = options.ShutdownToken;
+        _onBatteryRead  = options.OnBatteryRead;
+        _onScanStarted  = options.OnScanStarted;
         _onScanCompleted = options.OnScanCompleted;
     }
+
+    // ── Core merge ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Runs both readers concurrently and merges results, deduplicating by
+    /// <see cref="DeviceBatteryInfo.DeviceId"/> (case-insensitive).
+    /// GATT results take precedence on collision — same rule as the former
+    /// <c>DeviceAggregationPipeline.ReadMergedAsync</c>.
+    /// </summary>
+    private async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
+        bool raiseDeviceFound,
+        CancellationToken ct)
+    {
+        var gattTask    = _gattReader.ReadAllAsync(ct);
+        var classicTask = _classicReader.ReadAllAsync(ct);
+        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
+
+        // Merge: GATT wins on DeviceId collision.
+        var merged = new Dictionary<string, DeviceBatteryInfo>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var d in classicTask.Result)
+            merged[d.DeviceId] = d;
+
+        foreach (var d in gattTask.Result)
+            merged[d.DeviceId] = d;  // overwrites Classic on collision
+
+        var results = new List<DeviceBatteryInfo>(merged.Values);
+
+        if (raiseDeviceFound)
+            foreach (var d in results)
+                _onDeviceFound(d.DeviceId, d.Name, d.Battery);
+
+        return results;
+    }
+
+    // ── Public scan surface ──────────────────────────────────────────────────
 
     public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
         ScanNowAsync(_shutdownToken);
@@ -50,8 +88,7 @@ internal sealed class Scanner
             _isScanning = true;
             _onScanStarted();
 
-            results = await _aggregationPipeline
-                .ReadMergedAsync(raiseDeviceFound: true, ct)
+            results = await ReadMergedAsync(raiseDeviceFound: true, ct)
                 .ConfigureAwait(false);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -114,12 +151,8 @@ internal sealed class Scanner
         return tcs.Task;
     }
 
-    internal async Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct)
-    {
-        return await _aggregationPipeline
-            .ReadMergedAsync(raiseDeviceFound: false, ct)
-            .ConfigureAwait(false);
-    }
+    internal Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct) =>
+        ReadMergedAsync(raiseDeviceFound: false, ct);
 
     public void Dispose()
     {
