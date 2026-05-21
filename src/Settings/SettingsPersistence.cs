@@ -119,6 +119,10 @@ internal sealed class SettingsPersistence : IDisposable
                 ? new HashSet<string>(dto.CategoryFilterOverrides, StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            var aliasMap = dto.AliasMap != null
+                ? new Dictionary<string, string>(dto.AliasMap, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             _settings.Changed -= OnChanged;
             try
             {
@@ -131,7 +135,8 @@ internal sealed class SettingsPersistence : IDisposable
                     displayAliases,
                     ntfy,
                     dto.CategoryFilterEnabled,
-                    categoryFilterOverrides));
+                    categoryFilterOverrides,
+                    aliasMap));
             }
             finally
             {
@@ -177,6 +182,7 @@ internal sealed class SettingsPersistence : IDisposable
             NtfyTopic   = s.Ntfy.Topic,
             CategoryFilterEnabled = s.CategoryFilterEnabled,
             CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
+            AliasMap = new Dictionary<string, string>(s.AliasMap, StringComparer.OrdinalIgnoreCase),
         };
 
         try
@@ -212,5 +218,7 @@ internal sealed class SettingsPersistence : IDisposable
         // ADR-016
         public bool CategoryFilterEnabled { get; set; } = true;
         public List<string>? CategoryFilterOverrides { get; set; }
+        // ADR-015
+        public Dictionary<string, string>? AliasMap { get; set; }
     }
 }
