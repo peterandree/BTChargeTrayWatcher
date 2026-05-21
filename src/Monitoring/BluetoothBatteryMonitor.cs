@@ -68,27 +68,22 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Legacy convenience constructor. Uses <see cref="GattBatteryReader"/> and
-    /// <see cref="ClassicBatteryReader"/> directly, bypassing the cooperation stack
-    /// (<see cref="DeviceWatcherService"/>, <see cref="GattConnectionManager"/>,
-    /// <see cref="DeviceCapabilityCache"/>).
+    /// Legacy 2-argument constructor. No longer usable — the cooperation-stack
+    /// 6-argument constructor (<see cref="BluetoothBatteryMonitor(ThresholdSettings,
+    /// INotificationService, DeviceWatcherService, BatteryReaderOrchestrator,
+    /// GattConnectionManager, DeviceCapabilityCache)"/>) is the only supported
+    /// entry point and is wired exclusively in <c>Program.cs</c>.
     /// </summary>
-    /// <remarks>
-    /// Use the internal 6-argument cooperation-stack constructor via
-    /// <c>Program.cs</c> factory helpers instead. This constructor will be
-    /// removed in a future release.
-    /// </remarks>
     [Obsolete(
         "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
         "GattConnectionManager, DeviceCapabilityCache). " +
-        "Use the 6-argument internal constructor wired in Program.cs instead. " +
-        "This constructor will be removed in a future release.",
-        error: false)]
+        "Use the 6-argument internal constructor wired in Program.cs instead.",
+        error: true)]
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
     /// <summary>
-    /// Creates a monitor using the Windows Cooperation stack: device watcher for live
+    /// Creates a monitor using the cooperation stack: device watcher for live
     /// device tracking, GATT connection manager for per-device reads, and capability
     /// cache for protocol fallback optimisation.
     /// </summary>
@@ -110,14 +105,21 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Core constructor. Accepts explicit reader instances for both GATT and Classic
-    /// sources. Used by the cooperation-stack constructor as its shared implementation
-    /// base.
+    /// Core 4-argument constructor. Accepts explicit reader instances for both GATT
+    /// and Classic sources. Serves as the shared implementation body for the
+    /// cooperation-stack 6-argument constructor's <c>: this(...)</c> chain call.
     /// </summary>
     /// <remarks>
-    /// Prefer the 6-argument internal cooperation-stack constructor for production use.
-    /// This overload is kept as the shared implementation base for the cooperation-stack
-    /// constructor's <c>: this(...)</c> chain call.
+    /// <para>
+    /// This overload is intentionally kept at <c>error: false</c> (warning, not error)
+    /// because the internal 6-argument cooperation-stack constructor delegates to it
+    /// via <c>: this(...)</c>. Escalating to <c>error: true</c> would produce a
+    /// compile error inside this class at that chain call site.
+    /// </para>
+    /// <para>
+    /// Prefer the 6-argument internal cooperation-stack constructor for any new code.
+    /// This constructor will be removed once the chain call is refactored.
+    /// </para>
     /// </remarks>
     [Obsolete(
         "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
