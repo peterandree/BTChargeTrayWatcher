@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
   release:
@@ -22,7 +25,8 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $v = "$env:GITHUB_REF_NAME".TrimStart('v')
+          # Use the evaluated ref name where available (works for push and release events).
+          $v = '${{ github.ref_name }}'.TrimStart('v')
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
 
       - name: Publish
@@ -36,11 +40,20 @@ jobs:
             -p:Version=${{ steps.version.outputs.VERSION }} `
             -o ./publish
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (on push tags)
+        if: ${{ github.event_name == 'push' }}
         uses: softprops/action-gh-release@v2
         with:
           files: ./publish/BTChargeTrayWatcher.exe
           generate_release_notes: true
+
+      - name: Upload release assets (on release event)
+        if: ${{ github.event_name == 'release' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./publish/BTChargeTrayWatcher.exe
+          tag_name: ${{ github.event.release.tag_name }}
+          generate_release_notes: false
 
       - name: Submit to winget
         if: ${{ secrets.WINGET_TOKEN != '' }}
