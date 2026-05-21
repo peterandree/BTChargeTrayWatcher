@@ -47,6 +47,28 @@ public sealed class BatteryReaderOrchestratorTests
     private static WatchedDevice ClassicDevice(string id, string name) =>
         new(id, name, IsBle: false);
 
+    private static DeviceBatteryInfo Device(
+        string id,
+        string name,
+        DeviceCategory category = DeviceCategory.Unknown,
+        int? battery = 50,
+        BatterySource source = BatterySource.Unknown)
+        => new(id, name, battery, null, source, category);
+
+    private static ThresholdSettings FilterEnabled()
+    {
+        var s = new ThresholdSettings();
+        s.SetCategoryFilterEnabled(true);
+        return s;
+    }
+
+    private static ThresholdSettings FilterDisabled()
+    {
+        var s = new ThresholdSettings();
+        s.SetCategoryFilterEnabled(false);
+        return s;
+    }
+
     // ── Classic fallback ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -222,5 +244,111 @@ public sealed class BatteryReaderOrchestratorTests
 
         Assert.Single(results);
         Assert.Equal("Speaker", results[0].Name);
+    }
+
+    // ── ADR-016: category filtering on production path ────────────────────────────
+
+    [Fact]
+    public async Task Allowed_category_passes_through_on_production_path()
+    {
+        var classicReader = new StubClassicReader([
+            Device("classic-1", "Headphones", DeviceCategory.Audio)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager,
+            classicReader,
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.Equal("Headphones", results[0].Name);
+    }
+
+    [Fact]
+    public async Task Unknown_category_passes_through_when_filter_enabled_on_production_path()
+    {
+        var classicReader = new StubClassicReader([
+            Device("classic-1", "Mystery Device", DeviceCategory.Unknown)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager,
+            classicReader,
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.Equal("Mystery Device", results[0].Name);
+    }
+
+    [Fact]
+    public async Task Non_allowed_category_is_filtered_out_on_production_path()
+    {
+        var unknownCategory = (DeviceCategory)99;
+        var classicReader = new StubClassicReader([
+            Device("classic-1", "Smart Fridge", unknownCategory)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager,
+            classicReader,
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task Category_override_bypasses_filter_on_production_path()
+    {
+        var unknownCategory = (DeviceCategory)99;
+        var settings = FilterEnabled();
+        settings.SetCategoryFilterOverrides(["classic-1"]);
+        var classicReader = new StubClassicReader([
+            Device("classic-1", "Smart Fridge", unknownCategory)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager,
+            classicReader,
+            new DeviceCapabilityCache(),
+            settings);
+
+        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.Equal("Smart Fridge", results[0].Name);
+    }
+
+    [Fact]
+    public async Task Disabled_filter_passes_all_categories_on_production_path()
+    {
+        var unknownCategory = (DeviceCategory)99;
+        var classicReader = new StubClassicReader([
+            Device("classic-1", "Headphones", DeviceCategory.Audio),
+            Device("classic-2", "Smart Fridge", unknownCategory)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager,
+            classicReader,
+            new DeviceCapabilityCache(),
+            FilterDisabled());
+
+        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+
+        Assert.Equal(2, results.Count);
     }
 }

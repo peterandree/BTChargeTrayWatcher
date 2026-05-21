@@ -27,18 +27,36 @@ internal sealed class BatteryReaderOrchestrator
 {
     private const string ReaderName = "BatteryReaderOrchestrator";
 
+    /// <summary>
+    /// Device categories that are allowed through the filter by default (ADR-016).
+    /// Devices whose <see cref="DeviceBatteryInfo.Category"/> is not in this set
+    /// and is not <see cref="DeviceCategory.Unknown"/> will be silently excluded
+    /// from merge results unless the device ID appears in
+    /// <see cref="ThresholdSettings.CategoryFilterOverrides"/>.
+    /// </summary>
+    private static readonly IReadOnlySet<DeviceCategory> AllowedCategories =
+        new HashSet<DeviceCategory>
+        {
+            DeviceCategory.Audio,
+            DeviceCategory.Hid,
+            DeviceCategory.Controller,
+        };
+
     private readonly GattConnectionManager _gattManager;
     private readonly IBatteryReader _classicReader;
     private readonly DeviceCapabilityCache _capabilityCache;
+    private readonly ThresholdSettings? _settings;
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
         IBatteryReader classicReader,
-        DeviceCapabilityCache capabilityCache)
+        DeviceCapabilityCache capabilityCache,
+        ThresholdSettings? settings = null)
     {
         _gattManager = gattManager;
         _classicReader = classicReader;
         _capabilityCache = capabilityCache;
+        _settings = settings;
     }
 
     /// <summary>
@@ -104,6 +122,26 @@ internal sealed class BatteryReaderOrchestrator
         return MergeResults(gattResults, classicResults);
     }
 
+    /// <summary>
+    /// Returns <c>true</c> when the device should be included in merge results.
+    /// Filter logic (ADR-016):
+    /// <list type="bullet">
+    ///   <item>Filter disabled globally → always pass.</item>
+    ///   <item>Device ID in <see cref="ThresholdSettings.CategoryFilterOverrides"/> → always pass.</item>
+    ///   <item><see cref="DeviceCategory.Unknown"/> → pass (reader did not classify; no penalisation).</item>
+    ///   <item>Category in <see cref="AllowedCategories"/> → pass.</item>
+    ///   <item>All other cases → exclude silently.</item>
+    /// </list>
+    /// </summary>
+    private bool IsAllowedByFilter(DeviceBatteryInfo device)
+    {
+        if (_settings is null) return true;
+        if (!_settings.CategoryFilterEnabled) return true;
+        if (_settings.IsCategoryFilterOverridden(device.DeviceId)) return true;
+        if (device.Category == DeviceCategory.Unknown) return true;
+        return AllowedCategories.Contains(device.Category);
+    }
+
     private async Task<GattReadOutcome> SafeGattReadAsync(WatchedDevice device, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -159,7 +197,7 @@ internal sealed class BatteryReaderOrchestrator
         }
     }
 
-    private static List<DeviceBatteryInfo> MergeResults(
+    private List<DeviceBatteryInfo> MergeResults(
         List<DeviceBatteryInfo> gattResults,
         List<DeviceBatteryInfo> classicResults)
     {
@@ -170,6 +208,7 @@ internal sealed class BatteryReaderOrchestrator
         // GATT results first (higher priority)
         foreach (var device in gattResults)
         {
+            if (!IsAllowedByFilter(device)) continue;
             seenIds.Add(device.DeviceId);
             seenNames.Add(device.Name);
             merged.Add(device);
@@ -178,6 +217,7 @@ internal sealed class BatteryReaderOrchestrator
         // Classic results, skip duplicates by name or ID
         foreach (var device in classicResults)
         {
+            if (!IsAllowedByFilter(device)) continue;
             if (seenIds.Contains(device.DeviceId)) continue;
             if (seenNames.Contains(device.Name)) continue;
             merged.Add(device with { Source = BatterySource.Classic });
