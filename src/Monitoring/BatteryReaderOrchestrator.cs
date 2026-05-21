@@ -167,6 +167,10 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
+        // If the user has suppressed alias suggestions for this device, treat as no alias.
+        if (_settings.IsAliasSuggestionSuppressed(device.DeviceId))
+            return device.DeviceId;
+
         if (bestScore >= FuzzyThreshold && bestKey is not null && bestCanonical is not null)
         {
             AliasSuggested?.Invoke(new AliasSuggestion(
