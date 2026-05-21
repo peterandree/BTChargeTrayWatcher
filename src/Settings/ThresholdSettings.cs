@@ -20,6 +20,56 @@ public sealed class ThresholdSettings
     // Optional user-specified display name aliases keyed by device id
     private Dictionary<string, string> _displayNameAliases = new(StringComparer.OrdinalIgnoreCase);
 
+    // ADR-016: category filter
+    private bool _categoryFilterEnabled = true;
+    private HashSet<string> _categoryFilterOverrides = new(StringComparer.OrdinalIgnoreCase);
+
+    // ── ADR-016: category filter ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// When <c>true</c> (default), <see cref="DeviceAggregationPipeline"/> excludes devices
+    /// whose <see cref="DeviceBatteryInfo.Category"/> is a known but non-battery-bearing
+    /// category. Set to <c>false</c> to pass all devices through regardless of category.
+    /// </summary>
+    public bool CategoryFilterEnabled
+    {
+        get { lock (_thresholdLock) return _categoryFilterEnabled; }
+    }
+
+    public void SetCategoryFilterEnabled(bool value)
+    {
+        lock (_thresholdLock)
+        {
+            if (_categoryFilterEnabled == value) return;
+            _categoryFilterEnabled = value;
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Returns a snapshot of the device IDs that bypass the category filter.
+    /// </summary>
+    public IReadOnlyCollection<string> CategoryFilterOverrides
+    {
+        get { lock (_thresholdLock) return new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="deviceId"/> is present in the
+    /// category filter override set and should bypass filtering unconditionally.
+    /// </summary>
+    public bool IsCategoryFilterOverridden(string deviceId)
+    {
+        lock (_thresholdLock) return _categoryFilterOverrides.Contains(deviceId);
+    }
+
+    public void SetCategoryFilterOverrides(IEnumerable<string> deviceIds)
+    {
+        lock (_thresholdLock)
+            _categoryFilterOverrides = new HashSet<string>(deviceIds, StringComparer.OrdinalIgnoreCase);
+        Changed?.Invoke();
+    }
+
     // ── Per-device poll interval (legacy name-keyed API) ─────────────────────────────
     // Prefer GetPollIntervalForDevice / SetPollIntervalForDevice (device-id-keyed).
 
@@ -439,11 +489,10 @@ public sealed class ThresholdSettings
     {
         lock (_thresholdLock)
         {
-            // Deep-copy DeviceOverrides so callers cannot mutate stored instances.
             var overridesCopy = new Dictionary<string, DeviceThresholds>(
                 StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in _deviceOverrides)
-                overridesCopy[kvp.Key] = kvp.Value with { }; // record copy
+                overridesCopy[kvp.Key] = kvp.Value with { };
 
             return new SettingsSnapshot(
                 _low, _high, _laptopLow, _laptopHigh,
@@ -453,7 +502,9 @@ public sealed class ThresholdSettings
                 overridesCopy,
                 new Dictionary<string, int>(_devicePollIntervals, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(_displayNameAliases, StringComparer.OrdinalIgnoreCase),
-                _ntfy.Clone());
+                _ntfy.Clone(),
+                _categoryFilterEnabled,
+                new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase));
         }
     }
 
@@ -472,6 +523,8 @@ public sealed class ThresholdSettings
             _devicePollIntervals = s.DevicePollIntervals;
             _displayNameAliases = s.DeviceDisplayNameAliases;
             _ntfy = s.Ntfy;
+            _categoryFilterEnabled = s.CategoryFilterEnabled;
+            _categoryFilterOverrides = s.CategoryFilterOverrides;
         }
     }
 }
@@ -499,4 +552,6 @@ internal sealed record SettingsSnapshot(
     Dictionary<string, DeviceThresholds> DeviceOverrides,
     Dictionary<string, int> DevicePollIntervals,
     Dictionary<string, string> DeviceDisplayNameAliases,
-    NtfyIntegrationSettings Ntfy);
+    NtfyIntegrationSettings Ntfy,
+    bool CategoryFilterEnabled,
+    HashSet<string> CategoryFilterOverrides);

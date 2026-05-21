@@ -32,7 +32,7 @@ internal sealed class SettingsPersistence : IDisposable
     /// <summary>
     /// Schedules a debounced save. Rapid successive mutations collapse into a
     /// single write 300 ms after the last change, preventing both UI-thread stalls
-    /// and unnecessary disk I/O (fixes S7 / #91).
+    /// and unnecessary disk I/O.
     /// </summary>
     private void OnChanged()
     {
@@ -97,7 +97,6 @@ internal sealed class SettingsPersistence : IDisposable
                             $"[SettingsPersistence] Dropping invalid override for '{kvp.Key}': Low={t.Low}, High={t.High}");
                         continue;
                     }
-                    // Use init-only construction (fixes B1 / #81 — no mutable reference escapes).
                     overrides[kvp.Key] = new DeviceThresholds { Low = t.Low, High = t.High };
                 }
             }
@@ -116,6 +115,10 @@ internal sealed class SettingsPersistence : IDisposable
                 Topic     = dto.NtfyTopic
             };
 
+            var categoryFilterOverrides = dto.CategoryFilterOverrides != null
+                ? new HashSet<string>(dto.CategoryFilterOverrides, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             _settings.Changed -= OnChanged;
             try
             {
@@ -126,7 +129,9 @@ internal sealed class SettingsPersistence : IDisposable
                     overrides,
                     pollIntervals,
                     displayAliases,
-                    ntfy));
+                    ntfy,
+                    dto.CategoryFilterEnabled,
+                    categoryFilterOverrides));
             }
             finally
             {
@@ -169,7 +174,9 @@ internal sealed class SettingsPersistence : IDisposable
             DevicePollIntervals = new Dictionary<string, int>(s.DevicePollIntervals, StringComparer.OrdinalIgnoreCase),
             DeviceDisplayNameAliases = new Dictionary<string, string>(s.DeviceDisplayNameAliases, StringComparer.OrdinalIgnoreCase),
             NtfyEnabled = s.Ntfy.IsEnabled,
-            NtfyTopic   = s.Ntfy.Topic
+            NtfyTopic   = s.Ntfy.Topic,
+            CategoryFilterEnabled = s.CategoryFilterEnabled,
+            CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
         };
 
         try
@@ -202,5 +209,8 @@ internal sealed class SettingsPersistence : IDisposable
         public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }
         public bool    NtfyEnabled { get; set; }
         public string? NtfyTopic   { get; set; }
+        // ADR-016
+        public bool CategoryFilterEnabled { get; set; } = true;
+        public List<string>? CategoryFilterOverrides { get; set; }
     }
 }

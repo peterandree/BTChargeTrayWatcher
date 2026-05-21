@@ -5,4 +5,5 @@ public sealed record DeviceBatteryInfo(
     string Name,
     int? Battery,
     bool? IsCharging = null,
-    BatterySource Source = BatterySource.Unknown);
+    BatterySource Source = BatterySource.Unknown,
+    DeviceCategory Category = DeviceCategory.Unknown);
