@@ -24,7 +24,10 @@ public sealed class ThresholdSettings
     private bool _categoryFilterEnabled = true;
     private HashSet<string> _categoryFilterOverrides = new(StringComparer.OrdinalIgnoreCase);
 
-    // ── ADR-016: category filter ─────────────────────────────────────────────────────
+    // ADR-018: discovery log file sink
+    private bool _discoveryLogFileSinkEnabled = false;
+
+    // ── ADR-016: category filter ──────────────────────────────────────────────────
 
     /// <summary>
     /// When <c>true</c> (default), <see cref="DeviceAggregationPipeline"/> excludes devices
@@ -70,7 +73,30 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Per-device poll interval (legacy name-keyed API) ─────────────────────────────
+    // ── ADR-018: discovery log file sink ─────────────────────────────────────────
+
+    /// <summary>
+    /// When <c>true</c>, <see cref="DiscoveryLogger"/> writes structured JSON lines
+    /// to <c>%LOCALAPPDATA%\BTChargeTrayWatcher\discovery.log</c> in addition to
+    /// <see cref="System.Diagnostics.Debug.WriteLine"/>.
+    /// Default is <c>false</c> (opt-in, ADR-018).
+    /// </summary>
+    public bool DiscoveryLogFileSinkEnabled
+    {
+        get { lock (_thresholdLock) return _discoveryLogFileSinkEnabled; }
+    }
+
+    public void SetDiscoveryLogFileSinkEnabled(bool value)
+    {
+        lock (_thresholdLock)
+        {
+            if (_discoveryLogFileSinkEnabled == value) return;
+            _discoveryLogFileSinkEnabled = value;
+        }
+        Changed?.Invoke();
+    }
+
+    // ── Per-device poll interval (legacy name-keyed API) ──────────────────────────
     // Prefer GetPollIntervalForDevice / SetPollIntervalForDevice (device-id-keyed).
 
     [Obsolete("Use GetPollIntervalForDevice(deviceId, displayName) instead.")]
@@ -100,7 +126,7 @@ public sealed class ThresholdSettings
             return _devicePollIntervals.ContainsKey(deviceName);
     }
 
-    // ── Device-id-aware APIs (preferred) ────────────────────────────────────────────
+    // ── Device-id-aware APIs (preferred) ─────────────────────────────────────────
 
     public int GetLowForDevice(string deviceId, string displayName)
     {
@@ -227,7 +253,7 @@ public sealed class ThresholdSettings
         _laptopHigh = 80;
     }
 
-    // ── Global thresholds ────────────────────────────────────────────────────────────
+    // ── Global thresholds ────────────────────────────────────────────────────────────────
 
     public int Low
     {
@@ -321,7 +347,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Device sets ──────────────────────────────────────────────────────────────────
+    // ── Device sets ──────────────────────────────────────────────────────────────────────
 
     public IReadOnlyCollection<string> IgnoredDevices
     {
@@ -378,7 +404,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── ntfy integration ─────────────────────────────────────────────────────────────
+    // ── ntfy integration ───────────────────────────────────────────────────────────────────
 
     /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
     public NtfyIntegrationSettings GetNtfySettings()
@@ -392,7 +418,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Per-device overrides (legacy name-keyed API) ─────────────────────────────────
+    // ── Per-device overrides (legacy name-keyed API) ─────────────────────────────
     // Prefer SetLowForDevice / SetHighForDevice (device-id-keyed).
 
     [Obsolete("Use GetLowForDevice(deviceId, displayName) instead.")]
@@ -483,7 +509,7 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Snapshot / restore ───────────────────────────────────────────────────────────
+    // ── Snapshot / restore ──────────────────────────────────────────────────────────────────
 
     internal SettingsSnapshot Snapshot()
     {
@@ -504,7 +530,8 @@ public sealed class ThresholdSettings
                 new Dictionary<string, string>(_displayNameAliases, StringComparer.OrdinalIgnoreCase),
                 _ntfy.Clone(),
                 _categoryFilterEnabled,
-                new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase));
+                new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase),
+                _discoveryLogFileSinkEnabled);
         }
     }
 
@@ -525,11 +552,12 @@ public sealed class ThresholdSettings
             _ntfy = s.Ntfy;
             _categoryFilterEnabled = s.CategoryFilterEnabled;
             _categoryFilterOverrides = s.CategoryFilterOverrides;
+            _discoveryLogFileSinkEnabled = s.DiscoveryLogFileSinkEnabled;
         }
     }
 }
 
-// ── Shared types ─────────────────────────────────────────────────────────────────────
+// ── Shared types ───────────────────────────────────────────────────────────────────────
 
 /// <summary>
 /// Per-device low/high battery threshold overrides.
@@ -554,4 +582,5 @@ internal sealed record SettingsSnapshot(
     Dictionary<string, string> DeviceDisplayNameAliases,
     NtfyIntegrationSettings Ntfy,
     bool CategoryFilterEnabled,
-    HashSet<string> CategoryFilterOverrides);
+    HashSet<string> CategoryFilterOverrides,
+    bool DiscoveryLogFileSinkEnabled);

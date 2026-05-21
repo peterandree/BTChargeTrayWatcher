@@ -54,7 +54,7 @@ internal sealed class SettingsPersistence : IDisposable
                 TaskScheduler.Default);
     }
 
-    // ── Public API ─────────────────────────────────────────────────────
+    // ── Public API ───────────────────────────────────────────────────────────
 
     public void Load()
     {
@@ -131,7 +131,8 @@ internal sealed class SettingsPersistence : IDisposable
                     displayAliases,
                     ntfy,
                     dto.CategoryFilterEnabled,
-                    categoryFilterOverrides));
+                    categoryFilterOverrides,
+                    dto.DiscoveryLogFileSinkEnabled));
             }
             finally
             {
@@ -155,7 +156,7 @@ internal sealed class SettingsPersistence : IDisposable
         }
     }
 
-    // ── Private ────────────────────────────────────────────────────────
+    // ── Private ──────────────────────────────────────────────────────────────────
 
     private void Save()
     {
@@ -177,6 +178,7 @@ internal sealed class SettingsPersistence : IDisposable
             NtfyTopic   = s.Ntfy.Topic,
             CategoryFilterEnabled = s.CategoryFilterEnabled,
             CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
+            DiscoveryLogFileSinkEnabled = s.DiscoveryLogFileSinkEnabled,
         };
 
         try
@@ -192,7 +194,7 @@ internal sealed class SettingsPersistence : IDisposable
         }
     }
 
-    // ── DTO ───────────────────────────────────────────────────────────────
+    // ── DTO ──────────────────────────────────────────────────────────────────────
 
     private sealed record SettingsDto
     {
@@ -212,5 +214,7 @@ internal sealed class SettingsPersistence : IDisposable
         // ADR-016
         public bool CategoryFilterEnabled { get; set; } = true;
         public List<string>? CategoryFilterOverrides { get; set; }
+        // ADR-018
+        public bool DiscoveryLogFileSinkEnabled { get; set; } = false;
     }
 }
