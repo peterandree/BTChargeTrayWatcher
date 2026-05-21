@@ -44,17 +44,20 @@ internal sealed class DeviceAggregationPipeline
     private readonly IBatteryReader _classicReader;
     private readonly Action<string, string, int?>? _onDeviceFound;
     private readonly ThresholdSettings? _settings;
+    private readonly DiscoveryLogger _logger;
 
     public DeviceAggregationPipeline(
         IBatteryReader gattReader,
         IBatteryReader classicReader,
         Action<string, string, int?>? onDeviceFound,
-        ThresholdSettings? settings = null)
+        ThresholdSettings? settings = null,
+        DiscoveryLogger? logger = null)
     {
-        _gattReader = gattReader;
+        _gattReader    = gattReader;
         _classicReader = classicReader;
         _onDeviceFound = onDeviceFound;
-        _settings = settings;
+        _settings      = settings;
+        _logger        = logger ?? new DiscoveryLogger();
     }
 
     public async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
@@ -63,11 +66,11 @@ internal sealed class DeviceAggregationPipeline
     {
         ct.ThrowIfCancellationRequested();
 
-        var gattTask = SafeReadAsync(_gattReader, ct);
+        var gattTask    = SafeReadAsync(_gattReader, ct);
         var classicTask = SafeReadAsync(_classicReader, ct);
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
-        ReaderOutcome gattOutcome = gattTask.Result;
+        ReaderOutcome gattOutcome    = gattTask.Result;
         ReaderOutcome classicOutcome = classicTask.Result;
 
         ReportReaderErrors(gattOutcome.Error, classicOutcome.Error);
@@ -93,14 +96,12 @@ internal sealed class DeviceAggregationPipeline
 
     private sealed record ReaderOutcome(IReadOnlyList<DeviceBatteryInfo> Results, Exception? Error);
 
-    private static void ReportReaderErrors(Exception? gattError, Exception? classicError)
+    private void ReportReaderErrors(Exception? gattError, Exception? classicError)
     {
         if (gattError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] GATT reader failed (partial results used): {gattError}");
+            _logger.LogReaderFault("GATT",    gattError.ToString());
         if (classicError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] Classic reader failed (partial results used): {classicError}");
+            _logger.LogReaderFault("Classic", classicError.ToString());
     }
 
     /// <summary>

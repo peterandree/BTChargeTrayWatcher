@@ -28,15 +28,18 @@ internal sealed class BatteryReaderOrchestrator
     private readonly GattConnectionManager _gattManager;
     private readonly IBatteryReader _classicReader;
     private readonly DeviceCapabilityCache _capabilityCache;
+    private readonly DiscoveryLogger _logger;
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
         IBatteryReader classicReader,
-        DeviceCapabilityCache capabilityCache)
+        DeviceCapabilityCache capabilityCache,
+        DiscoveryLogger? logger = null)
     {
-        _gattManager = gattManager;
-        _classicReader = classicReader;
+        _gattManager     = gattManager;
+        _classicReader   = classicReader;
         _capabilityCache = capabilityCache;
+        _logger          = logger ?? new DiscoveryLogger();
     }
 
     /// <summary>
@@ -59,8 +62,7 @@ internal sealed class BatteryReaderOrchestrator
             }
             else if (dev.IsBle && !dev.IsConnected)
             {
-                Debug.WriteLine(
-                    $"[BatteryReaderOrchestrator] Skipping '{dev.Name}' — not connected (sleeping)");
+                _logger.LogDeviceSkipped(dev.Name, dev.DeviceId, "not connected (sleeping)");
             }
         }
 
@@ -111,8 +113,7 @@ internal sealed class BatteryReaderOrchestrator
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(
-                $"[BatteryReaderOrchestrator] GATT read fault for '{device.Name}': {ex.Message}");
+            _logger.LogGattFault(device.Name, device.DeviceId, ex.Message);
             return new GattReadOutcome(device.DeviceId, null);
         }
     }
@@ -129,8 +130,7 @@ internal sealed class BatteryReaderOrchestrator
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(
-                $"[BatteryReaderOrchestrator] Classic reader fault: {ex}");
+            _logger.LogClassicFault(ex.ToString());
             return [];
         }
     }
