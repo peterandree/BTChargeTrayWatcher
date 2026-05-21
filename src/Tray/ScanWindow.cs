@@ -303,7 +303,7 @@ public partial class ScanWindow : Form
         _progress.Value = 0;
     }
 
-    internal void OnScanComplete(int batteryDeviceCount, IReadOnlyList<WatchedDevice> trackedDevices)
+    internal void OnScanComplete(IReadOnlyList<WatchedDevice> trackedDevices)
     {
         if (_scanComplete || IsDisposed) return;
         _scanComplete = true;

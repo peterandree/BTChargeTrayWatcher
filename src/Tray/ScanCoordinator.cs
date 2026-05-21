@@ -110,7 +110,7 @@ internal sealed class ScanCoordinator : IDisposable
             MarshalToWindow(window, () => window.OnDeviceFound(deviceId, name, battery));
 
         void OnCompleted(IReadOnlyList<DeviceBatteryInfo> results) =>
-            MarshalToWindow(window, () => window.OnScanComplete(results.Count, _monitor.TrackedDevices));
+            MarshalToWindow(window, () => window.OnScanComplete(_monitor.TrackedDevices));
 
         void OnStarted() =>
             MarshalToWindow(window, () => window.OnScanStarted());
