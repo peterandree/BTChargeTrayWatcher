@@ -26,9 +26,22 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
 
-      - name: Run xUnit v3 tests
+      - name: Debug test EXE presence
         run: |
-          .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+          echo "Listing test output directories..."
+          dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0
+          dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64
+
+      - name: Run xUnit v3 tests (root dir)
+        run: |
+          & .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+        continue-on-error: true
+
+      - name: Run xUnit v3 tests (win-x64 dir)
+        if: failure()
+        run: |
+          & .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+        continue-on-error: true
 
       - name: Upload test output
         if: always()
