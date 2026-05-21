@@ -1,3 +1,5 @@
+using BTChargeTrayWatcher.Monitoring.Logging;
+
 namespace BTChargeTrayWatcher;
 
 /// <summary>
@@ -25,6 +27,8 @@ namespace BTChargeTrayWatcher;
 /// </remarks>
 internal sealed class DeviceAggregationPipeline
 {
+    private const string ReaderName = "DeviceAggregationPipeline";
+
     /// <summary>
     /// Device categories that are allowed through the filter by default (ADR-016).
     /// Devices whose <see cref="DeviceBatteryInfo.Category"/> is not in this set
@@ -96,11 +100,20 @@ internal sealed class DeviceAggregationPipeline
     private static void ReportReaderErrors(Exception? gattError, Exception? classicError)
     {
         if (gattError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] GATT reader failed (partial results used): {gattError}");
+            DiscoveryLogger.Log(
+                reader:    ReaderName,
+                operation: "ReadBattery",
+                outcome:   "ERROR",
+                errorCode: DiscoveryLogger.Codes.GattTimeout,
+                message:   $"GATT reader failed (partial results used): {gattError}");
+
         if (classicError is not null)
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] Classic reader failed (partial results used): {classicError}");
+            DiscoveryLogger.Log(
+                reader:    ReaderName,
+                operation: "ReadBattery",
+                outcome:   "ERROR",
+                errorCode: DiscoveryLogger.Codes.ClassicSetupApiFault,
+                message:   $"Classic reader failed (partial results used): {classicError}");
     }
 
     /// <summary>

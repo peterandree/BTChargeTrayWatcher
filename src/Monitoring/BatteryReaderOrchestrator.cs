@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using BTChargeTrayWatcher.Monitoring.Logging;
 
 namespace BTChargeTrayWatcher;
 
@@ -25,6 +25,8 @@ namespace BTChargeTrayWatcher;
 /// </remarks>
 internal sealed class BatteryReaderOrchestrator
 {
+    private const string ReaderName = "BatteryReaderOrchestrator";
+
     private readonly GattConnectionManager _gattManager;
     private readonly IBatteryReader _classicReader;
     private readonly DeviceCapabilityCache _capabilityCache;
@@ -59,8 +61,14 @@ internal sealed class BatteryReaderOrchestrator
             }
             else if (dev.IsBle && !dev.IsConnected)
             {
-                Debug.WriteLine(
-                    $"[BatteryReaderOrchestrator] Skipping '{dev.Name}' — not connected (sleeping)");
+                DiscoveryLogger.Log(
+                    reader:     ReaderName,
+                    operation:  "SkipSleeping",
+                    outcome:    "WARN",
+                    errorCode:  DiscoveryLogger.Codes.GattDisconnected,
+                    message:    $"Skipping '{dev.Name}' — not connected (sleeping)",
+                    deviceId:   dev.DeviceId,
+                    deviceName: dev.Name);
             }
         }
 
@@ -98,6 +106,7 @@ internal sealed class BatteryReaderOrchestrator
 
     private async Task<GattReadOutcome> SafeGattReadAsync(WatchedDevice device, CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var result = await _gattManager
@@ -111,14 +120,23 @@ internal sealed class BatteryReaderOrchestrator
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(
-                $"[BatteryReaderOrchestrator] GATT read fault for '{device.Name}': {ex.Message}");
+            sw.Stop();
+            DiscoveryLogger.Log(
+                reader:     ReaderName,
+                operation:  "ReadBattery",
+                outcome:    "ERROR",
+                errorCode:  DiscoveryLogger.Codes.GattTimeout,
+                message:    ex.Message,
+                deviceId:   device.DeviceId,
+                deviceName: device.Name,
+                durationMs: (int)sw.ElapsedMilliseconds);
             return new GattReadOutcome(device.DeviceId, null);
         }
     }
 
     private async Task<List<DeviceBatteryInfo>> SafeClassicReadAsync(CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             return await _classicReader.ReadAllAsync(ct).ConfigureAwait(false);
@@ -129,8 +147,14 @@ internal sealed class BatteryReaderOrchestrator
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(
-                $"[BatteryReaderOrchestrator] Classic reader fault: {ex}");
+            sw.Stop();
+            DiscoveryLogger.Log(
+                reader:     ReaderName,
+                operation:  "ReadBattery",
+                outcome:    "ERROR",
+                errorCode:  DiscoveryLogger.Codes.ClassicSetupApiFault,
+                message:    ex.ToString(),
+                durationMs: (int)sw.ElapsedMilliseconds);
             return [];
         }
     }
