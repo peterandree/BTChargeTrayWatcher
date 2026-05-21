@@ -18,6 +18,7 @@ public sealed class TrayApp : IDisposable
     private readonly TrayIconRenderer _iconRenderer;
     private readonly ScanCoordinator _scanner;
     private readonly SynchronizationContext _uiContext;
+    private readonly AliasSuggestionService _aliasSuggestionService;
 
     private readonly ToolStripMenuItem _scanMenuItem;
     private readonly ToolStripMenuItem _lowMenu;
@@ -28,14 +29,16 @@ public sealed class TrayApp : IDisposable
     private bool _hasBluetoothAlert;
     private bool _hasLaptopAlert;
 
-    public TrayApp(
+    internal TrayApp(
         ThresholdSettings       settings,
         BluetoothBatteryMonitor monitor,
         INotificationService    notifier,
-        LaptopBatteryMonitor    laptopMonitor)
+        LaptopBatteryMonitor    laptopMonitor,
+        AliasSuggestionService  aliasSuggestionService)
     {
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
+        _aliasSuggestionService = aliasSuggestionService;
 
         _settings      = settings;
         _monitor       = monitor;
@@ -78,11 +81,40 @@ public sealed class TrayApp : IDisposable
         _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
 
         _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
+    _aliasSuggestionService.SuggestionQueued += OnAliasSuggestionQueued;
 
         InitializeLaptopUiFromCachedState();
         _settings.Changed += OnSettingsChanged;
         UpdateTooltip();
         RefreshTrayIcon();
+    }
+
+    private void OnAliasSuggestionQueued(AliasSuggestion suggestion)
+    {
+        _uiContext.Post(_ =>
+        {
+            if (_disposed) return;
+            try
+            {
+                string message = $"Suggested alias for '{suggestion.DeviceName}'\n" +
+                                 $"Match: '{suggestion.MatchedAliasKey}' (score {suggestion.Score:P0})\n\n" +
+                                 "Yes = Apply alias, No = Ignore, Cancel = Suppress suggestions for this device.";
+
+                var res = MessageBox.Show(message, "Alias suggestion", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (res == DialogResult.Yes)
+                {
+                    _settings.AddAlias(suggestion.DeviceName, suggestion.CanonicalDeviceId);
+                }
+                else if (res == DialogResult.Cancel)
+                {
+                    _settings.SuppressAliasSuggestion(suggestion.DeviceId);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayApp] Alias suggestion UI fault: {ex}");
+            }
+        }, null);
     }
 
     private void InitializeLaptopUiFromCachedState()
@@ -269,6 +301,7 @@ public sealed class TrayApp : IDisposable
         _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
         _settings.Changed             -= OnSettingsChanged;
         _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
+    _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
 
         _scanner.Dispose();
 

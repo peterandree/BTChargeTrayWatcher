@@ -26,6 +26,9 @@ public sealed class ThresholdSettings
 
     // ADR-015: alias map — historical name variant (any casing) → canonical DeviceId
     private Dictionary<string, string> _aliasMap = new(StringComparer.OrdinalIgnoreCase);
+    
+    // Per-device suppression for alias suggestions (persisted)
+    private HashSet<string> _suppressedAliasSuggestions = new(StringComparer.OrdinalIgnoreCase);
 
     // ── ADR-015: alias map ───────────────────────────────────────────────────────────
 
@@ -280,6 +283,42 @@ public sealed class ThresholdSettings
         _high = 80;
         _laptopLow = 20;
         _laptopHigh = 80;
+    }
+
+    /// <summary>
+    /// Returns true when alias suggestions for the specified deviceId have been
+    /// suppressed by the user and should not be emitted.
+    /// </summary>
+    public bool IsAliasSuggestionSuppressed(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return false;
+        lock (_thresholdLock) return _suppressedAliasSuggestions.Contains(deviceId);
+    }
+
+    /// <summary>
+    /// Persistently suppress alias suggestions for the given device id.
+    /// </summary>
+    public void SuppressAliasSuggestion(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return;
+        lock (_thresholdLock)
+        {
+            if (!_suppressedAliasSuggestions.Add(deviceId)) return;
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Remove suppression for the given device id.
+    /// </summary>
+    public void UnsuppressAliasSuggestion(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return;
+        lock (_thresholdLock)
+        {
+            if (!_suppressedAliasSuggestions.Remove(deviceId)) return;
+        }
+        Changed?.Invoke();
     }
 
     // ── Global thresholds ────────────────────────────────────────────────────────────
@@ -560,7 +599,8 @@ public sealed class ThresholdSettings
                 _ntfy.Clone(),
                 _categoryFilterEnabled,
                 new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase),
-                new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase));
+                new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(_suppressedAliasSuggestions, StringComparer.OrdinalIgnoreCase));
         }
     }
 
@@ -582,6 +622,7 @@ public sealed class ThresholdSettings
             _categoryFilterEnabled = s.CategoryFilterEnabled;
             _categoryFilterOverrides = s.CategoryFilterOverrides;
             _aliasMap = s.AliasMap;
+            _suppressedAliasSuggestions = s.SuppressedAliasSuggestions;
         }
     }
 }
@@ -612,4 +653,5 @@ internal sealed record SettingsSnapshot(
     NtfyIntegrationSettings Ntfy,
     bool CategoryFilterEnabled,
     HashSet<string> CategoryFilterOverrides,
-    Dictionary<string, string> AliasMap);
+    Dictionary<string, string> AliasMap,
+    HashSet<string> SuppressedAliasSuggestions);

@@ -123,6 +123,10 @@ internal sealed class SettingsPersistence : IDisposable
                 ? new Dictionary<string, string>(dto.AliasMap, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+            var suppressed = dto.SuppressedAliasSuggestions != null
+                ? new HashSet<string>(dto.SuppressedAliasSuggestions, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             _settings.Changed -= OnChanged;
             try
             {
@@ -136,7 +140,8 @@ internal sealed class SettingsPersistence : IDisposable
                     ntfy,
                     dto.CategoryFilterEnabled,
                     categoryFilterOverrides,
-                    aliasMap));
+                    aliasMap,
+                    suppressed));
             }
             finally
             {
@@ -183,6 +188,7 @@ internal sealed class SettingsPersistence : IDisposable
             CategoryFilterEnabled = s.CategoryFilterEnabled,
             CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
             AliasMap = new Dictionary<string, string>(s.AliasMap, StringComparer.OrdinalIgnoreCase),
+                SuppressedAliasSuggestions = [.. s.SuppressedAliasSuggestions],
         };
 
         try
@@ -220,5 +226,7 @@ internal sealed class SettingsPersistence : IDisposable
         public List<string>? CategoryFilterOverrides { get; set; }
         // ADR-015
         public Dictionary<string, string>? AliasMap { get; set; }
+            // Suppressions for alias suggestions
+            public List<string>? SuppressedAliasSuggestions { get; set; }
     }
 }

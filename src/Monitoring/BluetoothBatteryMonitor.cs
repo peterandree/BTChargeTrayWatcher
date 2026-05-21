@@ -96,9 +96,10 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         DeviceWatcherService deviceWatcher,
         BatteryReaderOrchestrator orchestrator,
         GattConnectionManager gattConnectionManager,
-        DeviceCapabilityCache capabilityCache)
+        DeviceCapabilityCache capabilityCache,
+        AliasSuggestionService aliasSuggestionService)
         : this(settings, notifier,
-               new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher),
+               new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher, aliasSuggestionService),
                NullBatteryReader.Instance)
     {
         _deviceWatcher = deviceWatcher;

@@ -48,15 +48,24 @@ internal static class Program
             var capabilityCache       = new DeviceCapabilityCache();
             var gattConnectionManager = new GattConnectionManager();
             var classicReader         = new ClassicBatteryReader();
-            var orchestrator          = new BatteryReaderOrchestrator(gattConnectionManager, classicReader, capabilityCache, settings);
-            var deviceWatcher         = new DeviceWatcherService();
 
-            monitor       = new BluetoothBatteryMonitor(
-                settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache);
+            // Alias suggestion service
+            var aliasSuggestionService = new AliasSuggestionService();
+
+            var orchestrator = new BatteryReaderOrchestrator(
+                gattConnectionManager,
+                classicReader,
+                capabilityCache,
+                settings);
+
+            var deviceWatcher = new DeviceWatcherService();
+
+            monitor = new BluetoothBatteryMonitor(
+                settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache, aliasSuggestionService);
             laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
             deviceWatcher.Start();
-            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor);
+            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, aliasSuggestionService);
 
             app.StartBackgroundScan();
 
