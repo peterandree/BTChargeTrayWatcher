@@ -25,15 +25,17 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      - name: Test
-        run: >
-          dotnet test
-          tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj
-          --no-build
-          --configuration Release
-          --logger "trx;LogFileName=test-results.trx"
-          --collect:"XPlat Code Coverage"
-          --results-directory ./TestResults
+
+      - name: Run xUnit v3 tests
+        run: |
+          .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output.log
 
       - name: Upload test results
         if: always()
