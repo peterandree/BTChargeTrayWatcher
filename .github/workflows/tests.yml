@@ -32,15 +32,16 @@ jobs:
           dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0
           dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64
 
-      - name: Run xUnit v3 tests (root dir)
+
+      - name: Run xUnit v3 tests (DLL root dir)
         run: |
-          & .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+          dotnet .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\BTChargeTrayWatcher.Tests.dll --output Normal > test-output.log
         continue-on-error: true
 
-      - name: Run xUnit v3 tests (win-x64 dir)
+      - name: Run xUnit v3 tests (DLL win-x64 dir)
         if: failure()
         run: |
-          & .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64\BTChargeTrayWatcher.Tests.exe --output Normal > test-output.log
+          dotnet .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64\BTChargeTrayWatcher.Tests.dll --output Normal > test-output.log
         continue-on-error: true
 
       - name: Upload test output
