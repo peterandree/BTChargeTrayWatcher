@@ -18,7 +18,7 @@ internal enum DeviceTransport
 }
 
 /// <summary>Broad device category for protocol fallback selection.</summary>
-internal enum DeviceCategory
+public enum DeviceCategory
 {
     Unknown = 0,
     Audio = 1,
