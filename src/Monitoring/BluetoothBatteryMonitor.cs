@@ -68,17 +68,20 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Legacy 2-argument constructor. No longer usable — the cooperation-stack
-    /// 6-argument constructor (<see cref="BluetoothBatteryMonitor(ThresholdSettings,
-    /// INotificationService, DeviceWatcherService, BatteryReaderOrchestrator,
-    /// GattConnectionManager, DeviceCapabilityCache)"/>) is the only supported
-    /// entry point and is wired exclusively in <c>Program.cs</c>.
+    /// Legacy 2-argument constructor. Prefer the 6-argument internal cooperation-stack
+    /// constructor wired in <c>Program.cs</c>. This constructor will be removed once
+    /// the legacy <see cref="DeviceAggregationPipeline"/> path is retired (issue #100).
     /// </summary>
+    /// <remarks>
+    /// <c>error: false</c> (warning, not error) so that test fixtures can suppress
+    /// CS0618 via <c>#pragma warning disable CS0618</c>. CS0619 (error:true) cannot
+    /// be suppressed by pragma.
+    /// </remarks>
     [Obsolete(
         "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
         "GattConnectionManager, DeviceCapabilityCache). " +
         "Use the 6-argument internal constructor wired in Program.cs instead.",
-        error: true)]
+        error: false)]
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
