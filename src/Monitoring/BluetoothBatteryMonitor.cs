@@ -67,6 +67,23 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             await _deviceWatcher.RefreshAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Legacy convenience constructor. Uses <see cref="GattBatteryReader"/> and
+    /// <see cref="ClassicBatteryReader"/> directly, bypassing the cooperation stack
+    /// (<see cref="DeviceWatcherService"/>, <see cref="GattConnectionManager"/>,
+    /// <see cref="DeviceCapabilityCache"/>).
+    /// </summary>
+    /// <remarks>
+    /// Use the internal 6-argument cooperation-stack constructor via
+    /// <c>Program.cs</c> factory helpers instead. This constructor will be
+    /// removed in a future release.
+    /// </remarks>
+    [Obsolete(
+        "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
+        "GattConnectionManager, DeviceCapabilityCache). " +
+        "Use the 6-argument internal constructor wired in Program.cs instead. " +
+        "This constructor will be removed in a future release.",
+        error: false)]
     public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
         : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
 
@@ -92,6 +109,22 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _deviceWatcher.DevicesChanged += OnDevicesChanged;
     }
 
+    /// <summary>
+    /// Core constructor. Accepts explicit reader instances for both GATT and Classic
+    /// sources. Used by the cooperation-stack constructor as its shared implementation
+    /// base.
+    /// </summary>
+    /// <remarks>
+    /// Prefer the 6-argument internal cooperation-stack constructor for production use.
+    /// This overload is kept as the shared implementation base for the cooperation-stack
+    /// constructor's <c>: this(...)</c> chain call.
+    /// </remarks>
+    [Obsolete(
+        "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
+        "GattConnectionManager, DeviceCapabilityCache). " +
+        "Use the 6-argument internal constructor wired in Program.cs instead. " +
+        "This constructor will be removed in a future release.",
+        error: false)]
     public BluetoothBatteryMonitor(
         ThresholdSettings settings,
         INotificationService notifier,
