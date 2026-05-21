@@ -7,7 +7,6 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <RootNamespace>BTChargeTrayWatcher.Tests</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 
     <!-- Optional: avoids accidental WinForms coupling -->
     <!-- <UseWindowsForms>true</UseWindowsForms> -->
