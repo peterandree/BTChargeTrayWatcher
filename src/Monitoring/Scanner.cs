@@ -1,9 +1,5 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace BTChargeTrayWatcher;
 
@@ -16,61 +12,79 @@ internal sealed class Scanner : IDisposable
     private readonly TaskTracker _tracker;
     private readonly ScannerCallbacks _callbacks;
     private readonly CancellationToken _shutdownToken;
+
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private volatile bool _isScanning;
-    private bool _disposed;
+    private volatile bool _disposed;
+
+    public bool IsScanning => _isScanning;
 
     public Scanner(ScannerOptions options)
     {
-        _gattReader = options.GattReader;
+        _gattReader    = options.GattReader;
         _classicReader = options.ClassicReader;
-        _lastKnown = options.LastKnown;
-        _poller = options.Poller;
-        _tracker = options.Tracker;
-        _callbacks = options.Callbacks;
+        _lastKnown     = options.LastKnown;
+        _poller        = options.Poller;
+        _tracker       = options.Tracker;
+        _callbacks     = options.Callbacks;
         _shutdownToken = options.ShutdownToken;
     }
 
-    public async Task<List<DeviceBatteryInfo>> ReadMergedAsync(bool raiseDeviceFound, CancellationToken ct)
+    // ── Core merge ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Runs both readers concurrently and merges results, deduplicating by
+    /// <see cref="DeviceBatteryInfo.DeviceId"/> (case-insensitive).
+    /// GATT results take precedence on collision.
+    /// </summary>
+    private async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
+        bool raiseDeviceFound,
+        CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(ct);
+        var gattTask    = _gattReader.ReadAllAsync(ct);
+        var classicTask = _classicReader.ReadAllAsync(ct);
+        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
-        // Read GATT first.
-        var gatt = await _gattReader.ReadAsync(ct);
+        var merged = new Dictionary<string, DeviceBatteryInfo>(
+            StringComparer.OrdinalIgnoreCase);
 
-        // Read Classic second.
-        var classic = await _classicReader.ReadAsync(ct);
+        foreach (var d in classicTask.Result)
+            merged[d.DeviceId] = d;
 
-        // Merge preferring GATT if both sources report a value for the same device.
-        var merged = gatt
-            .Concat(classic)
-            .GroupBy(d => d.DeviceId)
-            .Select(g => g.FirstOrDefault(d => d.Source == BatterySource.Gatt) ?? g.First())
-            .ToList();
+        foreach (var d in gattTask.Result)
+            merged[d.DeviceId] = d;  // overwrites Classic on collision
+
+        var results = new List<DeviceBatteryInfo>(merged.Values);
 
         if (raiseDeviceFound)
-        {
-            foreach (var d in merged)
+            foreach (var d in results)
                 _callbacks.OnDeviceFound(d.DeviceId, d.Name, d.Battery);
-        }
 
-        return merged;
+        return results;
     }
+
+    // ── Public scan surface ──────────────────────────────────────────────────
+
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
+        ScanNowAsync(_shutdownToken);
 
     public async Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_isScanning) return new List<DeviceBatteryInfo>();
-        _isScanning = true;
-        bool scanSucceeded = false;
-        List<DeviceBatteryInfo> results = new();
+        ct.ThrowIfCancellationRequested();
+        await _scanLock.WaitAsync(ct).ConfigureAwait(false);
 
+        List<DeviceBatteryInfo> results = [];
+        bool scanSucceeded = false;
         try
         {
+            _isScanning = true;
             _callbacks.OnScanStarted();
 
-            results = await ReadMergedAsync(raiseDeviceFound: true, ct);
-            await _poller.PollLock.WaitAsync(ct);
+            results = await ReadMergedAsync(raiseDeviceFound: true, ct)
+                .ConfigureAwait(false);
+
+            await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 foreach (var device in results)
