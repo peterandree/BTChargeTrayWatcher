@@ -4,452 +4,323 @@ using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher.Tray
 {
-    public sealed class OptionsForm : Form
+    internal sealed class OptionsForm : Form
     {
-        public delegate DialogResult MessageBoxHandler(IWin32Window? owner, string text, string caption, MessageBoxButtons buttons, MessageBoxIcon icon);
-        private readonly MessageBoxHandler _messageBoxHandler;
-        private readonly TabControl tabControl;
-        private readonly TabPage devicesTab;
-        private readonly TabPage notificationsTab;
-        private readonly TabPage generalTab;
-        // ntfy controls
-        private readonly CheckBox ntfyEnabledCheck;
-        private readonly TextBox ntfyTopicTextBox;
-        private readonly Button regenerateTopicBtn;
-        private readonly Button sendNtfyTestBtn;
-        private readonly NumericUpDown lowNumeric;
-        private readonly NumericUpDown highNumeric;
-        private readonly NumericUpDown laptopLowNumeric;
-        private readonly NumericUpDown laptopHighNumeric;
-        private readonly CheckBox excludeLaptopOverlayCheck;
-        private INotificationService? _notifier;
+        public delegate DialogResult MessageBoxHandler(
+            IWin32Window? owner, string text, string caption,
+            MessageBoxButtons buttons, MessageBoxIcon icon);
 
-        private class DeviceRow
-        {
-            public string DeviceId { get; set; } = string.Empty;
-            public string DisplayName { get; set; } = string.Empty;
-            public int? Low { get; set; }
-            public int? High { get; set; }
-            public int? PollInterval { get; set; }
-            public bool Excluded { get; set; }
-        }
+        private readonly MessageBoxHandler _messageBox;
 
-        private readonly DataGridView devicesGrid;
-        private readonly Button resetAllBtn;
-        private List<DeviceRow> deviceRows = new();
         private ThresholdSettings? _settings;
         private BluetoothBatteryMonitor? _monitor;
+        private INotificationService? _notifier;
 
-        public OptionsForm(MessageBoxHandler? messageBoxHandler = null)
+        private System.Windows.Forms.ListView? _deviceListView;
+        private System.Windows.Forms.Button? _closeButton;
+        private System.Windows.Forms.Button? _saveButton;
+        private System.Windows.Forms.TextBox? _globalLowBox;
+        private System.Windows.Forms.TextBox? _globalHighBox;
+        private System.Windows.Forms.TextBox? _globalPollBox;
+        private System.Windows.Forms.Label? _statusLabel;
+        private System.Windows.Forms.CheckBox? _startupCheckBox;
+
+        private bool _initialized;
+        private bool _dirty;
+
+        // Expose the internal ListView for testing
+        internal System.Windows.Forms.ListView? DeviceListView => _deviceListView;
+
+        public OptionsForm()
+            : this((owner, text, caption, buttons, icon) =>
+                MessageBox.Show(owner, text, caption, buttons, icon))
         {
-            _messageBoxHandler = messageBoxHandler ?? ((owner, text, caption, buttons, icon) => MessageBox.Show(owner, text, caption, buttons, icon));
-            Text = "Options";
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            StartPosition = FormStartPosition.CenterScreen;
-            ShowInTaskbar = false;
-            Width = 600;
-            Height = 400;
-
-            tabControl = new TabControl
-            {
-                Dock = DockStyle.Fill
-            };
-
-            // Devices tab
-            devicesTab = new TabPage("Devices");
-            devicesGrid = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                ReadOnly = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                AutoGenerateColumns = false
-            };
-            devicesGrid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Display Name", DataPropertyName = "DisplayName", Width = 160 });
-            devicesGrid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Low %", DataPropertyName = "Low", Width = 60, ValueType = typeof(int) });
-            devicesGrid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "High %", DataPropertyName = "High", Width = 60, ValueType = typeof(int) });
-            devicesGrid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Poll (s)", DataPropertyName = "PollInterval", Width = 80, ValueType = typeof(int) });
-            devicesGrid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Excluded", DataPropertyName = "Excluded", Width = 70 });
-            var resetCol = new DataGridViewButtonColumn { HeaderText = "⟲", Text = "Reset", UseColumnTextForButtonValue = true, Width = 60 };
-            devicesGrid.Columns.Add(resetCol);
-            devicesTab.Controls.Add(devicesGrid);
-
-            resetAllBtn = new Button { Text = "Reset All Devices", Dock = DockStyle.Bottom, Height = 32 };
-            devicesTab.Controls.Add(resetAllBtn);
-
-
-
-            // Redesigned Notifications tab layout
-            notificationsTab = new TabPage("Notifications");
-            var notifLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(12),
-                RowCount = 4,
-                ColumnCount = 1,
-            };
-            notifLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // ntfy controls
-            notifLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 8)); // spacing
-            notifLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // help
-            notifLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
-
-            // ntfy controls group
-            var ntfyGroup = new GroupBox
-            {
-                Text = "Mobile notifications (ntfy.sh)",
-                Dock = DockStyle.Top,
-                Padding = new Padding(10),
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            };
-            ntfyEnabledCheck = new CheckBox { Text = "Enable ntfy notifications", AutoSize = true, Dock = DockStyle.Top };
-            var topicPanel = new Panel { Dock = DockStyle.Top, Height = 30 };
-            var topicLabel = new Label { Text = "Topic:", AutoSize = true, Width = 40, Dock = DockStyle.Left };
-            ntfyTopicTextBox = new TextBox { ReadOnly = true, Dock = DockStyle.Fill };
-            topicPanel.Controls.Add(ntfyTopicTextBox);
-            topicPanel.Controls.Add(topicLabel);
-
-            regenerateTopicBtn = new Button { Text = "Regenerate topic", Width = 140, Height = 32, Margin = new Padding(0,0,8,0) };
-            sendNtfyTestBtn = new Button { Text = "Send ntfy test", Width = 140, Height = 32, Margin = new Padding(0,0,0,0) };
-
-            // Horizontal panel for ntfy action buttons
-            var ntfyButtonPanel = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Top,
-                Margin = new Padding(0, 8, 0, 0),
-                Padding = new Padding(0)
-            };
-            ntfyButtonPanel.Controls.Add(sendNtfyTestBtn);
-            ntfyButtonPanel.Controls.Add(regenerateTopicBtn);
-
-            ntfyGroup.Controls.Add(ntfyButtonPanel);
-            ntfyGroup.Controls.Add(topicPanel);
-            ntfyGroup.Controls.Add(ntfyEnabledCheck);
-            notifLayout.Controls.Add(ntfyGroup, 0, 0);
-
-            // spacing
-            notifLayout.Controls.Add(new Panel { Height = 8, Dock = DockStyle.Top }, 0, 1);
-
-            // ntfy setup instructions/help (scrollable, clickable)
-            var ntfyHelpBox = new GroupBox
-            {
-                Text = "ntfy mobile setup instructions",
-                Dock = DockStyle.Fill,
-                Padding = new Padding(8),
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            };
-            var ntfyHelpText = new RichTextBox
-            {
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None,
-                Dock = DockStyle.Fill,
-                BackColor = SystemColors.Control,
-                DetectUrls = true,
-                ScrollBars = RichTextBoxScrollBars.Vertical,
-                Margin = new Padding(0),
-                Text = "To receive push notifications on your phone:\n\n" +
-                       "1. Install the ntfy app on your device:\n" +
-                       "   • Android: https://docs.ntfy.sh/subscribe/phone/\n" +
-                       "   • iPhone: https://docs.ntfy.sh/subscribe/phone/\n" +
-                       "2. Open the app and subscribe to your topic (shown above) using server ntfy.sh.\n" +
-                       "3. For more info, see: https://ntfy.sh"
-            };
-            ntfyHelpText.LinkClicked += (s, e) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = e.LinkText, UseShellExecute = true });
-            ntfyHelpBox.Controls.Add(ntfyHelpText);
-            notifLayout.Controls.Add(ntfyHelpBox, 0, 2);
-
-            notifLayout.Controls.Add(new Panel { Height = 8, Dock = DockStyle.Top }, 0, 3);
-
-            notificationsTab.Controls.Add(notifLayout);
-
-
-            // General tab
-            generalTab = new TabPage("General");
-            var generalPanel = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 5,
-                AutoSize = true,
-                Padding = new Padding(16),
-            };
-            generalPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
-            generalPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-
-            // Global thresholds
-            generalPanel.Controls.Add(new Label { Text = "Global Low %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
-            lowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
-            generalPanel.Controls.Add(lowNumeric, 1, 0);
-            generalPanel.Controls.Add(new Label { Text = "Global High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
-            highNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
-            generalPanel.Controls.Add(highNumeric, 1, 1);
-
-            // Laptop thresholds
-            generalPanel.Controls.Add(new Label { Text = "Laptop Low %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
-            laptopLowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
-            generalPanel.Controls.Add(laptopLowNumeric, 1, 2);
-            generalPanel.Controls.Add(new Label { Text = "Laptop High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
-            laptopHighNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
-            generalPanel.Controls.Add(laptopHighNumeric, 1, 3);
-
-            // Exclude laptop from tray icon overlay
-            excludeLaptopOverlayCheck = new CheckBox { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
-            generalPanel.Controls.Add(excludeLaptopOverlayCheck, 0, 4);
-            generalPanel.SetColumnSpan(excludeLaptopOverlayCheck, 2);
-
-            generalTab.Controls.Add(generalPanel);
-
-            tabControl.TabPages.Add(devicesTab);
-            tabControl.TabPages.Add(notificationsTab);
-            tabControl.TabPages.Add(generalTab);
-
-            Controls.Add(tabControl);
-
-            // Defer data wiring until settings/monitor are injected
         }
 
-        public void Initialize(ThresholdSettings settings, BluetoothBatteryMonitor monitor, INotificationService? notifier = null)
+        internal OptionsForm(MessageBoxHandler messageBoxHandler)
         {
-            _settings = settings;
-            _monitor = monitor;
-            _notifier = notifier;
-            // Wire up general tab controls to settings
-            lowNumeric.Value = settings.Low;
-            highNumeric.Value = settings.High;
-            laptopLowNumeric.Value = settings.LaptopLow;
-            laptopHighNumeric.Value = settings.LaptopHigh;
-            excludeLaptopOverlayCheck.Checked = settings.ExcludeLaptopFromTrayIconOverlay;
+            _messageBox = messageBoxHandler;
+            InitializeComponent();
+        }
 
-            lowNumeric.ValueChanged += (_, _) =>
-            {
-                try { settings.Low = (int)lowNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); lowNumeric.Value = settings.Low; }
-            };
-            highNumeric.ValueChanged += (_, _) =>
-            {
-                try { settings.High = (int)highNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); highNumeric.Value = settings.High; }
-            };
-            laptopLowNumeric.ValueChanged += (_, _) =>
-            {
-                try { settings.LaptopLow = (int)laptopLowNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopLowNumeric.Value = settings.LaptopLow; }
-            };
-            laptopHighNumeric.ValueChanged += (_, _) =>
-            {
-                try { settings.LaptopHigh = (int)laptopHighNumeric.Value; }
-                catch (ArgumentOutOfRangeException ex) { _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error); laptopHighNumeric.Value = settings.LaptopHigh; }
-            };
-            excludeLaptopOverlayCheck.CheckedChanged += (_, _) => settings.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+        internal void Initialize(ThresholdSettings settings, BluetoothBatteryMonitor monitor, INotificationService? notifier = null)
+        {
+            _settings  = settings;
+            _monitor   = monitor;
+            _notifier  = notifier;
+            _initialized = true;
 
-            // ntfy controls wiring
-            var ntfy = settings.GetNtfySettings();
-            ntfyEnabledCheck.Checked = ntfy.IsEnabled;
-            ntfyTopicTextBox.Text = ntfy.Topic ?? string.Empty;
-
-            ntfyEnabledCheck.CheckedChanged += (_, _) =>
-            {
-                settings.UpdateNtfySettings(s => s.IsEnabled = ntfyEnabledCheck.Checked);
-            };
-
-            regenerateTopicBtn.Click += (_, _) =>
-            {
-                string topic = NtfyTopicGenerator.Generate();
-                settings.UpdateNtfySettings(s =>
-                {
-                    s.Topic = topic;
-                    s.IsEnabled = false; // require explicit re-enable after regen
-                });
-                _messageBoxHandler(this,
-                    $"New topic generated:\n\n{topic}\n\nSubscribe to this topic in the ntfy app on your phone using server ntfy.sh, then enable the integration.",
-                    "Mobile notifications — new topic",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                ntfyTopicTextBox.Text = topic;
-                ntfyEnabledCheck.Checked = false;
-            };
-
-            sendNtfyTestBtn.Click += async (_, _) =>
-            {
-                var channel = new NtfyNotificationChannel(settings.GetNtfySettings());
-                bool ok = await channel.SendTestNotificationAsync().ConfigureAwait(false);
-                string msg = ok
-                    ? "Test notification sent. Check your phone."
-                    : "Failed to send test notification. Check your internet connection and verify the topic is correct.";
-                if (this.InvokeRequired)
-                {
-                    this.Invoke(new Action(() =>
-                        _messageBoxHandler(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning)));
-                }
-                else
-                {
-                    _messageBoxHandler(this, msg, "Mobile notifications — test", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                }
-            };
-
+            PopulateGlobals();
             LoadDeviceRows();
-            devicesGrid.CellValueChanged += DevicesGrid_CellValueChanged;
-            devicesGrid.CellContentClick += DevicesGrid_CellContentClick;
-            devicesGrid.DataError += (_, e) =>
+            WireMonitorEvents();
+            PopulateStartupCheckBox();
+        }
+
+        private void InitializeComponent()
+        {
+            Text            = "BTChargeTrayWatcher — Options";
+            Width           = 780;
+            Height          = 560;
+            MinimumSize     = new System.Drawing.Size(600, 400);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            StartPosition   = FormStartPosition.CenterScreen;
+
+            var mainLayout = new TableLayoutPanel
             {
-                // Show a friendly message when parsing/editing fails (e.g., non-numeric input),
-                // then reload rows so the UI reflects persisted settings.
-                try
-                {
-                    _messageBoxHandler(this, "Invalid value entered. Please enter a numeric value.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                catch { }
-                LoadDeviceRows();
-                e.ThrowException = false;
+                Dock        = DockStyle.Fill,
+                RowCount    = 3,
+                ColumnCount = 1,
+                Padding     = new Padding(8),
             };
-            // Only commit edits immediately for checkbox cells (Excluded). Leave
-            // text/numeric cells to commit on edit end so users can type values.
-            devicesGrid.CurrentCellDirtyStateChanged += (_, _) =>
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            // ── Global settings row ──────────────────────────────────────
+            var globalsPanel = new FlowLayoutPanel
             {
-                if (!devicesGrid.IsCurrentCellDirty) return;
-                try
-                {
-                    var col = devicesGrid.CurrentCell?.OwningColumn;
-                    if (col is DataGridViewCheckBoxColumn)
-                        devicesGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
-                }
-                catch { /* swallow UI inspection errors */ }
+                AutoSize      = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents  = false,
+                Padding       = new Padding(0, 0, 0, 6),
             };
-            resetAllBtn.Click += ResetAllBtn_Click;
+
+            globalsPanel.Controls.Add(MakeLabel("Global low %:"));
+            _globalLowBox = MakeTextBox(3);
+            globalsPanel.Controls.Add(_globalLowBox);
+
+            globalsPanel.Controls.Add(MakeLabel("  Global high %:"));
+            _globalHighBox = MakeTextBox(3);
+            globalsPanel.Controls.Add(_globalHighBox);
+
+            globalsPanel.Controls.Add(MakeLabel("  Poll interval (s):"));
+            _globalPollBox = MakeTextBox(4);
+            globalsPanel.Controls.Add(_globalPollBox);
+
+            _startupCheckBox = new CheckBox { Text = "  Start with Windows", AutoSize = true, Margin = new Padding(8, 3, 0, 3) };
+            globalsPanel.Controls.Add(_startupCheckBox);
+
+            mainLayout.Controls.Add(globalsPanel, 0, 0);
+
+            // ── Device list ──────────────────────────────────────────────
+            _deviceListView = new System.Windows.Forms.ListView
+            {
+                Dock          = DockStyle.Fill,
+                View          = View.Details,
+                FullRowSelect = true,
+                GridLines     = true,
+                LabelEdit     = false,
+            };
+            _deviceListView.Columns.Add("Device",          180);
+            _deviceListView.Columns.Add("Display name",    150);
+            _deviceListView.Columns.Add("Low %",            60);
+            _deviceListView.Columns.Add("High %",           60);
+            _deviceListView.Columns.Add("Poll (s)",         70);
+            _deviceListView.Columns.Add("Ignored",          60);
+            _deviceListView.Columns.Add("Device ID",       160);
+
+            mainLayout.Controls.Add(_deviceListView, 0, 1);
+
+            // ── Bottom bar ───────────────────────────────────────────────
+            var bottomBar = new FlowLayoutPanel
+            {
+                AutoSize      = true,
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock          = DockStyle.Fill,
+                Padding       = new Padding(0, 6, 0, 0),
+            };
+
+            _closeButton = new Button { Text = "Close",  Width = 80, Height = 28 };
+            _saveButton  = new Button { Text = "Save",   Width = 80, Height = 28 };
+            _statusLabel = new Label  { Text = string.Empty, AutoSize = true, TextAlign = System.Drawing.ContentAlignment.MiddleLeft };
+
+            _closeButton.Click += OnCloseClicked;
+            _saveButton.Click  += OnSaveClicked;
+
+            bottomBar.Controls.Add(_closeButton);
+            bottomBar.Controls.Add(_saveButton);
+            bottomBar.Controls.Add(_statusLabel);
+
+            mainLayout.Controls.Add(bottomBar, 0, 2);
+            Controls.Add(mainLayout);
+
+            FormClosing += OnFormClosing;
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+
+        private static Label MakeLabel(string text) =>
+            new() { Text = text, AutoSize = true, TextAlign = System.Drawing.ContentAlignment.MiddleLeft };
+
+        private static TextBox MakeTextBox(int width) =>
+            new() { Width = width * 14, Margin = new Padding(2, 3, 2, 3) };
+
+        // ── Populate ─────────────────────────────────────────────────────────
+
+        private void PopulateGlobals()
+        {
+            if (_settings is null) return;
+            _globalLowBox!.Text  = _settings.Low.ToString();
+            _globalHighBox!.Text = _settings.High.ToString();
+            _globalPollBox!.Text = ((int)PollingDefaults.PollingInterval.TotalSeconds).ToString();
+
+            _globalLowBox.TextChanged  += (_, _) => _dirty = true;
+            _globalHighBox.TextChanged += (_, _) => _dirty = true;
+            _globalPollBox.TextChanged += (_, _) => _dirty = true;
+        }
+
+        private void PopulateStartupCheckBox()
+        {
+            _startupCheckBox!.Checked = StartupHelper.IsRegistered();
+            _startupCheckBox.CheckedChanged += (_, _) => _dirty = true;
         }
 
         private void LoadDeviceRows()
         {
-            if (_settings == null || _monitor == null) return;
-            deviceRows = new List<DeviceRow>();
-            foreach (var d in _monitor.LastKnownDevices)
+            _deviceListView!.Items.Clear();
+            if (_settings is null || _monitor is null) return;
+
+            var devices = _monitor.LastKnownDevices;
+
+            foreach (var d in devices.OrderBy(x => x.Name))
             {
-                deviceRows.Add(new DeviceRow
-                {
-                    DeviceId = d.DeviceId,
-                    DisplayName = d.Name,
-                    Low = _settings.GetLowForDevice(d.DeviceId, d.Name),
-                    High = _settings.GetHighForDevice(d.DeviceId, d.Name),
-                    PollInterval = _settings.GetPollIntervalForDevice(d.DeviceId, d.Name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds,
-                    Excluded = _settings.IsIgnored(d.DeviceId, d.Name)
-                });
+                string displayName = _settings.GetAliasOrNull(d.DeviceId) ?? string.Empty;
+                string low         = _settings.TryGetDeviceLow(d.DeviceId, d.Name, out int lo)  ? lo.ToString() : string.Empty;
+                string high        = _settings.TryGetDeviceHigh(d.DeviceId, d.Name, out int hi) ? hi.ToString() : string.Empty;
+                string poll        = _settings.GetPollIntervalForDevice(d.DeviceId, d.Name)?.ToString() ?? string.Empty;
+                bool   ignored     = _settings.IsIgnored(d.DeviceId, d.Name);
+
+                var item = new ListViewItem(d.Name);
+                item.SubItems.Add(displayName);
+                item.SubItems.Add(low);
+                item.SubItems.Add(high);
+                item.SubItems.Add(poll);
+                item.SubItems.Add(ignored ? "Yes" : "No");
+                item.SubItems.Add(d.DeviceId);
+                item.Tag = d.DeviceId;
+
+                _deviceListView.Items.Add(item);
             }
-            devicesGrid.DataSource = null;
-            devicesGrid.DataSource = deviceRows;
         }
 
-        private void DevicesGrid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        private void WireMonitorEvents()
         {
-            if (_settings == null || e.RowIndex < 0 || e.RowIndex >= deviceRows.Count) return;
-            var row = deviceRows[e.RowIndex];
-            var col = devicesGrid.Columns[e.ColumnIndex].DataPropertyName;
-            if (col == "DisplayName")
-            {
-                try
-                {
-                    string defaultName = row.DisplayName;
-                    if (_monitor != null)
-                    {
-                        var tracked = _monitor.TrackedDevices.FirstOrDefault(t => t.DeviceId == row.DeviceId);
-                        if (tracked != null) defaultName = tracked.Name;
-                    }
+            if (_monitor is null) return;
+            _monitor.DeviceBatteryRead   += OnDeviceBatteryRead;
+            _monitor.ManualScanCompleted += OnManualScanCompleted;
+        }
 
-                    if (string.Equals(row.DisplayName, defaultName, StringComparison.OrdinalIgnoreCase))
-                        _settings.SetDisplayNameAlias(row.DeviceId, null);
-                    else
-                        _settings.SetDisplayNameAlias(row.DeviceId, row.DisplayName);
-                }
-                catch (Exception ex)
-                {
-                    _messageBoxHandler(this, $"Failed to set alias: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    LoadDeviceRows();
-                }
-            }
-            else if (col == "Low")
+        private void UnwireMonitorEvents()
+        {
+            if (_monitor is null) return;
+            _monitor.DeviceBatteryRead   -= OnDeviceBatteryRead;
+            _monitor.ManualScanCompleted -= OnManualScanCompleted;
+        }
+
+        private void OnDeviceBatteryRead(string name, int? battery)
+        {
+            if (InvokeRequired) { Invoke(() => OnDeviceBatteryRead(name, battery)); return; }
+            UpdateDeviceRow(name, battery);
+        }
+
+        private void OnManualScanCompleted(IReadOnlyList<DeviceBatteryInfo> devices)
+        {
+            if (InvokeRequired) { Invoke(() => OnManualScanCompleted(devices)); return; }
+            LoadDeviceRows();
+        }
+
+        private void UpdateDeviceRow(string name, int? battery)
+        {
+            if (_deviceListView is null) return;
+            foreach (ListViewItem item in _deviceListView.Items)
             {
-                try
+                if (item.Text == name)
                 {
-                    _settings.SetLowForDevice(row.DeviceId, row.Low);
-                }
-                catch (ArgumentOutOfRangeException ex)
-                {
-                    _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    LoadDeviceRows();
-                }
-            }
-            else if (col == "High")
-            {
-                try
-                {
-                    _settings.SetHighForDevice(row.DeviceId, row.High);
-                }
-                catch (ArgumentOutOfRangeException ex)
-                {
-                    _messageBoxHandler(this, ex.Message, "Invalid threshold", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    LoadDeviceRows();
-                }
-            }
-            else if (col == "Excluded")
-            {
-                if (row.Excluded)
-                    _settings.SetIgnoredDevicesByIds(_settings.IgnoredDevices.Union(new[] { row.DeviceId }));
-                else
-                    _settings.SetIgnoredDevicesByIds(_settings.IgnoredDevices.Except(new[] { row.DeviceId }));
-            }
-            else if (col == "PollInterval")
-            {
-                if (row.PollInterval.HasValue && row.PollInterval.Value <= 0)
-                {
-                    _messageBoxHandler(this, "Poll interval must be a positive integer.", "Invalid value", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    LoadDeviceRows();
-                }
-                else
-                {
-                    _settings.SetPollIntervalForDevice(row.DeviceId, row.PollInterval);
+                    // Battery column not currently shown — placeholder for future expansion.
+                    _ = battery;
+                    return;
                 }
             }
         }
 
-        private void DevicesGrid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
+        // ── Editing ──────────────────────────────────────────────────────────
+
+        private void OnCloseClicked(object? sender, EventArgs e)
         {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (devicesGrid.Columns[e.ColumnIndex] is DataGridViewButtonColumn)
+            if (_dirty)
             {
-                // Reset button clicked
-                var row = deviceRows[e.RowIndex];
-                if (_settings != null)
-                {
-                    _settings.SetLowForDevice(row.DeviceId, null);
-                    _settings.SetHighForDevice(row.DeviceId, null);
-                    _settings.SetPollIntervalForDevice(row.DeviceId, null);
-                    LoadDeviceRows();
-                }
+                var result = _messageBox(
+                    this,
+                    "You have unsaved changes. Save before closing?",
+                    "Unsaved changes",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel) return;
+                if (result == DialogResult.Yes) Save();
+            }
+
+            Close();
+        }
+
+        private void OnSaveClicked(object? sender, EventArgs e) => Save();
+
+        private void Save()
+        {
+            if (_settings is null) return;
+
+            if (int.TryParse(_globalLowBox!.Text.Trim(),  out int low))  _settings.Low  = low;
+            if (int.TryParse(_globalHighBox!.Text.Trim(), out int high)) _settings.High = high;
+
+            SaveDeviceRows();
+            ApplyStartupRegistration();
+
+            _settings.Persist();
+            _dirty = false;
+            _statusLabel!.Text = "Saved.";
+        }
+
+        private void SaveDeviceRows()
+        {
+            if (_settings is null || _deviceListView is null) return;
+
+            foreach (ListViewItem item in _deviceListView.Items)
+            {
+                string deviceId = item.Tag as string ?? string.Empty;
+                if (string.IsNullOrEmpty(deviceId)) continue;
+
+                string alias   = item.SubItems[1].Text.Trim();
+                string lowText = item.SubItems[2].Text.Trim();
+                string hiText  = item.SubItems[3].Text.Trim();
+                string pollTxt = item.SubItems[4].Text.Trim();
+                bool   ignored = string.Equals(item.SubItems[5].Text, "Yes", StringComparison.OrdinalIgnoreCase);
+
+                _settings.SetAlias(deviceId, alias.Length > 0 ? alias : null);
+
+                if (int.TryParse(lowText,  out int dLow))  _settings.SetDeviceLow(deviceId, dLow);
+                else                                        _settings.ClearDeviceLow(deviceId);
+
+                if (int.TryParse(hiText,   out int dHigh)) _settings.SetDeviceHigh(deviceId, dHigh);
+                else                                        _settings.ClearDeviceHigh(deviceId);
+
+                if (int.TryParse(pollTxt,  out int dPoll)) _settings.SetPollInterval(deviceId, dPoll);
+                else                                        _settings.ClearPollInterval(deviceId);
+
+                if (ignored) _settings.AddIgnored(deviceId, null);
+                else         _settings.RemoveIgnored(deviceId, null);
             }
         }
 
-        private void ResetAllBtn_Click(object? sender, EventArgs e)
+        private void ApplyStartupRegistration()
         {
-            if (_settings == null) return;
-            var confirm = _messageBoxHandler(this, "Reset all device thresholds and poll intervals to defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (confirm == DialogResult.Yes)
-            {
-                foreach (var row in deviceRows)
-                {
-                    _settings.SetLowForDevice(row.DeviceId, null);
-                    _settings.SetHighForDevice(row.DeviceId, null);
-                    _settings.SetPollIntervalForDevice(row.DeviceId, null);
-                }
-                LoadDeviceRows();
-            }
+            if (_startupCheckBox is null) return;
+            if (_startupCheckBox.Checked) StartupHelper.Register();
+            else                          StartupHelper.Unregister();
+        }
+
+        private void OnFormClosing(object? sender, FormClosingEventArgs e)
+        {
+            UnwireMonitorEvents();
         }
     }
 }
