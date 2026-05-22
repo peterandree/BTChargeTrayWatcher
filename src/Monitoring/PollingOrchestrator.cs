@@ -8,91 +8,187 @@ namespace BTChargeTrayWatcher;
 
 internal sealed class PollingOrchestrator : IDisposable
 {
+    internal enum BatteryAlertState { Normal = 0, Low = 1, High = 2 }
+
     private readonly ThresholdSettings _settings;
     private readonly INotificationService _notifier;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly TaskTracker _tracker;
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readDevices;
-    private readonly PollingOrchestratorCallbacks _callbacks;
     private readonly CancellationToken _shutdownToken;
-    private readonly SemaphoreSlim _pollLock = new(1, 1);
-    private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates = new();
-    private bool _disposed;
+    private readonly PollingOrchestratorCallbacks _callbacks;
 
-    public SemaphoreSlim PollLock => _pollLock;
+    private readonly SemaphoreSlim _pollLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, int> _missCount =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Timestamp of last processed update per device (UTC)
+    private readonly ConcurrentDictionary<string, DateTime> _lastProcessed =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private volatile int _thresholdsChanged;
+    private volatile bool _disposed;
+
+    /// <summary>
+    /// Exposes the internal poll lock for test-only synchronisation.
+    /// Only accessible to the test assembly via InternalsVisibleTo.
+    /// Production code must never acquire this lock directly.
+    /// </summary>
+    internal SemaphoreSlim PollLock => _pollLock;
 
     public PollingOrchestrator(PollingOrchestratorOptions options)
     {
-        _settings = options.Settings;
-        _notifier = options.Notifier;
-        _lastKnown = options.LastKnown;
-        _tracker = options.Tracker;
-        _readDevices = options.ReadDevices;
-        _callbacks = options.Callbacks;
+        _settings      = options.Settings;
+        _notifier      = options.Notifier;
+        _lastKnown     = options.LastKnown;
+        _tracker       = options.Tracker;
+        _readDevices   = options.ReadDevices;
         _shutdownToken = options.ShutdownToken;
+        _callbacks     = options.Callbacks;
     }
 
-    public void StartBackgroundPolling()
+    public void OnTimerTick()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed || _shutdownToken.IsCancellationRequested) return;
+        _tracker.Start(ct => SafePollAsync(ct), _shutdownToken);
+    }
 
-        _tracker.Start(async ct =>
+    public void SignalThresholdsChanged()
+    {
+        if (_disposed || _shutdownToken.IsCancellationRequested) return;
+        Interlocked.Exchange(ref _thresholdsChanged, 1);
+        _tracker.Start(ct => SafePollAsync(ct), _shutdownToken);
+    }
+
+    private async Task SafePollAsync(CancellationToken ct)
+    {
+        try { await PollInternalAsync(ct, honorPerDeviceIntervals: true).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+        catch (Exception ex)
         {
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await PollOnceAsync(ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] Polling fault: {ex}");
-                }
-
-                await Task.Delay(PollingDefaults.PollingInterval, ct);
-            }
-        }, _shutdownToken);
+            System.Diagnostics.Debug.WriteLine($"[BTChargeTrayWatcher] PollAsync fault: {ex}");
+        }
     }
 
-    public async Task PollOnceAsync(CancellationToken ct)
+    public Task PollAsync() => PollAsync(_shutdownToken);
+
+    public Task PollAsync(CancellationToken ct) => PollInternalAsync(ct, honorPerDeviceIntervals: false);
+
+    private async Task PollInternalAsync(CancellationToken ct, bool honorPerDeviceIntervals)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await _pollLock.WaitAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        await _pollLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var devices = await _readDevices(ct);
-            bool hasAlert = false;
+            // Re-check after acquiring the lock: Dispose() may have run between the
+            // pre-WaitAsync guard in OnTimerTick and this point (TOCTOU window).
+            if (_disposed || ct.IsCancellationRequested) return;
+
+            bool thresholdsChanged = Interlocked.Exchange(ref _thresholdsChanged, 0) == 1;
+            if (thresholdsChanged)
+            {
+                _alertStates.Clear();
+                _missCount.Clear();
+            }
+
+            var snapshot = new Dictionary<string, DeviceBatteryInfo>(
+                _lastKnown, StringComparer.OrdinalIgnoreCase);
+
+            var devices = await _readDevices(ct).ConfigureAwait(false);
+            var currentValid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var device in devices)
             {
+                ct.ThrowIfCancellationRequested();
                 if (device.Battery is null) continue;
+
+                currentValid.Add(device.DeviceId);
+                snapshot.TryGetValue(device.DeviceId, out var prevInfo);
+                int prev = prevInfo?.Battery ?? 0;
+                bool isNew = prevInfo is null;
+
+                // Reset miss count for presence tracking regardless of whether the
+                // reading is processed (honours presence detection while allowing
+                // per-device throttling of updates/alerts).
+                _missCount[device.DeviceId] = 0;
+
+                bool due = !honorPerDeviceIntervals;
+                if (honorPerDeviceIntervals)
+                {
+                    int intervalSec = (int)(_settings.GetPollIntervalForDevice(device.DeviceId, device.Name)
+                        ?? (int)PollingDefaults.PollingInterval.TotalSeconds);
+                    if (!_lastProcessed.TryGetValue(device.DeviceId, out var last)) due = true;
+                    else if ((DateTime.UtcNow - last).TotalSeconds >= intervalSec) due = true;
+                }
+
+                if (!due)
+                {
+                    // Still update presence; skip processing/notifications for now.
+                    continue;
+                }
+
+                // Mark processed timestamp
+                _lastProcessed[device.DeviceId] = DateTime.UtcNow;
 
                 _lastKnown[device.DeviceId] = device;
                 _callbacks.OnBatteryRead(device.Name, device.Battery);
 
-                BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var s)
-                    ? s : BatteryAlertState.Normal;
+                BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
+                    ? es
+                    : ClassifyBatteryState(device.DeviceId, device.Name, prev, BatteryAlertState.Normal, device.IsCharging);
 
-                BatteryAlertState newState = ClassifyBatteryState(
-                    device.DeviceId,
-                    device.Name,
-                    device.Battery.Value,
-                    previousState,
-                    device.IsCharging);
+                BatteryAlertState currentState =
+                    ClassifyBatteryState(device.DeviceId, device.Name, device.Battery.Value, previousState, device.IsCharging);
 
-                _alertStates[device.DeviceId] = newState;
-                if (newState is BatteryAlertState.Low or BatteryAlertState.High)
-                    hasAlert = true;
+                if (_settings.IsIgnored(device.DeviceId, device.Name))
+                {
+                    _alertStates[device.DeviceId] = BatteryAlertState.Normal;
+                    continue;
+                }
 
-                if (newState != previousState)
-                    SendAlertIfNeeded(device, newState);
+                if (isNew || thresholdsChanged || !_alertStates.ContainsKey(device.DeviceId))
+                {
+                    SendAlertIfNeeded(device, currentState);
+                    _alertStates[device.DeviceId] = currentState;
+                    continue;
+                }
+
+                if (prev == device.Battery.Value) continue;
+
+                if (previousState != currentState)
+                    SendAlertIfNeeded(device, currentState);
+
+                _alertStates[device.DeviceId] = currentState;
             }
 
-            _callbacks.OnScanCompleted(devices);
+            foreach (var id in snapshot.Keys)
+            {
+                if (!currentValid.Contains(id))
+                {
+                    int misses = _missCount.AddOrUpdate(id, 1, (_, prev) => prev + 1);
+                    if (misses >= PollingDefaults.MissCountThreshold)
+                    {
+                        _lastKnown.TryRemove(id, out _);
+                        _alertStates.TryRemove(id, out _);
+                        _missCount.TryRemove(id, out _);
+                        _lastProcessed.TryRemove(id, out _);
+                    }
+                }
+            }
+
+            _callbacks.OnScanCompleted([.. _lastKnown.Values]);
+
+            // Emit the authoritative combined alert state derived from classified states.
+            // This is the single source of truth for the tray icon overlay (ADR-011).
+            bool hasAlert = false;
+            foreach (var state in _alertStates.Values)
+            {
+                if (state != BatteryAlertState.Normal) { hasAlert = true; break; }
+            }
             _callbacks.OnAlertStateChanged(hasAlert);
         }
         finally
@@ -101,7 +197,7 @@ internal sealed class PollingOrchestrator : IDisposable
         }
     }
 
-    public void UpdateAlertState(string deviceId, string name, int battery)
+    internal void UpdateAlertState(string deviceId, string name, int battery)
     {
         BatteryAlertState existing = _alertStates.TryGetValue(deviceId, out var s)
             ? s : BatteryAlertState.Normal;
@@ -148,6 +244,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
         _disposed = true;
         _pollLock.Dispose();
     }
