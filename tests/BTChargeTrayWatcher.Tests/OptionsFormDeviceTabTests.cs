@@ -16,12 +16,25 @@ namespace BTChargeTrayWatcher.Tests
             return (DataGridView)f!.GetValue(form)!;
         }
 
+        private static BluetoothBatteryMonitor CreateMonitor(ThresholdSettings settings)
+        {
+            var infrastructure = new BluetoothMonitoringInfrastructure(
+                DeviceWatcher:          new DeviceWatcherService(),
+                Orchestrator:           new BatteryReaderOrchestrator(
+                                            new GattConnectionManager(),
+                                            new ClassicBatteryReader(),
+                                            new DeviceCapabilityCache()),
+                GattConnectionManager:  new GattConnectionManager(),
+                CapabilityCache:        new DeviceCapabilityCache(),
+                AliasSuggestionService: new AliasSuggestionService());
+            return new BluetoothBatteryMonitor(settings, NullNotificationService.Instance, infrastructure);
+        }
+
         [StaFact]
         public void DeviceTab_editing_updates_settings()
         {
             var settings = new ThresholdSettings();
-            // Use a minimal test double for monitor
-            var monitor = new BluetoothBatteryMonitor(settings, NullNotificationService.Instance, new DeviceWatcherService(), new BatteryReaderOrchestrator(new GattConnectionManager(), new ClassicBatteryReader(), new DeviceCapabilityCache()), new GattConnectionManager(), new DeviceCapabilityCache(), new AliasSuggestionService());
+            var monitor = CreateMonitor(settings);
             var deviceId = "dev-xyz";
             var device = new DeviceBatteryInfo(deviceId, "Test Device", 50, null, BatterySource.Gatt);
             var field = typeof(BluetoothBatteryMonitor).GetField("_lastKnown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
