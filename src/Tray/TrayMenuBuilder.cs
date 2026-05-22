@@ -17,16 +17,13 @@ internal sealed class TrayMenuBuilder
 
     public static ContextMenuStrip Build(
         ThresholdSettings settings,
-        ToolStripMenuItem laptopMenuItem,
+        TrayMenuItems items,
         Func<IReadOnlyList<DeviceBatteryInfo>> getDevices,
-        ToolStripMenuItem scanMenuItem,
-        ToolStripMenuItem lowMenu,
-        ToolStripMenuItem highMenu,
         Action onExit,
         Action? onOptions = null)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add(laptopMenuItem);
+        menu.Items.Add(items.LaptopMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         // Flat device list: name, battery, trend/charging
         try
@@ -50,7 +47,7 @@ internal sealed class TrayMenuBuilder
         }
         catch { menu.Items.Add("(device error)"); }
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(scanMenuItem);
+        menu.Items.Add(items.ScanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         var optionsMenuItem = new ToolStripMenuItem("Options…");
         optionsMenuItem.Click += (_, _) =>
@@ -58,45 +55,57 @@ internal sealed class TrayMenuBuilder
             if (onOptions != null)
                 onOptions();
             else
-                BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm();
+                BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(settings);
         };
         menu.Items.Add(optionsMenuItem);
         menu.Items.Add(new ToolStripSeparator());
-        // Removed: Low threshold, High threshold, and Run on startup (now in Options dialog)
-        menu.Items.Add("Exit", null, (_, _) => onExit());
+        menu.Items.Add(items.LowMenu);
+        menu.Items.Add(items.HighMenu);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => onExit()));
         return menu;
     }
 
-    // Minimal stub implementations to restore build
     public ToolStripMenuItem BuildLowMenu()
     {
-        return new ToolStripMenuItem("Low threshold");
+        var lowMenu = new ToolStripMenuItem("Low threshold");
+        foreach (var low in LowThresholdCandidates)
+        {
+            var item = new ToolStripMenuItem(low + "%") { Checked = _settings.Low == low };
+            item.Click += (_, _) =>
+            {
+                _settings.Low = low;
+                foreach (ToolStripMenuItem sibling in lowMenu.DropDownItems)
+                    sibling.Checked = sibling == item;
+            };
+            lowMenu.DropDownItems.Add(item);
+        }
+        return lowMenu;
     }
 
     public ToolStripMenuItem BuildHighMenu()
     {
-        return new ToolStripMenuItem("High threshold");
-    }
-
-    public ToolStripMenuItem BuildLaptopMenuItem()
-    {
-        return new ToolStripMenuItem("Laptop battery");
-    }
-
-    public ToolStripMenuItem BuildDevicesMenu(Func<IReadOnlyList<object>> getDevices)
-    {
-        var menu = new ToolStripMenuItem("Devices");
-        try
+        var highMenu = new ToolStripMenuItem("High threshold");
+        foreach (var high in HighThresholdCandidates)
         {
-            var devices = getDevices();
-            foreach (var dev in devices)
+            var item = new ToolStripMenuItem(high + "%") { Checked = _settings.High == high };
+            item.Click += (_, _) =>
             {
-                string name = dev?.ToString() ?? "(unknown)";
-                var item = new ToolStripMenuItem(name) { Enabled = false };
-                menu.DropDownItems.Add(item);
-            }
+                _settings.High = high;
+                foreach (ToolStripMenuItem sibling in highMenu.DropDownItems)
+                    sibling.Checked = sibling == item;
+            };
+            highMenu.DropDownItems.Add(item);
         }
-        catch { menu.DropDownItems.Add("(error)"); }
-        return menu;
+        return highMenu;
     }
+
+    public ToolStripMenuItem BuildLaptopMenuItem() =>
+        new("Laptop: N/A") { Enabled = false };
 }
+
+internal sealed record TrayMenuItems(
+    ToolStripMenuItem LaptopMenuItem,
+    ToolStripMenuItem ScanMenuItem,
+    ToolStripMenuItem LowMenu,
+    ToolStripMenuItem HighMenu);

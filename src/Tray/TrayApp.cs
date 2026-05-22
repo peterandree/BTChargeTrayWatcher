@@ -64,17 +64,14 @@ public sealed class TrayApp : IDisposable
         _lowMenu        = menuBuilder.BuildLowMenu();
         _highMenu       = menuBuilder.BuildHighMenu();
         _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
+        var menuItems   = new TrayMenuItems(_laptopMenuItem, _scanMenuItem = new ToolStripMenuItem("Scan devices…"), _lowMenu, _highMenu);
 
-        _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
         _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
             _settings,
-            _laptopMenuItem,
+            menuItems,
             () => monitor.LastKnownDevices,
-            _scanMenuItem,
-            _lowMenu,
-            _highMenu,
             onExit: () => _ = ExitAsync(),
             onOptions: _showOptions);
 
@@ -214,7 +211,7 @@ public sealed class TrayApp : IDisposable
         }
 
         if (sb.Length == 0)
-            sb.Append($"BT Battery Alert \u25bc{_settings.Low}% \u25b2{_settings.High}%");
+            sb.Append($"BT Battery Alert ▼{_settings.Low}% ▲{_settings.High}%");
 
         string text = sb.ToString();
         _trayIcon.Text = text.Length > 127 ? text[..127] : text;
@@ -242,26 +239,26 @@ public sealed class TrayApp : IDisposable
     {
         if (!info.HasBattery)
         {
-            _laptopMenuItem.Text = "\U0001f4bb Laptop: No battery";
+            _laptopMenuItem.Text = "💻 Laptop: No battery";
             return;
         }
 
-        string chargeExtra = info.IsOnAcPower && !info.IsCharging ? " \U0001f50c Plugged in"
+        string chargeExtra = info.IsOnAcPower && !info.IsCharging ? " 🔌 Plugged in"
             : !info.IsOnAcPower ? " On battery"
             : string.Empty;
 
-        _laptopMenuItem.Text = $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
+        _laptopMenuItem.Text = $"💻 Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
     }
 
     private void OnScanStarted()
     {
-        _scanMenuItem.Text    = "\u23f3 Scanning\u2026";
+        _scanMenuItem.Text    = "⏳ Scanning…";
         _scanMenuItem.Enabled = false;
     }
 
     private void OnScanCompleted(IReadOnlyList<DeviceBatteryInfo> devices)
     {
-        _scanMenuItem.Text    = "Scan devices\u2026";
+        _scanMenuItem.Text    = "Scan devices…";
         _scanMenuItem.Enabled = true;
         UpdateTooltip();
     }

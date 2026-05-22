@@ -1,97 +1,76 @@
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BTChargeTrayWatcher;
 
-internal sealed class Scanner
+internal sealed class Scanner : IDisposable
 {
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
-    private readonly Action<string, string, int?> _onDeviceFound;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
     private readonly TaskTracker _tracker;
+    private readonly ScannerCallbacks _callbacks;
     private readonly CancellationToken _shutdownToken;
-    private readonly Action<string, int?> _onBatteryRead;
-    private readonly Action _onScanStarted;
-    private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
-
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private volatile bool _isScanning;
-    private volatile bool _disposed;
-
-    public bool IsScanning => _isScanning;
+    private bool _disposed;
 
     public Scanner(ScannerOptions options)
     {
-        _gattReader     = options.GattReader;
-        _classicReader  = options.ClassicReader;
-        _onDeviceFound  = options.OnDeviceFound;
-        _lastKnown      = options.LastKnown;
-        _poller         = options.Poller;
-        _tracker        = options.Tracker;
-        _shutdownToken  = options.ShutdownToken;
-        _onBatteryRead  = options.OnBatteryRead;
-        _onScanStarted  = options.OnScanStarted;
-        _onScanCompleted = options.OnScanCompleted;
+        _gattReader = options.GattReader;
+        _classicReader = options.ClassicReader;
+        _lastKnown = options.LastKnown;
+        _poller = options.Poller;
+        _tracker = options.Tracker;
+        _callbacks = options.Callbacks;
+        _shutdownToken = options.ShutdownToken;
     }
 
-    // ── Core merge ───────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Runs both readers concurrently and merges results, deduplicating by
-    /// <see cref="DeviceBatteryInfo.DeviceId"/> (case-insensitive).
-    /// GATT results take precedence on collision — same rule as the former
-    /// <c>DeviceAggregationPipeline.ReadMergedAsync</c>.
-    /// </summary>
-    private async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
-        bool raiseDeviceFound,
-        CancellationToken ct)
+    public async Task<List<DeviceBatteryInfo>> ReadMergedAsync(bool raiseDeviceFound, CancellationToken ct)
     {
-        var gattTask    = _gattReader.ReadAllAsync(ct);
-        var classicTask = _classicReader.ReadAllAsync(ct);
-        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(ct);
 
-        // Merge: GATT wins on DeviceId collision.
-        var merged = new Dictionary<string, DeviceBatteryInfo>(
-            StringComparer.OrdinalIgnoreCase);
+        // Read GATT first.
+        var gatt = await _gattReader.ReadAsync(ct);
 
-        foreach (var d in classicTask.Result)
-            merged[d.DeviceId] = d;
+        // Read Classic second.
+        var classic = await _classicReader.ReadAsync(ct);
 
-        foreach (var d in gattTask.Result)
-            merged[d.DeviceId] = d;  // overwrites Classic on collision
-
-        var results = new List<DeviceBatteryInfo>(merged.Values);
+        // Merge preferring GATT if both sources report a value for the same device.
+        var merged = gatt
+            .Concat(classic)
+            .GroupBy(d => d.DeviceId)
+            .Select(g => g.FirstOrDefault(d => d.Source == BatterySource.Gatt) ?? g.First())
+            .ToList();
 
         if (raiseDeviceFound)
-            foreach (var d in results)
-                _onDeviceFound(d.DeviceId, d.Name, d.Battery);
+        {
+            foreach (var d in merged)
+                _callbacks.OnDeviceFound(d.DeviceId, d.Name, d.Battery);
+        }
 
-        return results;
+        return merged;
     }
-
-    // ── Public scan surface ──────────────────────────────────────────────────
-
-    public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
-        ScanNowAsync(_shutdownToken);
 
     public async Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ct.ThrowIfCancellationRequested();
-        await _scanLock.WaitAsync(ct).ConfigureAwait(false);
-
-        List<DeviceBatteryInfo> results = [];
+        if (_isScanning) return new List<DeviceBatteryInfo>();
+        _isScanning = true;
         bool scanSucceeded = false;
+        List<DeviceBatteryInfo> results = new();
+
         try
         {
-            _isScanning = true;
-            _onScanStarted();
+            _callbacks.OnScanStarted();
 
-            results = await ReadMergedAsync(raiseDeviceFound: true, ct)
-                .ConfigureAwait(false);
-
-            await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
+            results = await ReadMergedAsync(raiseDeviceFound: true, ct);
+            await _poller.PollLock.WaitAsync(ct);
             try
             {
                 foreach (var device in results)
@@ -99,7 +78,7 @@ internal sealed class Scanner
                     if (device.Battery is null) continue;
                     _lastKnown[device.DeviceId] = device;
                     _poller.UpdateAlertState(device.DeviceId, device.Name, device.Battery.Value);
-                    _onBatteryRead(device.Name, device.Battery);
+                    _callbacks.OnBatteryRead(device.Name, device.Battery);
                 }
             }
             finally
@@ -115,7 +94,7 @@ internal sealed class Scanner
             _isScanning = false;
             _scanLock.Release();
             if (scanSucceeded)
-                _onScanCompleted(results);
+                _callbacks.OnScanCompleted(results);
         }
     }
 
@@ -161,14 +140,17 @@ internal sealed class Scanner
     }
 }
 
+internal sealed record ScannerCallbacks(
+    Action<string, string, int?> OnDeviceFound,
+    Action<string, int?> OnBatteryRead,
+    Action OnScanStarted,
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
+
 internal sealed record ScannerOptions(
     IBatteryReader GattReader,
     IBatteryReader ClassicReader,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
-    Action<string, string, int?> OnDeviceFound,
-    Action<string, int?> OnBatteryRead,
-    Action OnScanStarted,
-    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    ScannerCallbacks Callbacks,
     CancellationToken ShutdownToken);

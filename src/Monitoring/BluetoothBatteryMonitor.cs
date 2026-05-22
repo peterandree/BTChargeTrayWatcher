@@ -1,252 +1,145 @@
+using System;
 using System.Collections.Concurrent;
-using Microsoft.Win32;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BTChargeTrayWatcher;
 
-public sealed class BluetoothBatteryMonitor : IAsyncDisposable
+internal sealed class BluetoothBatteryMonitor : IAsyncDisposable
 {
     private readonly ThresholdSettings _settings;
-    private readonly IBatteryReader _gattReader;
-    private readonly IBatteryReader _classicReader;
-
-    private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    private readonly CancellationTokenSource _shutdownCts = new();
-    private readonly System.Threading.Timer _timer;
-
-    private readonly TaskTracker _taskTracker;
-    private readonly PollingOrchestrator _poller;
+    private readonly INotificationService _notifier;
+    private readonly DeviceWatcherService _deviceWatcher;
+    private readonly BatteryReaderOrchestrator _orchestrator;
+    private readonly GattConnectionManager _gattConnectionManager;
+    private readonly DeviceCapabilityCache _capabilityCache;
+    private readonly AliasSuggestionService _aliasSuggestionService;
+    private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown = new();
     private readonly Scanner _scanner;
+    private readonly PollingOrchestrator _poller;
+    private readonly TaskTracker _tracker = new();
+    private readonly CancellationTokenSource _shutdownCts = new();
+    private bool _disposed;
 
-    // Cooperation stack (null when using legacy constructor)
-    private readonly DeviceWatcherService? _deviceWatcher;
-    private readonly GattConnectionManager? _gattConnectionManager;
-    private readonly DeviceCapabilityCache? _capabilityCache;
-
-    private volatile bool _disposeStarted;
-    private volatile bool _isDisposed;
-
-    private readonly TaskCompletionSource _disposalComplete =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    public event Action<string, int?>? DeviceBatteryRead;
     public event Action<string, string, int?>? DeviceFound;
-    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ManualScanCompleted;
-    public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
+    public event Action<string, int?>? BatteryRead;
     public event Action? ScanStarted;
-
-    /// <summary>
-    /// Raised by the orchestrator after every poll with the authoritative combined
-    /// alert state (true = at least one non-ignored, hysteresis-consistent device is
-    /// outside its configured thresholds). Feeds <see cref="TrayApp._hasBluetoothAlert"/>.
-    /// </summary>
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
+    public event Action<IReadOnlyList<DeviceBatteryInfo>>? ManualScanCompleted;
     public event Action<bool>? AlertStateChanged;
 
-    public bool IsScanning => _scanner.IsScanning;
+    public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices => _lastKnown.Values.OrderBy(d => d.Name).ToList();
 
-    public IReadOnlyList<DeviceBatteryInfo> LastKnownDevices =>
-        [.. _lastKnown.Values];
-
-    public bool HasCachedResults => !_lastKnown.IsEmpty;
-
-    /// <summary>
-    /// Returns all currently tracked devices from the device watcher (cooperation path only).
-    /// On the legacy path this returns an empty list.
-    /// </summary>
-    internal IReadOnlyList<WatchedDevice> TrackedDevices =>
-        _deviceWatcher?.CurrentDevices ?? [];
-
-    /// <summary>
-    /// Forces a fresh re-enumeration of all paired Bluetooth devices.
-    /// Called before manual scans to ensure the device list is up to date.
-    /// </summary>
-    internal async Task RefreshTrackedDevicesAsync(CancellationToken ct = default)
-    {
-        if (_deviceWatcher is not null)
-            await _deviceWatcher.RefreshAsync(ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Creates a monitor using the cooperation stack: device watcher for live
-    /// device tracking, GATT connection manager for per-device reads, and capability
-    /// cache for protocol fallback optimisation.
-    /// </summary>
     internal BluetoothBatteryMonitor(
-        ThresholdSettings                 settings,
-        INotificationService              notifier,
+        ThresholdSettings settings,
+        INotificationService notifier,
         BluetoothMonitoringInfrastructure infrastructure)
     {
-        _settings      = settings;
-        _gattReader    = new OrchestratorBatteryReaderAdapter(
-                             infrastructure.Orchestrator,
-                             infrastructure.DeviceWatcher,
-                             infrastructure.AliasSuggestionService);
-        _classicReader = NullBatteryReader.Instance;
-
-        _taskTracker = new TaskTracker();
+        _settings = settings;
+        _notifier = notifier;
+        _deviceWatcher = infrastructure.DeviceWatcher;
+        _orchestrator = infrastructure.Orchestrator;
+        _gattConnectionManager = infrastructure.GattConnectionManager;
+        _capabilityCache = infrastructure.CapabilityCache;
+        _aliasSuggestionService = infrastructure.AliasSuggestionService;
 
         _poller = new PollingOrchestrator(new PollingOrchestratorOptions(
-            Settings:            settings,
-            Notifier:            notifier,
-            LastKnown:           _lastKnown,
-            Tracker:             _taskTracker,
-            ReadDevices:         ct => _scanner!.QuietReadAsync(ct),
-            ShutdownToken:       _shutdownCts.Token,
-            OnBatteryRead:       (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanCompleted:     list => BackgroundRefreshCompleted?.Invoke(list),
-            OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)));
+            Settings: _settings,
+            Notifier: _notifier,
+            LastKnown: _lastKnown,
+            Tracker: _tracker,
+            ReadDevices: ct => ReadDevicesCoreAsync(ct),
+            Callbacks: new PollingOrchestratorCallbacks(
+                OnBatteryRead: (name, battery) => BatteryRead?.Invoke(name, battery),
+                OnScanCompleted: devices => BackgroundRefreshCompleted?.Invoke(devices),
+                OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)),
+            ShutdownToken: _shutdownCts.Token));
 
         _scanner = new Scanner(new ScannerOptions(
-            GattReader:      _gattReader,
-            ClassicReader:   _classicReader,
-            LastKnown:       _lastKnown,
-            Poller:          _poller,
-            Tracker:         _taskTracker,
-            ShutdownToken:   _shutdownCts.Token,
-            OnDeviceFound:   (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
-            OnBatteryRead:   (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanStarted:   () => ScanStarted?.Invoke(),
-            OnScanCompleted: list => ManualScanCompleted?.Invoke(list)));
-
-        _timer = new System.Threading.Timer(
-            _ => OnTimerTick(),
-            null,
-            PollingDefaults.StartupDelay,
-            PollingDefaults.PollingInterval);
-
-        _settings.Changed += Settings_Changed;
-        SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
-
-        _deviceWatcher         = infrastructure.DeviceWatcher;
-        _gattConnectionManager = infrastructure.GattConnectionManager;
-        _capabilityCache       = infrastructure.CapabilityCache;
-        _deviceWatcher.DevicesChanged += OnDevicesChanged;
+            GattReader: new GattBatteryReader(_deviceWatcher, _orchestrator),
+            ClassicReader: new ClassicBatteryReader(_deviceWatcher),
+            LastKnown: _lastKnown,
+            Poller: _poller,
+            Tracker: _tracker,
+            Callbacks: new ScannerCallbacks(
+                OnDeviceFound: (deviceId, name, battery) => DeviceFound?.Invoke(deviceId, name, battery),
+                OnBatteryRead: (name, battery) => BatteryRead?.Invoke(name, battery),
+                OnScanStarted: () => ScanStarted?.Invoke(),
+                OnScanCompleted: devices => ManualScanCompleted?.Invoke(devices)),
+            ShutdownToken: _shutdownCts.Token));
     }
 
-    public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
-    public Task PollAsync(CancellationToken ct) => StartTrackedPollAsync(ct);
-
-    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
-        _scanner.StartTrackedScanAsync(_shutdownCts.Token);
-    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) =>
-        _scanner.StartTrackedScanAsync(ct);
-
-    private Task StartTrackedPollAsync(CancellationToken ct)
+    public void StartBackgroundMonitoring()
     {
-        ThrowIfDisposingOrDisposed();
-
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        _taskTracker.Start(_ =>
-        {
-            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token, ct);
-            CancellationToken token = linkedCts.Token;
-
-            return _poller.PollAsync(token).ContinueWith(t =>
-            {
-                linkedCts.Dispose();
-                if (t.IsFaulted)
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BTChargeTrayWatcher] PollAsync fault: {t.Exception}");
-                if (t.IsFaulted) tcs.TrySetException(t.Exception!.InnerExceptions);
-                else if (t.IsCanceled) tcs.TrySetCanceled(token);
-                else tcs.TrySetResult();
-            }, TaskScheduler.Default);
-        }, _shutdownCts.Token);
-
-        return tcs.Task;
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _poller.StartBackgroundPolling();
     }
 
-    private void OnTimerTick()
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) =>
+        _scanner.ScanNowAsync(ct);
+
+    internal async Task<List<DeviceBatteryInfo>> ReadDevicesCoreAsync(CancellationToken ct)
     {
-        if (_disposeStarted || _isDisposed) return;
-        try { _poller.OnTimerTick(); }
-        catch (Exception ex)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var results = await _scanner.QuietReadAsync(ct);
+
+        foreach (var device in results)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[BTChargeTrayWatcher] Timer tick fault: {ex}");
+            if (device.Battery is not null)
+                _lastKnown[device.DeviceId] = device;
+
+            TryQueueAliasSuggestion(device);
         }
-    }
 
-    private void OnDevicesChanged()
-    {
-        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
-        _poller.OnTimerTick();
-    }
-
-    private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
-    {
-        if (_disposeStarted || _isDisposed) return;
-
-        if (e.Mode == PowerModes.Suspend)
-        {
-            _timer.Change(Timeout.Infinite, Timeout.Infinite);
-        }
-        else if (e.Mode == PowerModes.Resume)
-        {
-            _capabilityCache?.InvalidateAll();
-            _gattConnectionManager?.InvalidateAll();
-            _timer.Change(PollingDefaults.ResumeDelay, PollingDefaults.PollingInterval);
-        }
-    }
-
-    private void Settings_Changed()
-    {
-        if (_disposeStarted || _isDisposed || _shutdownCts.IsCancellationRequested) return;
-        _poller.SignalThresholdsChanged();
-    }
-
-    private void ThrowIfDisposingOrDisposed()
-    {
-        ObjectDisposedException.ThrowIf(_disposeStarted || _isDisposed, this);
+        return results;
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_isDisposed) return;
-        if (_disposeStarted)
+        if (_disposed) return;
+        _disposed = true;
+
+        try
         {
-            await _disposalComplete.Task.ConfigureAwait(false);
-            return;
+            _shutdownCts.Cancel();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[BluetoothBatteryMonitor] Cancel fault: {ex}");
         }
 
-        _disposeStarted = true;
-
-        _settings.Changed -= Settings_Changed;
-        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
-        if (_deviceWatcher is not null)
-            _deviceWatcher.DevicesChanged -= OnDevicesChanged;
-
-        _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-        _taskTracker.Stop();
-        _shutdownCts.Cancel();
-
-        Task[] tasks = _taskTracker.Snapshot();
-        if (tasks.Length > 0)
-        {
-            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[BTChargeTrayWatcher] Shutdown wait fault: {ex}");
-            }
-        }
-
-        _timer.Dispose();
-        _shutdownCts.Dispose();
-        _poller.Dispose();
         _scanner.Dispose();
+        _poller.Dispose();
+        _tracker.Dispose();
 
-        if (_gattReader is IDisposable gd) gd.Dispose();
-        if (_classicReader is IDisposable cd) cd.Dispose();
-        _gattConnectionManager?.Dispose();
-        if (_deviceWatcher is not null)
-            await _deviceWatcher.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            _shutdownCts.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[BluetoothBatteryMonitor] CTS dispose fault: {ex}");
+        }
 
-        _isDisposed = true;
-        GC.SuppressFinalize(this);
-        _disposalComplete.TrySetResult();
+        try
+        {
+            await _gattConnectionManager.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[BluetoothBatteryMonitor] GATT dispose fault: {ex}");
+        }
+    }
+
+    private void TryQueueAliasSuggestion(DeviceBatteryInfo device)
+    {
+        if (device.Battery is null) return;
+        if (_settings.TryGetAlias(device.Name, out _)) return;
+        if (_settings.IsAliasSuggestionSuppressed(device.DeviceId)) return;
+
+        _ = _aliasSuggestionService.TrySuggestAsync(device.DeviceId, device.Name, _settings);
     }
 }
