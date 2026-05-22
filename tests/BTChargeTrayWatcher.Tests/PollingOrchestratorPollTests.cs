@@ -30,18 +30,28 @@ public sealed class PollingOrchestratorPollTests
     private static Task<List<DeviceBatteryInfo>> Result(params DeviceBatteryInfo[] devices)
         => Task.FromResult(new List<DeviceBatteryInfo>(devices));
 
+    /// <param name="pollIntervalSec">
+    /// Per-device poll interval in seconds applied to ALL devices via a global override.
+    /// Use 0 in tests that call PollAsync multiple times and need every poll to be processed.
+    /// Omit (null) to use the production default, which is seconds-scale and will skip
+    /// back-to-back polls within the same test.
+    /// </param>
     private static (PollingOrchestrator orchestrator, NotificationSpy spy, ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown)
         Build(
             Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices,
             ThresholdSettings? settings = null,
+            int? pollIntervalSec = null,
             Action<string, int?>? onBatteryRead = null,
             Action<IReadOnlyList<DeviceBatteryInfo>>? onScanCompleted = null,
             Action<bool>? onAlertStateChanged = null)
     {
         var spy  = new NotificationSpy();
         var last = new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase);
+        var s    = settings ?? new ThresholdSettings();
+        if (pollIntervalSec.HasValue)
+            s.SetGlobalPollInterval(pollIntervalSec.Value);
         var opts = new PollingOrchestratorOptions(
-            Settings:      settings ?? new ThresholdSettings(),
+            Settings:      s,
             Notifier:      spy,
             LastKnown:     last,
             Tracker:       new TaskTracker(),
@@ -83,7 +93,7 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Same_battery_value_on_second_poll_fires_no_notification()
     {
-        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
+        var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)), pollIntervalSec: 0);
         await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
         await o.PollAsync(TestContext.Current.CancellationToken);
@@ -99,7 +109,7 @@ public sealed class PollingOrchestratorPollTests
             call++;
             int battery = call == 1 ? 50 : 15;
             return Result(Dev("id1", "Keyboard", battery));
-        });
+        }, pollIntervalSec: 0);
 
         await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
@@ -117,7 +127,7 @@ public sealed class PollingOrchestratorPollTests
             call++;
             int battery = call == 1 ? 50 : 90;
             return Result(Dev("id1", "Mouse", battery, charging: false));
-        });
+        }, pollIntervalSec: 0);
 
         await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
