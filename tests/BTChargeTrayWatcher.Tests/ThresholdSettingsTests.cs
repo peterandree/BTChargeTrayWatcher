@@ -102,21 +102,6 @@ public sealed class ThresholdSettingsTests
         Assert.Equal(80, s.GetHighForDevice("HeadphonesId", "Headphones"));
     }
 
-    [Fact]
-    public void SetLow_override_is_returned_by_GetLow()
-    {
-        var s = new ThresholdSettings();
-        s.SetLowForDevice("HeadphonesId", 10);
-        Assert.Equal(10, s.GetLowForDevice("HeadphonesId", "Headphones"));
-    }
-
-    [Fact]
-    public void SetHigh_override_is_returned_by_GetHigh()
-    {
-        var s = new ThresholdSettings();
-        s.SetHighForDevice("HeadphonesId", 90);
-        Assert.Equal(90, s.GetHighForDevice("HeadphonesId", "Headphones"));
-    }
 
     [Fact]
     public void Device_override_is_case_insensitive()

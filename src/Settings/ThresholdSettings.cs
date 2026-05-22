@@ -128,35 +128,6 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Per-device poll interval (legacy name-keyed API) ─────────────────────────────
-    // Prefer GetPollIntervalForDevice / SetPollIntervalForDevice (device-id-keyed).
-
-    [Obsolete("Use GetPollIntervalForDevice(deviceId, displayName) instead.")]
-    public int? GetPollInterval(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _devicePollIntervals.TryGetValue(deviceName, out var interval) ? interval : (int?)null;
-    }
-
-    [Obsolete("Use SetPollIntervalForDevice(deviceId, interval) instead.")]
-    public void SetPollInterval(string deviceName, int? interval)
-    {
-        lock (_thresholdLock)
-        {
-            if (interval.HasValue)
-                _devicePollIntervals[deviceName] = interval.Value;
-            else
-                _devicePollIntervals.Remove(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    [Obsolete("Use HasCustomPollIntervalForDevice(deviceId) instead.")]
-    public bool HasCustomPollInterval(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _devicePollIntervals.ContainsKey(deviceName);
-    }
 
     // ── Device-id-aware APIs (preferred) ────────────────────────────────────────────
 
@@ -486,96 +457,6 @@ public sealed class ThresholdSettings
         Changed?.Invoke();
     }
 
-    // ── Per-device overrides (legacy name-keyed API) ─────────────────────────────────
-    // Prefer SetLowForDevice / SetHighForDevice (device-id-keyed).
-
-    [Obsolete("Use GetLowForDevice(deviceId, displayName) instead.")]
-    public int GetLow(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue ? t.Low.Value : _low;
-    }
-
-    [Obsolete("Use GetHighForDevice(deviceId, displayName) instead.")]
-    public int GetHigh(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue ? t.High.Value : _high;
-    }
-
-    [Obsolete("Use GetLowForDevice(deviceId, displayName) to check for a custom value.")]
-    public bool HasCustomLow(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.Low.HasValue;
-    }
-
-    [Obsolete("Use GetHighForDevice(deviceId, displayName) to check for a custom value.")]
-    public bool HasCustomHigh(string deviceName)
-    {
-        lock (_thresholdLock)
-            return _deviceOverrides.TryGetValue(deviceName, out var t) && t.High.HasValue;
-    }
-
-    [Obsolete("Use SetLowForDevice(deviceId, value) instead.")]
-    public void SetLow(string deviceName, int? value)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
-            {
-                if (value == null) return;
-                t = new DeviceThresholds();
-                _deviceOverrides[deviceName] = t;
-            }
-
-            if (value.HasValue)
-            {
-#pragma warning disable CS0618
-                int effectiveHigh = GetHigh(deviceName);
-#pragma warning restore CS0618
-                if (value.Value >= effectiveHigh)
-                    throw new ArgumentOutOfRangeException(nameof(value),
-                        $"Low threshold ({value.Value}) must be below effective High threshold ({effectiveHigh}) for device '{deviceName}'.");
-            }
-
-            t = t with { Low = value };
-            _deviceOverrides[deviceName] = t;
-            if (!t.Low.HasValue && !t.High.HasValue)
-                _deviceOverrides.Remove(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    [Obsolete("Use SetHighForDevice(deviceId, value) instead.")]
-    public void SetHigh(string deviceName, int? value)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_deviceOverrides.TryGetValue(deviceName, out var t))
-            {
-                if (value == null) return;
-                t = new DeviceThresholds();
-                _deviceOverrides[deviceName] = t;
-            }
-
-            if (value.HasValue)
-            {
-#pragma warning disable CS0618
-                int effectiveLow = GetLow(deviceName);
-#pragma warning restore CS0618
-                if (value.Value <= effectiveLow)
-                    throw new ArgumentOutOfRangeException(nameof(value),
-                        $"High threshold ({value.Value}) must be above effective Low threshold ({effectiveLow}) for device '{deviceName}'.");
-            }
-
-            t = t with { High = value };
-            _deviceOverrides[deviceName] = t;
-            if (!t.Low.HasValue && !t.High.HasValue)
-                _deviceOverrides.Remove(deviceName);
-        }
-        Changed?.Invoke();
-    }
 
     // ── Snapshot / restore ───────────────────────────────────────────────────────────
 

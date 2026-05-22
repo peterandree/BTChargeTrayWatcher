@@ -18,7 +18,7 @@ Runtime state (last-known battery values, alert states, miss counts) must be key
 
 - Runtime dictionaries (`_lastKnown`, `_alertStates`, `_missCount` in `PollingOrchestrator`; `_lastKnown` shared with `Scanner`) are keyed by **`DeviceId`**.
 - `ThresholdSettings` stores threshold overrides, ignored-device sets, and tray-overlay exclusion sets keyed by **`Name`**.
-- `PollingOrchestrator.ClassifyBatteryState` resolves thresholds via `_settings.GetLow(device.Name)` / `_settings.GetHigh(device.Name)`, bridging the two key spaces at evaluation time.
+// [2026-05-22] Legacy: `PollingOrchestrator.ClassifyBatteryState` previously resolved thresholds via `_settings.GetLow(device.Name)` / `_settings.GetHigh(device.Name)`. This is now replaced by device-id-aware APIs: `_settings.GetLowForDevice(device.DeviceId, device.Name)` / `_settings.GetHighForDevice(device.DeviceId, device.Name)`, bridging the two key spaces at evaluation time.
 
 ## Rationale
 
