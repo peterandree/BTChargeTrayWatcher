@@ -1,6 +1,4 @@
-using System;
 using Xunit;
-using BTChargeTrayWatcher;
 
 namespace BTChargeTrayWatcher.Tests;
 

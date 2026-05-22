@@ -1,7 +1,3 @@
-using System;
-using System.Linq;
-using System.Windows.Forms;
-
 namespace BTChargeTrayWatcher.Tray
 {
     public sealed class OptionsForm : Form

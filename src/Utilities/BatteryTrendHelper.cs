@@ -1,5 +1,3 @@
-using System;
-
 namespace BTChargeTrayWatcher;
 
 public static class BatteryTrendHelper

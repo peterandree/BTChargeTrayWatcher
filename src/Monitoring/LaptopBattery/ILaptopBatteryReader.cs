@@ -1,7 +1,4 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-
-namespace BTChargeTrayWatcher;
+﻿namespace BTChargeTrayWatcher;
 
 public interface ILaptopBatteryReader
 {

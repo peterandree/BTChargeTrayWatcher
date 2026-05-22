@@ -1,6 +1,3 @@
-using System;
-using System.Windows.Forms;
-
 namespace BTChargeTrayWatcher.Tray
 {
     public static class OptionsFormManager

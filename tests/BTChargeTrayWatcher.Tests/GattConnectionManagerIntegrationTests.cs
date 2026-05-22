@@ -5,7 +5,6 @@
 // (see GattBatteryReaderTests.cs).
 
 using Xunit;
-using BTChargeTrayWatcher;
 
 namespace BTChargeTrayWatcher.Tests;
 

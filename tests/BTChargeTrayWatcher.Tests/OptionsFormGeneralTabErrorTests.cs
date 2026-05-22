@@ -1,6 +1,4 @@
-using System;
 using System.Windows.Forms;
-using BTChargeTrayWatcher;
 using BTChargeTrayWatcher.Tray;
 using Xunit;
 

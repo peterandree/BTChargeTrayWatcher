@@ -1,4 +1,3 @@
-using BTChargeTrayWatcher;
 using BTChargeTrayWatcher.Utilities;
 using Xunit;
 

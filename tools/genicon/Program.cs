@@ -1,6 +1,3 @@
-using Svg;
-using System.Drawing.Imaging;
-
 string outputPath = args.Length > 0 ? args[0] : "app.ico";
 
 const string svgContent = """
