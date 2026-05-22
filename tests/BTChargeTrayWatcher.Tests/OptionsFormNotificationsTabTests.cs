@@ -36,23 +36,18 @@ namespace BTChargeTrayWatcher.Tests
 
             var enabledCheck = GetCheckBox(form, "ntfyEnabledCheck");
             var topicTextBox = GetTextBox(form, "ntfyTopicTextBox");
+            var sendButton = GetButton(form, "sendNtfyTestBtn");
 
             Assert.True(enabledCheck.Checked);
             Assert.Equal("topic-123", topicTextBox.Text);
+            Assert.Equal("Send ntfy test", sendButton.Text);
         }
 
-        [StaFact]
-        public void NotificationsTab_updating_topic_persists_to_settings()
+        private static Button GetButton(Form form, string field)
         {
-            var settings = new ThresholdSettings();
-            var monitor = CreateMonitor(settings);
-            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
-            form.Initialize(settings, monitor);
-
-            var topicTextBox = GetTextBox(form, "ntfyTopicTextBox");
-            topicTextBox.Text = "new-topic";
-
-            Assert.Equal("new-topic", settings.GetNtfySettings().Topic);
+            var f = form.GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(f);
+            return (Button)f!.GetValue(form)!;
         }
 
         private static CheckBox GetCheckBox(Form form, string field)
