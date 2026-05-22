@@ -18,7 +18,7 @@ public sealed class GattBatteryProcessorTests
             return Task.FromResult(new GattDeviceReadResult(deviceId, name, 55, true));
         });
 
-        var res = await processor.ProcessDeviceAsync("dev-1", "Dev", CancellationToken.None);
+        var res = await processor.ProcessDeviceAsync("dev-1", "Dev", TestContext.Current.CancellationToken);
         Assert.Equal(55, res.Battery);
         Assert.True(res.IsCharging);
     }
@@ -32,7 +32,7 @@ public sealed class GattBatteryProcessorTests
             throw new InvalidOperationException("simulated failure");
         });
 
-        var res = await processor.ProcessDeviceAsync("dev-2", "Dev", CancellationToken.None);
+        var res = await processor.ProcessDeviceAsync("dev-2", "Dev", TestContext.Current.CancellationToken);
         Assert.Null(res.Battery);
     }
 }

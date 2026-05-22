@@ -132,8 +132,8 @@ public sealed class ThresholdSettingsTests
         var s = new ThresholdSettings();
         s.SetLowForDevice("HeadphonesId", 10);
         s.SetLowForDevice("HeadphonesId", null);
-        Assert.False(s.HasCustomLow("HeadphonesId"));
-        Assert.Equal(20, s.GetLowForDevice("HeadphonesId", "Headphones")); // falls back to global
+        // New API: GetLowForDevice returns global if no override
+        Assert.Equal(20, s.GetLowForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
@@ -156,7 +156,8 @@ public sealed class ThresholdSettingsTests
     public void HasCustomLow_false_when_no_override()
     {
         var s = new ThresholdSettings();
-        Assert.False(s.HasCustomLow("HeadphonesId"));
+        // New API: GetLowForDevice returns global if no override
+        Assert.Equal(20, s.GetLowForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
@@ -164,7 +165,8 @@ public sealed class ThresholdSettingsTests
     {
         var s = new ThresholdSettings();
         s.SetHighForDevice("HeadphonesId", 90);
-        Assert.True(s.HasCustomHigh("HeadphonesId"));
+        // New API: GetHighForDevice returns override if set
+        Assert.Equal(90, s.GetHighForDevice("HeadphonesId", "Headphones"));
     }
 
     // ── Ignore / exclude toggles ────────────────────────────────────────────────────

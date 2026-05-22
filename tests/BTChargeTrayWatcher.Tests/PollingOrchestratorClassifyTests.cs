@@ -29,7 +29,7 @@ public sealed class PollingOrchestratorClassifyTests
             OnBatteryRead:     (_, _) => { },
             OnScanCompleted:   _ => { },
             OnAlertStateChanged: _ => { },
-            ShutdownToken:     CancellationToken.None);
+            ShutdownToken:     TestContext.Current.CancellationToken);
         return new PollingOrchestrator(opts);
     }
 
@@ -205,7 +205,7 @@ public sealed class PollingOrchestratorClassifyTests
     public void Per_device_low_override_triggers_Low_at_custom_threshold()
     {
         var settings = new ThresholdSettings(); // global Low=20
-        settings.SetLow("Keyboard", 30);        // override Low=30
+        settings.SetLowForDevice("Keyboard", 30);        // override Low=30
         var o = BuildOrchestrator(settings);
 
         // battery=25 is above global Low=20 but below custom Low=30
@@ -217,7 +217,7 @@ public sealed class PollingOrchestratorClassifyTests
     public void Per_device_high_override_triggers_High_at_custom_threshold()
     {
         var settings = new ThresholdSettings(); // global High=80
-        settings.SetHigh("Mouse", 70);          // override High=70
+        settings.SetHighForDevice("Mouse", 70);          // override High=70
         var o = BuildOrchestrator(settings);
 
         // battery=75 is below global High=80 but above custom High=70

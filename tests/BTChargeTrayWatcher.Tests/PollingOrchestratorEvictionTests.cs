@@ -61,7 +61,7 @@ public sealed class PollingOrchestratorEvictionTests
             OnBatteryRead:       (_, _) => { },
             OnScanCompleted:     _ => { },
             OnAlertStateChanged: v => alertStates.Add(v),
-            ShutdownToken:       CancellationToken.None);
+            ShutdownToken:       TestContext.Current.CancellationToken);
 
         return new BuildResult(new PollingOrchestrator(opts), spy, lastKnown, alertStates);
     }
@@ -94,20 +94,20 @@ public sealed class PollingOrchestratorEvictionTests
         }, settings);
 
         // Poll 1: device present, processed, _lastProcessed stamped.
-        await r.Orchestrator.PollAsync();
+        await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(r.LastKnown.ContainsKey("id1"));
         r.Spy.Calls.Clear();
 
         // Polls 2..MissCountThreshold+1: device absent, miss count increments, device evicted.
         for (int i = 0; i < PollingDefaults.MissCountThreshold; i++)
-            await r.Orchestrator.PollAsync();
+            await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.False(r.LastKnown.ContainsKey("id1"), "Device must be evicted after threshold misses.");
 
         // Poll MissCountThreshold+2: device re-appears.
         // If _lastProcessed was not pruned on eviction the stale timestamp from poll 1
         // would cause (DateTime.UtcNow - last).TotalSeconds < 3600 and the device would
         // be silently skipped (IsScanning=false, no battery read, no alert evaluation).
-        await r.Orchestrator.PollAsync();
+        await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
 
         // Device must be back in lastKnown — proves it was processed, not skipped.
         Assert.True(r.LastKnown.ContainsKey("id1"),
@@ -139,13 +139,13 @@ public sealed class PollingOrchestratorEvictionTests
         });
 
         // Poll 1: device seen, added to lastKnown.
-        await r.Orchestrator.PollAsync();
+        await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(r.LastKnown.ContainsKey("id1"));
 
         // Polls 2..MissCountThreshold: accumulate MissCountThreshold-1 misses
         // (one short of eviction).
         for (int i = 0; i < PollingDefaults.MissCountThreshold - 1; i++)
-            await r.Orchestrator.PollAsync();
+            await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(r.LastKnown.ContainsKey("id1"), "Device must not be evicted yet.");
 
         // Threshold change: must clear _missCount.
@@ -154,12 +154,12 @@ public sealed class PollingOrchestratorEvictionTests
         r.Orchestrator.SignalThresholdsChanged();
         // Drain any background poll the signal may have enqueued.
         await r.Orchestrator.PollLock
-            .WaitAsync(CancellationToken.None)
+            .WaitAsync(TestContext.Current.CancellationToken)
             .ContinueWith(_ => r.Orchestrator.PollLock.Release());
 
         // Poll after reset: device absent again. With the miss count cleared
         // this is only miss #1; device must survive.
-        await r.Orchestrator.PollAsync();
+        await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(r.LastKnown.ContainsKey("id1"),
             "Device must not be evicted after threshold reset cleared miss count.");
     }
@@ -183,12 +183,12 @@ public sealed class PollingOrchestratorEvictionTests
         });
 
         // Poll 1: device at 10% -> Low alert -> OnAlertStateChanged(true).
-        await r.Orchestrator.PollAsync();
+        await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(r.AlertStates.Last(), "Expected alert=true while Low device is present.");
 
         // Polls 2..MissCountThreshold+1: device absent, eventually evicted.
         for (int i = 0; i < PollingDefaults.MissCountThreshold; i++)
-            await r.Orchestrator.PollAsync();
+            await r.Orchestrator.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.False(r.LastKnown.ContainsKey("id1"), "Device must be evicted.");
 

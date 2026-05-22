@@ -23,10 +23,10 @@ public sealed class TaskTrackerTests
         var tracker = new TaskTracker();
         var gate = new TaskCompletionSource();
 
-        tracker.Start(_ => gate.Task, CancellationToken.None);
+        tracker.Start(_ => gate.Task, TestContext.Current.CancellationToken); // fire-and-forget by design
 
         // Give the runner a moment to register
-        await Task.Delay(20);
+        await Task.Delay(20, TestContext.Current.CancellationToken);
         Assert.NotEmpty(tracker.Snapshot());
 
         gate.SetResult();
@@ -39,13 +39,13 @@ public sealed class TaskTrackerTests
         var tracker = new TaskTracker();
         var tcs = new TaskCompletionSource();
 
-        tracker.Start(_ => tcs.Task, CancellationToken.None);
-        await Task.Delay(20);
+        tracker.Start(_ => tcs.Task, TestContext.Current.CancellationToken); // fire-and-forget by design
+        await Task.Delay(20, TestContext.Current.CancellationToken);
         Assert.NotEmpty(tracker.Snapshot());
 
         tcs.SetResult();
         // Allow continuation to run
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Empty(tracker.Snapshot());
     }
 
@@ -58,7 +58,7 @@ public sealed class TaskTrackerTests
         tracker.Stop();
 
         bool ran = false;
-        tracker.Start(_ => { ran = true; return Task.CompletedTask; }, CancellationToken.None);
+        tracker.Start(_ => { ran = true; return Task.CompletedTask; }, TestContext.Current.CancellationToken);
 
         Assert.False(ran);
         Assert.Empty(tracker.Snapshot());
@@ -70,8 +70,8 @@ public sealed class TaskTrackerTests
         var tracker = new TaskTracker();
         var tcs = new TaskCompletionSource();
 
-        tracker.Start(_ => tcs.Task, CancellationToken.None);
-        await Task.Delay(20);
+        tracker.Start(_ => tcs.Task, TestContext.Current.CancellationToken);
+        await Task.Delay(20, TestContext.Current.CancellationToken);
 
         tracker.Stop();
 
@@ -79,7 +79,7 @@ public sealed class TaskTrackerTests
         Assert.NotEmpty(tracker.Snapshot());
 
         tcs.SetResult();
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
     }
 
     // ── Cancelled token ──────────────────────────────────────────────────────────────────
@@ -107,24 +107,24 @@ public sealed class TaskTrackerTests
         var tcs1 = new TaskCompletionSource();
         var tcs2 = new TaskCompletionSource();
 
-        tracker.Start(_ => tcs1.Task, CancellationToken.None);
-        await Task.Delay(20);
+        tracker.Start(_ => tcs1.Task, TestContext.Current.CancellationToken); // fire-and-forget by design
+        await Task.Delay(20, TestContext.Current.CancellationToken);
 
         var snap = tracker.Snapshot();
-        Assert.Single(snap);
+        _ = Assert.Single(snap);
 
         // Add a second task AFTER taking the snapshot
-        tracker.Start(_ => tcs2.Task, CancellationToken.None);
-        await Task.Delay(20);
+        tracker.Start(_ => tcs2.Task, TestContext.Current.CancellationToken); // fire-and-forget by design
+        await Task.Delay(20, TestContext.Current.CancellationToken);
 
         // Original snapshot is unaffected
-        Assert.Single(snap);
+        _ = Assert.Single(snap);
         // Live snapshot now has two
         Assert.Equal(2, tracker.Snapshot().Length);
 
         tcs1.SetResult();
         tcs2.SetResult();
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
     }
 
     // ── Multiple concurrent tasks ────────────────────────────────────────────────────────
@@ -136,13 +136,13 @@ public sealed class TaskTrackerTests
         var gates = Enumerable.Range(0, 5).Select(_ => new TaskCompletionSource()).ToArray();
 
         foreach (var g in gates)
-            tracker.Start(_ => g.Task, CancellationToken.None);
+            tracker.Start(_ => g.Task, TestContext.Current.CancellationToken); // fire-and-forget by design
 
-        await Task.Delay(50);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Equal(5, tracker.Snapshot().Length);
 
         foreach (var g in gates) g.SetResult();
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
         Assert.Empty(tracker.Snapshot());
     }
 
@@ -165,11 +165,11 @@ public sealed class TaskTrackerTests
 
             // work completes synchronously (returns Task.CompletedTask), maximising
             // the chance that ContinueWith fires before _active.Add in a buggy impl.
-            tracker.Start(_ => Task.CompletedTask, CancellationToken.None);
+            tracker.Start(_ => Task.CompletedTask, TestContext.Current.CancellationToken); // fire-and-forget by design
 
             // Allow all continuations to drain.
             await Task.Yield();
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
 
             var leaked = tracker.Snapshot().Where(t => t.IsCompleted).ToArray();
             Assert.Empty(leaked);

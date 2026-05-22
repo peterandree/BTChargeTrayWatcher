@@ -76,7 +76,7 @@ public sealed class ScannerTests : IAsyncDisposable
             OnScanCompleted: list => scanCompletions.Add(list),
             ShutdownToken:   shutdownCts.Token);
 
-        tracker.Start(_ => Task.CompletedTask, CancellationToken.None);
+        tracker.Start(_ => Task.CompletedTask, TestContext.Current.CancellationToken);
 
         var scanner = new Scanner(opts);
 
@@ -113,7 +113,7 @@ public sealed class ScannerTests : IAsyncDisposable
         var (scanner, _, gatt, _, _, scanStarted) = Build();
         gatt.Results = [Dev("A", "Mouse", 60)];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(scanStarted);
     }
@@ -124,7 +124,7 @@ public sealed class ScannerTests : IAsyncDisposable
         var (scanner, _, gatt, _, scanCompletions, _) = Build();
         gatt.Results = [Dev("A", "Mouse", 60), Dev("B", "Keyboard", 75)];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(scanCompletions);
         Assert.Equal(2, scanCompletions[0].Count);
@@ -140,7 +140,7 @@ public sealed class ScannerTests : IAsyncDisposable
         var (scanner, lastKnown, gatt, _, _, _) = Build();
         gatt.Results = [Dev("A", "Mouse", 55)];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.True(lastKnown.ContainsKey("A"));
         Assert.Equal(55, lastKnown["A"].Battery);
@@ -152,7 +152,7 @@ public sealed class ScannerTests : IAsyncDisposable
         var (scanner, lastKnown, gatt, _, _, _) = Build();
         gatt.Results = [Dev("A", "Ghost", null)];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.False(lastKnown.ContainsKey("A"));
     }
@@ -168,7 +168,7 @@ public sealed class ScannerTests : IAsyncDisposable
             Dev("C", "Headset",  40),
         ];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, batteryReads.Count);
         Assert.Contains(batteryReads, r => r.name == "Mouse"   && r.pct == 60);
@@ -185,7 +185,7 @@ public sealed class ScannerTests : IAsyncDisposable
         var (scanner, _, gatt, _, _, _) = Build();
         gatt.Results = [Dev("A", "Mouse", 50)];
 
-        await scanner.StartTrackedScanAsync();
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.False(scanner.IsScanning);
     }

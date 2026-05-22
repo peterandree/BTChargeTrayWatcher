@@ -20,9 +20,8 @@ namespace BTChargeTrayWatcher.Tests
         public void DeviceTab_editing_updates_settings()
         {
             var settings = new ThresholdSettings();
-#pragma warning disable CS0618 // Legacy constructor used intentionally in tests — cooperation stack not required here
-            var monitor = new BluetoothBatteryMonitor(settings, null!);
-#pragma warning restore CS0618
+            // Use a minimal test double for monitor
+            var monitor = new BluetoothBatteryMonitor(settings, NullNotificationService.Instance, new DeviceWatcherService(), new BatteryReaderOrchestrator(new GattConnectionManager(), new ClassicBatteryReader(), new DeviceCapabilityCache()), new GattConnectionManager(), new DeviceCapabilityCache(), new AliasSuggestionService());
             var deviceId = "dev-xyz";
             var device = new DeviceBatteryInfo(deviceId, "Test Device", 50, null, BatterySource.Gatt);
             var field = typeof(BluetoothBatteryMonitor).GetField("_lastKnown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -41,11 +40,23 @@ namespace BTChargeTrayWatcher.Tests
 
             // Get the DataGridView and edit values (find columns by DataPropertyName)
             var grid = debugGrid;
-            int idxLow = grid.Columns.Cast<DataGridViewColumn>().First(c => c.DataPropertyName == "Low").Index;
-            int idxHigh = grid.Columns.Cast<DataGridViewColumn>().First(c => c.DataPropertyName == "High").Index;
-            int idxPoll = grid.Columns.Cast<DataGridViewColumn>().First(c => c.DataPropertyName == "PollInterval").Index;
-            int idxDisplayName = grid.Columns.Cast<DataGridViewColumn>().First(c => c.DataPropertyName == "DisplayName").Index;
-            int idxExcluded = grid.Columns.Cast<DataGridViewColumn>().First(c => c.DataPropertyName == "Excluded").Index;
+            var colLow = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Low");
+            var colHigh = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "High");
+            var colPoll = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "PollInterval");
+            var colDisplayName = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "DisplayName");
+            var colExcluded = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Excluded");
+
+            Assert.NotNull(colLow);
+            Assert.NotNull(colHigh);
+            Assert.NotNull(colPoll);
+            Assert.NotNull(colDisplayName);
+            Assert.NotNull(colExcluded);
+
+            int idxLow = colLow.Index;
+            int idxHigh = colHigh.Index;
+            int idxPoll = colPoll.Index;
+            int idxDisplayName = colDisplayName.Index;
+            int idxExcluded = colExcluded.Index;
 
             grid.Rows[0].Cells[idxLow].Value = 10;
             grid.Rows[0].Cells[idxHigh].Value = 90;
@@ -77,6 +88,7 @@ namespace BTChargeTrayWatcher.Tests
             Assert.NotNull(drField);
             var drList = (System.Collections.IList)drField!.GetValue(form)!;
             var firstRow = drList[0];
+            Assert.NotNull(firstRow);
             var displayNameProp = firstRow.GetType().GetProperty("DisplayName");
             Assert.NotNull(displayNameProp);
             displayNameProp!.SetValue(firstRow, "Alias");
