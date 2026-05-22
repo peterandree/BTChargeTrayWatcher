@@ -3,7 +3,7 @@ using System.Windows.Forms;
 
 namespace BTChargeTrayWatcher.Tray
 {
-    public static class OptionsFormManager
+    internal static class OptionsFormManager
     {
         private static OptionsForm? _instance;
 
