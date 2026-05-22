@@ -92,48 +92,48 @@ public sealed class ThresholdSettingsTests
     public void GetLow_returns_global_when_no_override()
     {
         var s = new ThresholdSettings();
-        Assert.Equal(20, s.GetLow("Headphones"));
+        Assert.Equal(20, s.GetLowForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
     public void GetHigh_returns_global_when_no_override()
     {
         var s = new ThresholdSettings();
-        Assert.Equal(80, s.GetHigh("Headphones"));
+        Assert.Equal(80, s.GetHighForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
     public void SetLow_override_is_returned_by_GetLow()
     {
         var s = new ThresholdSettings();
-        s.SetLow("Headphones", 10);
-        Assert.Equal(10, s.GetLow("Headphones"));
+        s.SetLowForDevice("HeadphonesId", 10);
+        Assert.Equal(10, s.GetLowForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
     public void SetHigh_override_is_returned_by_GetHigh()
     {
         var s = new ThresholdSettings();
-        s.SetHigh("Headphones", 90);
-        Assert.Equal(90, s.GetHigh("Headphones"));
+        s.SetHighForDevice("HeadphonesId", 90);
+        Assert.Equal(90, s.GetHighForDevice("HeadphonesId", "Headphones"));
     }
 
     [Fact]
     public void Device_override_is_case_insensitive()
     {
         var s = new ThresholdSettings();
-        s.SetLow("headphones", 10);
-        Assert.Equal(10, s.GetLow("HEADPHONES"));
+        s.SetLowForDevice("headphones-id", 10);
+        Assert.Equal(10, s.GetLowForDevice("HEADPHONES-ID", "HEADPHONES"));
     }
 
     [Fact]
     public void SetLow_null_clears_override_and_removes_entry()
     {
         var s = new ThresholdSettings();
-        s.SetLow("Headphones", 10);
-        s.SetLow("Headphones", null);
-        Assert.False(s.HasCustomLow("Headphones"));
-        Assert.Equal(20, s.GetLow("Headphones")); // falls back to global
+        s.SetLowForDevice("HeadphonesId", 10);
+        s.SetLowForDevice("HeadphonesId", null);
+        Assert.False(s.HasCustomLow("HeadphonesId"));
+        Assert.Equal(20, s.GetLowForDevice("HeadphonesId", "Headphones")); // falls back to global
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public sealed class ThresholdSettingsTests
     {
         var s = new ThresholdSettings();
         // global High = 80; setting Low = 85 should throw
-        Assert.Throws<ArgumentOutOfRangeException>(() => s.SetLow("Headphones", 85));
+        Assert.Throws<ArgumentOutOfRangeException>(() => s.SetLowForDevice("HeadphonesId", 85));
     }
 
     [Fact]
@@ -149,22 +149,22 @@ public sealed class ThresholdSettingsTests
     {
         var s = new ThresholdSettings();
         // global Low = 20; setting High = 15 should throw
-        Assert.Throws<ArgumentOutOfRangeException>(() => s.SetHigh("Headphones", 15));
+        Assert.Throws<ArgumentOutOfRangeException>(() => s.SetHighForDevice("HeadphonesId", 15));
     }
 
     [Fact]
     public void HasCustomLow_false_when_no_override()
     {
         var s = new ThresholdSettings();
-        Assert.False(s.HasCustomLow("Headphones"));
+        Assert.False(s.HasCustomLow("HeadphonesId"));
     }
 
     [Fact]
     public void HasCustomHigh_true_after_override_set()
     {
         var s = new ThresholdSettings();
-        s.SetHigh("Headphones", 90);
-        Assert.True(s.HasCustomHigh("Headphones"));
+        s.SetHighForDevice("HeadphonesId", 90);
+        Assert.True(s.HasCustomHigh("HeadphonesId"));
     }
 
     // ── Ignore / exclude toggles ────────────────────────────────────────────────────
