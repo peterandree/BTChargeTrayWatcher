@@ -21,15 +21,16 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var s = settings ?? new ThresholdSettings();
         var opts = new PollingOrchestratorOptions(
-            Settings:          s,
-            Notifier:          NullNotificationService.Instance,
-            LastKnown:         new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase),
-            Tracker:           new TaskTracker(),
-            ReadDevices:       _ => Task.FromResult(new List<DeviceBatteryInfo>()),
-            OnBatteryRead:     (_, _) => { },
-            OnScanCompleted:   _ => { },
-            OnAlertStateChanged: _ => { },
-            ShutdownToken:     TestContext.Current.CancellationToken);
+            Settings:      s,
+            Notifier:      NullNotificationService.Instance,
+            LastKnown:     new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase),
+            Tracker:       new TaskTracker(),
+            ReadDevices:   _ => Task.FromResult(new List<DeviceBatteryInfo>()),
+            Callbacks:     new PollingOrchestratorCallbacks(
+                OnBatteryRead:       (_, _) => { },
+                OnScanCompleted:     _ => { },
+                OnAlertStateChanged: _ => { }),
+            ShutdownToken: TestContext.Current.CancellationToken);
         return new PollingOrchestrator(opts);
     }
 
@@ -80,7 +81,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Battery_at_high_threshold_unknown_charging_is_High()
     {
-        // null charging = unknown; must NOT suppress the High alert
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
             o.ClassifyBatteryState("Dev", "Dev", 80, BatteryAlertState.Normal, null));
@@ -89,7 +89,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Battery_at_high_threshold_confirmed_charging_is_Normal()
     {
-        // Confirmed charging suppresses the High alert (ADR-004)
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
             o.ClassifyBatteryState("Dev", "Dev", 80, BatteryAlertState.Normal, true));
@@ -114,14 +113,10 @@ public sealed class PollingOrchestratorClassifyTests
     }
 
     // ── Hysteresis ────────────────────────────────────────────────────────────────────────
-    // Hysteresis = 2.  Low=20, High=80.
-    // From Low: stays Low while battery <= low+2 = 22.
-    // From High: stays High while battery >= high-2 = 78 (and not confirmed charging).
 
     [Fact]
     public void Hysteresis_Low_stays_Low_within_band()
     {
-        // battery=22 == low+hysteresis; still inside Low band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Low,
             o.ClassifyBatteryState("Dev", "Dev", 22, BatteryAlertState.Low, null));
@@ -130,7 +125,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Hysteresis_Low_exits_to_Normal_above_band()
     {
-        // battery=23 > low+hysteresis; exits Low band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
             o.ClassifyBatteryState("Dev", "Dev", 23, BatteryAlertState.Low, null));
@@ -139,7 +133,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Hysteresis_High_stays_High_within_band_not_charging()
     {
-        // battery=78 == high-hysteresis; still inside High band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
             o.ClassifyBatteryState("Dev", "Dev", 78, BatteryAlertState.High, false));
@@ -148,7 +141,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Hysteresis_High_exits_to_Normal_below_band()
     {
-        // battery=77 < high-hysteresis; exits High band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
             o.ClassifyBatteryState("Dev", "Dev", 77, BatteryAlertState.High, null));
@@ -157,7 +149,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Hysteresis_High_exits_to_Normal_when_confirmed_charging_within_band()
     {
-        // Confirmed charging suppresses High even inside the hysteresis band
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.Normal,
             o.ClassifyBatteryState("Dev", "Dev", 78, BatteryAlertState.High, true));
@@ -204,11 +195,10 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Per_device_low_override_triggers_Low_at_custom_threshold()
     {
-        var settings = new ThresholdSettings(); // global Low=20
-        settings.SetLowForDevice("Keyboard", 30);        // override Low=30
+        var settings = new ThresholdSettings();
+        settings.SetLowForDevice("Keyboard", 30);
         var o = BuildOrchestrator(settings);
 
-        // battery=25 is above global Low=20 but below custom Low=30
         Assert.Equal(BatteryAlertState.Low,
             o.ClassifyBatteryState("Keyboard", "Keyboard", 25, BatteryAlertState.Normal, null));
     }
@@ -216,11 +206,10 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Per_device_high_override_triggers_High_at_custom_threshold()
     {
-        var settings = new ThresholdSettings(); // global High=80
-        settings.SetHighForDevice("Mouse", 70);          // override High=70
+        var settings = new ThresholdSettings();
+        settings.SetHighForDevice("Mouse", 70);
         var o = BuildOrchestrator(settings);
 
-        // battery=75 is below global High=80 but above custom High=70
         Assert.Equal(BatteryAlertState.High,
             o.ClassifyBatteryState("Mouse", "Mouse", 75, BatteryAlertState.Normal, false));
     }
@@ -254,7 +243,6 @@ public sealed class PollingOrchestratorClassifyTests
     [Fact]
     public void Transition_Low_to_High_without_hysteresis_gap_fires_High()
     {
-        // Simulates a device that jumps from 10% directly to 95% (e.g. reconnect after charge)
         var o = BuildOrchestrator();
         Assert.Equal(BatteryAlertState.High,
             o.ClassifyBatteryState("Dev", "Dev", 95, BatteryAlertState.Low, false));
