@@ -12,7 +12,7 @@ namespace BTChargeTrayWatcher.Tests;
 /// </summary>
 public sealed class PollingOrchestratorPollTests
 {
-    // ── Helpers ──────────────────────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────────
 
     private sealed class NotificationSpy : INotificationService
     {
@@ -54,7 +54,7 @@ public sealed class PollingOrchestratorPollTests
         return (new PollingOrchestrator(opts), spy, last);
     }
 
-    // ── Alert routing ──────────────────────────────────────────────────────────────────
+    // ── Alert routing ────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task New_device_below_low_fires_NotifyLow()
@@ -149,7 +149,7 @@ public sealed class PollingOrchestratorPollTests
         Assert.Empty(last);
     }
 
-    // ── Threshold-change reset ────────────────────────────────────────────────────────
+    // ── Threshold-change reset ───────────────────────────────────────────────────
 
     [Fact]
     public async Task ThresholdsChanged_re_evaluates_alert_state_from_scratch()
@@ -173,7 +173,7 @@ public sealed class PollingOrchestratorPollTests
         Assert.Contains("High:Dev:85", spy.Calls);
     }
 
-    // ── Miss-count eviction ────────────────────────────────────────────────────────────
+    // ── Miss-count eviction ──────────────────────────────────────────────────────
 
     [Fact]
     public async Task Device_absent_for_MissCountThreshold_polls_is_evicted()
@@ -213,7 +213,7 @@ public sealed class PollingOrchestratorPollTests
         Assert.True(last.ContainsKey("id1"));
     }
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────────────────
+    // ── Callbacks ────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task OnScanCompleted_receives_all_known_devices()
@@ -256,8 +256,8 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Per_device_poll_interval_is_respected()
     {
-        // OnBatteryRead fires only when the device is actually processed (interval elapsed).
-        // OnScanCompleted fires every poll regardless, so it is not suitable here.
+        // A 3600-second per-device interval means the second PollAsync call
+        // (within the same second) must skip processing and not invoke OnBatteryRead.
         var settings = new ThresholdSettings();
         settings.SetPollIntervalForDevice("id1", 3600);
         int batteryReadCount = 0;
@@ -266,9 +266,9 @@ public sealed class PollingOrchestratorPollTests
             settings: settings,
             onBatteryRead: (_, _) => batteryReadCount++);
 
-        await o.PollAsync(TestContext.Current.CancellationToken); // poll 1: device is new, always processed
+        await o.PollAsync(TestContext.Current.CancellationToken); // poll 1: no prior timestamp → processed
         int afterFirst = batteryReadCount;
-        await o.PollAsync(TestContext.Current.CancellationToken); // poll 2: interval not elapsed, device skipped
+        await o.PollAsync(TestContext.Current.CancellationToken); // poll 2: interval not elapsed → skipped
         Assert.Equal(afterFirst, batteryReadCount);
     }
 }

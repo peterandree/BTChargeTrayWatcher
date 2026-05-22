@@ -65,7 +65,7 @@ internal sealed class PollingOrchestrator : IDisposable
 
     private async Task SafePollAsync(CancellationToken ct)
     {
-        try { await PollInternalAsync(ct, honorPerDeviceIntervals: true).ConfigureAwait(false); }
+        try { await PollInternalAsync(ct).ConfigureAwait(false); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (_disposed) { }
         catch (Exception ex)
@@ -76,9 +76,9 @@ internal sealed class PollingOrchestrator : IDisposable
 
     public Task PollAsync() => PollAsync(_shutdownToken);
 
-    public Task PollAsync(CancellationToken ct) => PollInternalAsync(ct, honorPerDeviceIntervals: false);
+    public Task PollAsync(CancellationToken ct) => PollInternalAsync(ct);
 
-    private async Task PollInternalAsync(CancellationToken ct, bool honorPerDeviceIntervals)
+    private async Task PollInternalAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         await _pollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -93,6 +93,7 @@ internal sealed class PollingOrchestrator : IDisposable
             {
                 _alertStates.Clear();
                 _missCount.Clear();
+                _lastProcessed.Clear();
             }
 
             var snapshot = new Dictionary<string, DeviceBatteryInfo>(
@@ -116,14 +117,12 @@ internal sealed class PollingOrchestrator : IDisposable
                 // per-device throttling of updates/alerts).
                 _missCount[device.DeviceId] = 0;
 
-                bool due = !honorPerDeviceIntervals;
-                if (honorPerDeviceIntervals)
-                {
-                    int intervalSec = (int)(_settings.GetPollIntervalForDevice(device.DeviceId, device.Name)
-                        ?? (int)PollingDefaults.PollingInterval.TotalSeconds);
-                    if (!_lastProcessed.TryGetValue(device.DeviceId, out var last)) due = true;
-                    else if ((DateTime.UtcNow - last).TotalSeconds >= intervalSec) due = true;
-                }
+                int intervalSec = (int)(_settings.GetPollIntervalForDevice(device.DeviceId, device.Name)
+                    ?? (int)PollingDefaults.PollingInterval.TotalSeconds);
+
+                bool due;
+                if (!_lastProcessed.TryGetValue(device.DeviceId, out var last)) due = true;
+                else due = (DateTime.UtcNow - last).TotalSeconds >= intervalSec;
 
                 if (!due)
                 {
