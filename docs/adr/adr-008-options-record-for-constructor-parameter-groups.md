@@ -5,11 +5,11 @@
 
 ## Context
 
-Several classes in this codebase require many collaborating dependencies at construction time. `PollingOrchestrator`, for example, needs eight distinct parameters: settings, notifier, shared state, task tracker, a read delegate, a shutdown token, and two event-callback delegates. A constructor with eight positional parameters is fragile: call sites are hard to read, parameter order is easy to confuse, and adding a ninth parameter requires updating every call site.
+Several classes in this codebase require many collaborating dependencies at construction time. Previously, classes like `PollingOrchestrator` required up to eight distinct parameters. This pattern has been replaced: all such classes now use a single options record (e.g., `PollingOrchestratorOptions`) to group parameters, eliminating high-arity constructors.
 
 ## Decision
 
-When a constructor requires more than four parameters, group them into a `sealed record` named `<ClassName>Options` and accept that record as the single constructor parameter.
+When a constructor requires more than four parameters, group them into a `sealed record` named `<ClassName>Options` and accept that record as the single constructor parameter. All legacy high-arity constructors have been removed.
 
 ```csharp
 internal sealed record PollingOrchestratorOptions(

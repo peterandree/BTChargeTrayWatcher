@@ -67,7 +67,7 @@
 
 Entry point. Enforces single-instance via a named `Mutex`. Constructs all objects in dependency order (`ThresholdSettings` → `NotificationService` → readers → `BluetoothBatteryMonitor` → `LaptopBatteryMonitor` → `TrayApp`) and calls `Application.Run()`. Disposes monitors on exit.
 
-Always uses the 6-argument internal `BluetoothBatteryMonitor` cooperation-stack constructor. The legacy 2-argument and 4-argument constructors are deprecated and not called by `Program.cs`.
+Uses a low-arity constructor for `BluetoothBatteryMonitor` that accepts a parameter object (infrastructure record) for the cooperation stack. Legacy 2-argument and 4-argument constructors have been removed.
 
 ### TrayApp
 
@@ -81,7 +81,7 @@ Bridges the background monitor and the UI. Owns the `ScanWindow` lifetime. Route
 
 Public facade. Owns the 60-second polling `Timer`, reacts to `PowerModeChanged` (suspends/resumes the timer), and delegates actual reading to `Scanner` and `PollingOrchestrator`. Manages cooperative shutdown via `CancellationTokenSource` and `TaskTracker`.
 
-The production entry point is the 6-argument internal constructor, wired in `Program.cs`, which accepts the full cooperation stack (`DeviceWatcherService`, `BatteryReaderOrchestrator`, `GattConnectionManager`, `DeviceCapabilityCache`). The public 2-argument and 4-argument constructors are deprecated (`[Obsolete]`) and bypass the cooperation stack.
+The production entry point is a constructor that accepts a single infrastructure record, wired in `Program.cs`, which provides the full cooperation stack (`DeviceWatcherService`, `BatteryReaderOrchestrator`, `GattConnectionManager`, `DeviceCapabilityCache`). All legacy multi-argument constructors have been removed.
 
 ### Scanner
 
@@ -95,9 +95,9 @@ All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (d
 
 ### DeviceAggregationPipeline
 
-**Legacy IBatteryReader path only — not reached by `Program.cs`.** Used by `Scanner` when constructed with explicit `IBatteryReader` instances via the deprecated 2-argument/4-argument `BluetoothBatteryMonitor` constructors. Performs the same parallel-read-and-merge responsibility as `BatteryReaderOrchestrator` but without the cooperation-stack features (no `GattConnectionManager`, no `DeviceCapabilityCache`, no per-device GATT connection reuse).
+**Legacy IBatteryReader path only — not reached by `Program.cs`.** Previously used by `Scanner` when constructed with explicit `IBatteryReader` instances via now-removed legacy constructors. Performs the same parallel-read-and-merge responsibility as `BatteryReaderOrchestrator` but without the cooperation-stack features (no `GattConnectionManager`, no `DeviceCapabilityCache`, no per-device GATT connection reuse).
 
-Retained only to keep `ScannerTests` and `DeviceAggregationPipelineTests` green. Will be removed when the legacy constructors are eliminated (issue #100 follow-up).
+Retained only to keep `ScannerTests` and `DeviceAggregationPipelineTests` green. All legacy constructors have now been eliminated (issue #100 follow-up complete).
 
 ### PollingOrchestrator
 
