@@ -34,6 +34,7 @@ public sealed class PollingOrchestratorPollTests
         Build(
             Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices,
             ThresholdSettings? settings = null,
+            Action<string, int?>? onBatteryRead = null,
             Action<IReadOnlyList<DeviceBatteryInfo>>? onScanCompleted = null,
             Action<bool>? onAlertStateChanged = null)
     {
@@ -46,7 +47,7 @@ public sealed class PollingOrchestratorPollTests
             Tracker:       new TaskTracker(),
             ReadDevices:   readDevices,
             Callbacks:     new PollingOrchestratorCallbacks(
-                OnBatteryRead:       (_, _) => { },
+                OnBatteryRead:       onBatteryRead ?? ((_, _) => { }),
                 OnScanCompleted:     onScanCompleted ?? (_ => { }),
                 OnAlertStateChanged: onAlertStateChanged ?? (_ => { })),
             ShutdownToken: TestContext.Current.CancellationToken);
@@ -255,17 +256,19 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Per_device_poll_interval_is_respected()
     {
+        // OnBatteryRead fires only when the device is actually processed (interval elapsed).
+        // OnScanCompleted fires every poll regardless, so it is not suitable here.
         var settings = new ThresholdSettings();
         settings.SetPollIntervalForDevice("id1", 3600);
-        int processedCount = 0;
+        int batteryReadCount = 0;
         var (o, _, _) = Build(
             _ => Result(Dev("id1", "Dev", 50)),
             settings: settings,
-            onScanCompleted: _ => processedCount++);
+            onBatteryRead: (_, _) => batteryReadCount++);
 
-        await o.PollAsync(TestContext.Current.CancellationToken); // first poll: device is new, always processed
-        int afterFirst = processedCount;
-        await o.PollAsync(TestContext.Current.CancellationToken); // second poll: interval not elapsed, skip
-        Assert.Equal(afterFirst, processedCount);
+        await o.PollAsync(TestContext.Current.CancellationToken); // poll 1: device is new, always processed
+        int afterFirst = batteryReadCount;
+        await o.PollAsync(TestContext.Current.CancellationToken); // poll 2: interval not elapsed, device skipped
+        Assert.Equal(afterFirst, batteryReadCount);
     }
 }
