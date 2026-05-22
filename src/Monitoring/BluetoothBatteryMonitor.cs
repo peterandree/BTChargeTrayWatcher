@@ -68,24 +68,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Legacy 2-argument constructor. Prefer the 6-argument internal cooperation-stack
-    /// constructor wired in <c>Program.cs</c>. This constructor will be removed once
-    /// the legacy <see cref="DeviceAggregationPipeline"/> path is retired (issue #100).
-    /// </summary>
-    /// <remarks>
-    /// <c>error: false</c> (warning, not error) so that test fixtures can suppress
-    /// CS0618 via <c>#pragma warning disable CS0618</c>. CS0619 (error:true) cannot
-    /// be suppressed by pragma.
-    /// </remarks>
-    [Obsolete(
-        "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
-        "GattConnectionManager, DeviceCapabilityCache). " +
-        "Use the 6-argument internal constructor wired in Program.cs instead.",
-        error: false)]
-    public BluetoothBatteryMonitor(ThresholdSettings settings, INotificationService notifier)
-        : this(settings, notifier, new GattBatteryReader(), new ClassicBatteryReader()) { }
-
-    /// <summary>
     /// Creates a monitor using the cooperation stack: device watcher for live
     /// device tracking, GATT connection manager for per-device reads, and capability
     /// cache for protocol fallback optimisation.
@@ -98,48 +80,11 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         GattConnectionManager gattConnectionManager,
         DeviceCapabilityCache capabilityCache,
         AliasSuggestionService aliasSuggestionService)
-        : this(settings, notifier,
-               new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher, aliasSuggestionService),
-               NullBatteryReader.Instance)
     {
-        _deviceWatcher = deviceWatcher;
-        _gattConnectionManager = gattConnectionManager;
-        _capabilityCache = capabilityCache;
-        _deviceWatcher.DevicesChanged += OnDevicesChanged;
-    }
-
-    /// <summary>
-    /// Core 4-argument constructor. Accepts explicit reader instances for both GATT
-    /// and Classic sources. Serves as the shared implementation body for the
-    /// cooperation-stack 6-argument constructor's <c>: this(...)</c> chain call.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This overload is intentionally kept at <c>error: false</c> (warning, not error)
-    /// because the internal 6-argument cooperation-stack constructor delegates to it
-    /// via <c>: this(...)</c>. Escalating to <c>error: true</c> would produce a
-    /// compile error inside this class at that chain call site.
-    /// </para>
-    /// <para>
-    /// Prefer the 6-argument internal cooperation-stack constructor for any new code.
-    /// This constructor will be removed once the chain call is refactored.
-    /// </para>
-    /// </remarks>
-    [Obsolete(
-        "This constructor bypasses the cooperation stack (DeviceWatcherService, " +
-        "GattConnectionManager, DeviceCapabilityCache). " +
-        "Use the 6-argument internal constructor wired in Program.cs instead. " +
-        "This constructor will be removed in a future release.",
-        error: false)]
-    public BluetoothBatteryMonitor(
-        ThresholdSettings settings,
-        INotificationService notifier,
-        IBatteryReader gattReader,
-        IBatteryReader classicReader)
-    {
+        // Initialize core readers via the orchestrator adapter
         _settings = settings;
-        _gattReader = gattReader;
-        _classicReader = classicReader;
+        _gattReader = new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher, aliasSuggestionService);
+        _classicReader = NullBatteryReader.Instance;
 
         _taskTracker = new TaskTracker();
 
@@ -155,8 +100,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)));
 
         _scanner = new Scanner(new ScannerOptions(
-            GattReader: gattReader,
-            ClassicReader: classicReader,
+            GattReader: _gattReader,
+            ClassicReader: _classicReader,
             LastKnown: _lastKnown,
             Poller: _poller,
             Tracker: _taskTracker,
@@ -174,6 +119,11 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
         _settings.Changed += Settings_Changed;
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+
+        _deviceWatcher = deviceWatcher;
+        _gattConnectionManager = gattConnectionManager;
+        _capabilityCache = capabilityCache;
+        _deviceWatcher.DevicesChanged += OnDevicesChanged;
     }
 
     public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
