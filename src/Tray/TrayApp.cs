@@ -13,7 +13,8 @@ public sealed class TrayApp : IDisposable
     private readonly ThresholdSettings _settings;
     private readonly BluetoothBatteryMonitor _monitor;
     private readonly LaptopBatteryMonitor _laptopMonitor;
-    private readonly INotificationService _notifier;
+    private readonly Action _showOptions;
+    private readonly Action _unsubscribeNotificationClicked;
     private readonly NotifyIcon _trayIcon;
     private readonly TrayIconRenderer _iconRenderer;
     private readonly ScanCoordinator _scanner;
@@ -29,12 +30,22 @@ public sealed class TrayApp : IDisposable
     private bool _hasBluetoothAlert;
     private bool _hasLaptopAlert;
 
+    /// <param name="settings">Application threshold settings.</param>
+    /// <param name="monitor">Bluetooth battery monitor.</param>
+    /// <param name="laptopMonitor">Laptop battery monitor.</param>
+    /// <param name="aliasSuggestionService">Alias suggestion service.</param>
+    /// <param name="showOptions">Action that opens the Options form (injected from composition root so TrayApp does not depend on INotificationService).</param>
+    /// <param name="subscribeNotificationClicked">
+    /// Receives the scan-window-open callback; composition root wires it to the notifier's
+    /// OnNotificationClicked event and returns an unsubscribe action.
+    /// </param>
     internal TrayApp(
         ThresholdSettings       settings,
         BluetoothBatteryMonitor monitor,
-        INotificationService    notifier,
         LaptopBatteryMonitor    laptopMonitor,
-        AliasSuggestionService  aliasSuggestionService)
+        AliasSuggestionService  aliasSuggestionService,
+        Action                  showOptions,
+        Func<Action, Action>    subscribeNotificationClicked)
     {
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
@@ -43,7 +54,7 @@ public sealed class TrayApp : IDisposable
         _settings      = settings;
         _monitor       = monitor;
         _laptopMonitor = laptopMonitor;
-        _notifier      = notifier;
+        _showOptions   = showOptions;
         _iconRenderer  = new TrayIconRenderer();
         _scanner       = new ScanCoordinator(monitor, settings, _uiContext);
 
@@ -65,7 +76,7 @@ public sealed class TrayApp : IDisposable
             _lowMenu,
             _highMenu,
             onExit: () => _ = ExitAsync(),
-            onOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(_settings, _monitor, _notifier));
+            onOptions: _showOptions);
 
         _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
@@ -80,8 +91,8 @@ public sealed class TrayApp : IDisposable
 
         _laptopMonitor.BatteryUpdated += OnLaptopBatteryUpdated;
 
-        _notifier.OnNotificationClicked += _scanner.RequestOpenScanWindow;
-    _aliasSuggestionService.SuggestionQueued += OnAliasSuggestionQueued;
+        _unsubscribeNotificationClicked = subscribeNotificationClicked(_scanner.RequestOpenScanWindow);
+        _aliasSuggestionService.SuggestionQueued += OnAliasSuggestionQueued;
 
         InitializeLaptopUiFromCachedState();
         _settings.Changed += OnSettingsChanged;
@@ -300,8 +311,8 @@ public sealed class TrayApp : IDisposable
         _monitor.ManualScanCompleted        -= OnDevicesRefreshed;
         _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
         _settings.Changed             -= OnSettingsChanged;
-        _notifier.OnNotificationClicked -= _scanner.RequestOpenScanWindow;
-    _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
+        _unsubscribeNotificationClicked();
+        _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
 
         _scanner.Dispose();
 

@@ -73,42 +73,40 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     /// cache for protocol fallback optimisation.
     /// </summary>
     internal BluetoothBatteryMonitor(
-        ThresholdSettings settings,
-        INotificationService notifier,
-        DeviceWatcherService deviceWatcher,
-        BatteryReaderOrchestrator orchestrator,
-        GattConnectionManager gattConnectionManager,
-        DeviceCapabilityCache capabilityCache,
-        AliasSuggestionService aliasSuggestionService)
+        ThresholdSettings                 settings,
+        INotificationService              notifier,
+        BluetoothMonitoringInfrastructure infrastructure)
     {
-        // Initialize core readers via the orchestrator adapter
-        _settings = settings;
-        _gattReader = new OrchestratorBatteryReaderAdapter(orchestrator, deviceWatcher, aliasSuggestionService);
+        _settings      = settings;
+        _gattReader    = new OrchestratorBatteryReaderAdapter(
+                             infrastructure.Orchestrator,
+                             infrastructure.DeviceWatcher,
+                             infrastructure.AliasSuggestionService);
         _classicReader = NullBatteryReader.Instance;
 
         _taskTracker = new TaskTracker();
 
         _poller = new PollingOrchestrator(new PollingOrchestratorOptions(
-            Settings: settings,
-            Notifier: notifier,
-            LastKnown: _lastKnown,
-            Tracker: _taskTracker,
-            ReadDevices: ct => _scanner!.QuietReadAsync(ct),
-            ShutdownToken: _shutdownCts.Token,
-            OnBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanCompleted: list => BackgroundRefreshCompleted?.Invoke(list),
+            Settings:            settings,
+            Notifier:            notifier,
+            LastKnown:           _lastKnown,
+            Tracker:             _taskTracker,
+            ReadDevices:         ct => _scanner!.QuietReadAsync(ct),
+            ShutdownToken:       _shutdownCts.Token,
+            OnBatteryRead:       (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            OnScanCompleted:     list => BackgroundRefreshCompleted?.Invoke(list),
             OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)));
 
         _scanner = new Scanner(new ScannerOptions(
-            GattReader: _gattReader,
-            ClassicReader: _classicReader,
-            LastKnown: _lastKnown,
-            Poller: _poller,
-            Tracker: _taskTracker,
-            ShutdownToken: _shutdownCts.Token,
-            OnDeviceFound: (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
-            OnBatteryRead: (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanStarted: () => ScanStarted?.Invoke(),
+            GattReader:      _gattReader,
+            ClassicReader:   _classicReader,
+            LastKnown:       _lastKnown,
+            Poller:          _poller,
+            Tracker:         _taskTracker,
+            ShutdownToken:   _shutdownCts.Token,
+            OnDeviceFound:   (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
+            OnBatteryRead:   (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+            OnScanStarted:   () => ScanStarted?.Invoke(),
             OnScanCompleted: list => ManualScanCompleted?.Invoke(list)));
 
         _timer = new System.Threading.Timer(
@@ -120,9 +118,9 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _settings.Changed += Settings_Changed;
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
 
-        _deviceWatcher = deviceWatcher;
-        _gattConnectionManager = gattConnectionManager;
-        _capabilityCache = capabilityCache;
+        _deviceWatcher         = infrastructure.DeviceWatcher;
+        _gattConnectionManager = infrastructure.GattConnectionManager;
+        _capabilityCache       = infrastructure.CapabilityCache;
         _deviceWatcher.DevicesChanged += OnDevicesChanged;
     }
 

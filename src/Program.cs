@@ -45,11 +45,9 @@ internal static class Program
             ]);
 
             // Cooperation stack: device watcher + GATT connection manager + capability cache.
-            var capabilityCache       = new DeviceCapabilityCache();
-            var gattConnectionManager = new GattConnectionManager();
-            var classicReader         = new ClassicBatteryReader();
-
-            // Alias suggestion service
+            var capabilityCache        = new DeviceCapabilityCache();
+            var gattConnectionManager  = new GattConnectionManager();
+            var classicReader          = new ClassicBatteryReader();
             var aliasSuggestionService = new AliasSuggestionService();
 
             var orchestrator = new BatteryReaderOrchestrator(
@@ -60,12 +58,29 @@ internal static class Program
 
             var deviceWatcher = new DeviceWatcherService();
 
-            monitor = new BluetoothBatteryMonitor(
-                settings, dispatcher, deviceWatcher, orchestrator, gattConnectionManager, capabilityCache, aliasSuggestionService);
+            var infrastructure = new BluetoothMonitoringInfrastructure(
+                DeviceWatcher:          deviceWatcher,
+                Orchestrator:           orchestrator,
+                GattConnectionManager:  gattConnectionManager,
+                CapabilityCache:        capabilityCache,
+                AliasSuggestionService: aliasSuggestionService);
+
+            monitor       = new BluetoothBatteryMonitor(settings, dispatcher, infrastructure);
             laptopMonitor = new LaptopBatteryMonitor(settings, dispatcher);
 
             deviceWatcher.Start();
-            using var app = new TrayApp(settings, monitor, toastService, laptopMonitor, aliasSuggestionService);
+
+            using var app = new TrayApp(
+                settings,
+                monitor,
+                laptopMonitor,
+                aliasSuggestionService,
+                showOptions: () => BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm(settings, monitor, dispatcher),
+                subscribeNotificationClicked: handler =>
+                {
+                    dispatcher.OnNotificationClicked += handler;
+                    return () => dispatcher.OnNotificationClicked -= handler;
+                });
 
             app.StartBackgroundScan();
 
