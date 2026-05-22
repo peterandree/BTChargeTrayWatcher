@@ -48,7 +48,7 @@ public sealed class PollingOrchestratorPollTests
             OnBatteryRead:       (_, _) => { },
             OnScanCompleted:     onScanCompleted ?? (_ => { }),
             OnAlertStateChanged: onAlertStateChanged ?? (_ => { }),
-            ShutdownToken:       CancellationToken.None);
+            ShutdownToken:       TestContext.Current.CancellationToken);
         return (new PollingOrchestrator(opts), spy, last);
     }
 
@@ -58,7 +58,7 @@ public sealed class PollingOrchestratorPollTests
     public async Task New_device_below_low_fires_NotifyLow()
     {
         var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 10)));
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Low:Headphones:10", spy.Calls);
     }
 
@@ -66,7 +66,7 @@ public sealed class PollingOrchestratorPollTests
     public async Task New_device_above_high_fires_NotifyHigh()
     {
         var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 90)));
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Contains("High:Headphones:90", spy.Calls);
     }
 
@@ -74,7 +74,7 @@ public sealed class PollingOrchestratorPollTests
     public async Task New_device_in_normal_range_fires_no_notification()
     {
         var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
     }
 
@@ -83,11 +83,11 @@ public sealed class PollingOrchestratorPollTests
     {
         // First poll: normal range
         var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
 
         // Second poll: same value -> no transition -> no notification
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
     }
 
@@ -102,9 +102,9 @@ public sealed class PollingOrchestratorPollTests
             return Result(Dev("id1", "Keyboard", battery));
         });
 
-        await o.PollAsync(); // battery=50, Normal
+        await o.PollAsync(TestContext.Current.CancellationToken); // battery=50, Normal
         spy.Calls.Clear();
-        await o.PollAsync(); // battery=15, Low -> alert
+        await o.PollAsync(TestContext.Current.CancellationToken); // battery=15, Low -> alert
 
         Assert.Contains("Low:Keyboard:15", spy.Calls);
     }
@@ -120,9 +120,9 @@ public sealed class PollingOrchestratorPollTests
             return Result(Dev("id1", "Mouse", battery, charging: false));
         });
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("High:Mouse:90", spy.Calls);
     }
@@ -136,7 +136,7 @@ public sealed class PollingOrchestratorPollTests
             _ => Result(Dev("id1", "Headphones", 5)),
             settings: settings);
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
     }
 
@@ -145,7 +145,7 @@ public sealed class PollingOrchestratorPollTests
     {
         var (o, spy, last) = Build(_ => Result(new DeviceBatteryInfo("id1", "Dev", null)));
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
         Assert.Empty(last); // not added to lastKnown
     }
@@ -163,17 +163,17 @@ public sealed class PollingOrchestratorPollTests
             return Result(Dev("id1", "Dev", 85, charging: false));
         });
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Contains("High:Dev:85", spy.Calls);
         spy.Calls.Clear();
 
         // Signal threshold change (clears alert state cache).
         o.SignalThresholdsChanged();
         // Wait for the background task that SignalThresholdsChanged fires.
-        await Task.WhenAll(o.PollLock.WaitAsync(CancellationToken.None).ContinueWith(_ => o.PollLock.Release()));
+        await Task.WhenAll(o.PollLock.WaitAsync(TestContext.Current.CancellationToken).ContinueWith(_ => o.PollLock.Release()));
 
         // Run another explicit poll to get a deterministic result.
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
 
         // After reset the device is treated as new — High fires again.
         Assert.Contains("High:Dev:85", spy.Calls);
@@ -193,12 +193,12 @@ public sealed class PollingOrchestratorPollTests
             return Task.FromResult(new List<DeviceBatteryInfo>()); // absent
         });
 
-        await o.PollAsync(); // call=1, device added
+        await o.PollAsync(TestContext.Current.CancellationToken); // call=1, device added
         Assert.True(last.ContainsKey("id1"));
 
         // Poll MissCountThreshold times while absent
         for (int i = 0; i < PollingDefaults.MissCountThreshold; i++)
-            await o.PollAsync();
+            await o.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.False(last.ContainsKey("id1"));
     }
@@ -214,10 +214,10 @@ public sealed class PollingOrchestratorPollTests
             return Task.FromResult(new List<DeviceBatteryInfo>());
         });
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         // Only MissCountThreshold - 1 absent polls: not yet evicted
         for (int i = 0; i < PollingDefaults.MissCountThreshold - 1; i++)
-            await o.PollAsync();
+            await o.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.True(last.ContainsKey("id1"));
     }
@@ -232,7 +232,7 @@ public sealed class PollingOrchestratorPollTests
             _ => Result(Dev("id1", "A", 50), Dev("id2", "B", 60)),
             onScanCompleted: list => received = list);
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(received);
         Assert.Equal(2, received!.Count);
@@ -246,7 +246,7 @@ public sealed class PollingOrchestratorPollTests
             _ => Result(Dev("id1", "Dev", 10)),
             onAlertStateChanged: v => lastAlert = v);
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(lastAlert);
     }
 
@@ -258,7 +258,7 @@ public sealed class PollingOrchestratorPollTests
             _ => Result(Dev("id1", "Dev", 50)),
             onAlertStateChanged: v => lastAlert = v);
 
-        await o.PollAsync();
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.False(lastAlert);
     }
 
@@ -277,12 +277,12 @@ public sealed class PollingOrchestratorPollTests
             return Result(Dev("id1", "Headset", battery));
         }, settings: settings);
 
-        await o.PollAsync(); // first poll processed
+        await o.PollAsync(TestContext.Current.CancellationToken); // first poll processed
         spy.Calls.Clear();
 
         // Trigger a scheduled poll path which enforces per-device intervals
         o.OnTimerTick();
-        await Task.WhenAll(o.PollLock.WaitAsync(CancellationToken.None).ContinueWith(_ => o.PollLock.Release()));
+        await Task.WhenAll(o.PollLock.WaitAsync(TestContext.Current.CancellationToken).ContinueWith(_ => o.PollLock.Release()));
 
         Assert.Empty(spy.Calls);
     }

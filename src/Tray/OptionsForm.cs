@@ -299,10 +299,30 @@ namespace BTChargeTrayWatcher.Tray
             LoadDeviceRows();
             devicesGrid.CellValueChanged += DevicesGrid_CellValueChanged;
             devicesGrid.CellContentClick += DevicesGrid_CellContentClick;
+            devicesGrid.DataError += (_, e) =>
+            {
+                // Show a friendly message when parsing/editing fails (e.g., non-numeric input),
+                // then reload rows so the UI reflects persisted settings.
+                try
+                {
+                    _messageBoxHandler(this, "Invalid value entered. Please enter a numeric value.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { }
+                LoadDeviceRows();
+                e.ThrowException = false;
+            };
+            // Only commit edits immediately for checkbox cells (Excluded). Leave
+            // text/numeric cells to commit on edit end so users can type values.
             devicesGrid.CurrentCellDirtyStateChanged += (_, _) =>
             {
-                if (devicesGrid.IsCurrentCellDirty)
-                    devicesGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                if (!devicesGrid.IsCurrentCellDirty) return;
+                try
+                {
+                    var col = devicesGrid.CurrentCell?.OwningColumn;
+                    if (col is DataGridViewCheckBoxColumn)
+                        devicesGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                }
+                catch { /* swallow UI inspection errors */ }
             };
             resetAllBtn.Click += ResetAllBtn_Click;
         }

@@ -18,7 +18,7 @@ public sealed class GattBatteryReaderTests
 
         var devices = new[] { (Id: "dev1", Name: "D1"), (Id: "dev2", Name: "D2") };
 
-        var results = await reader.ReadAllAsync(devices, CancellationToken.None);
+        var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.DeviceId == "dev1" && r.Battery == 33);
@@ -36,7 +36,7 @@ public sealed class GattBatteryReaderTests
         }, TimeSpan.FromMilliseconds(50));
 
         var devices = new[] { (Id: "slow", Name: "Slow") };
-        var results = await reader.ReadAllAsync(devices, CancellationToken.None);
+        var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Null(results[0].Battery);
@@ -70,7 +70,7 @@ public sealed class GattBatteryReaderTests
             .Select(i => (Id: $"d{i}", Name: $"D{i}"))
             .ToArray();
 
-        var results = await reader.ReadAllAsync(devices, CancellationToken.None);
+        var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);
 
         Assert.InRange(maxObserved, 1, PollingDefaults.GattMaxConcurrentReads);
         Assert.Equal(devices.Length, results.Count);

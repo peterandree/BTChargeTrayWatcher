@@ -1,6 +1,13 @@
+using System.Runtime.CompilerServices;
 using Xunit;
 
 namespace Xunit
 {
-    public class StaFactAttribute : FactAttribute { }
+    public sealed class StaFactAttribute : FactAttribute
+    {
+        public StaFactAttribute(
+            [CallerFilePath] string? sourceFilePath = null,
+            [CallerLineNumber] int sourceLineNumber = 0)
+            : base(sourceFilePath, sourceLineNumber) { }
+    }
 }

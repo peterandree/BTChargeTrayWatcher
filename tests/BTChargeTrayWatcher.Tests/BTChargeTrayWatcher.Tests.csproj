@@ -8,6 +8,9 @@
     <IsPackable>false</IsPackable>
     <RootNamespace>BTChargeTrayWatcher.Tests</RootNamespace>
 
+    <!-- Match main project architecture to avoid MSIL/AMD64 mismatch -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
     <!-- Optional: avoids accidental WinForms coupling -->
     <!-- <UseWindowsForms>true</UseWindowsForms> -->
   </PropertyGroup>

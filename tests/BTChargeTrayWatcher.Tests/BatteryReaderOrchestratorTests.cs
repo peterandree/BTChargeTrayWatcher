@@ -85,7 +85,7 @@ public sealed class BatteryReaderOrchestratorTests
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
         var watched = new List<WatchedDevice> { ClassicDevice("dev-1", "Some Device") };
-        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.Name == "Headphones");
@@ -102,7 +102,7 @@ public sealed class BatteryReaderOrchestratorTests
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
         var watched = new List<WatchedDevice>();
-        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         Assert.Empty(results);
     }
@@ -117,7 +117,7 @@ public sealed class BatteryReaderOrchestratorTests
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
         var watched = new List<WatchedDevice> { BleDevice("ble-1", "Mouse") };
-        await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, classicReader.CallCount);
     }
@@ -142,7 +142,7 @@ public sealed class BatteryReaderOrchestratorTests
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
         var watched = new List<WatchedDevice> { BleDevice("ble-1", "Headphones") };
-        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         // Classic Headphones and Keyboard both come through since GATT was skipped
         Assert.Equal(2, results.Count);
@@ -160,7 +160,7 @@ public sealed class BatteryReaderOrchestratorTests
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
         var watched = new List<WatchedDevice> { ClassicDevice("classic-1", "Headphones") };
-        await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         // Classic device should not have been recorded in capability cache
         Assert.Null(cache.GetKnownSource("classic-1"));
@@ -181,7 +181,7 @@ public sealed class BatteryReaderOrchestratorTests
         {
             new("ble-1", "Sleeping Mouse", IsBle: true, IsConnected: false)
         };
-        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         // Device was disconnected → no GATT attempt → no capability cache entry
         Assert.Null(cache.GetKnownSource("ble-1"));
@@ -201,7 +201,7 @@ public sealed class BatteryReaderOrchestratorTests
         {
             new("ble-1", "Active Mouse", IsBle: true, IsConnected: true)
         };
-        await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         // GATT was attempted (will fail in test env) and RecordFailure was called,
         // so ShouldAttempt returns false until the retry interval elapses.
@@ -222,7 +222,7 @@ public sealed class BatteryReaderOrchestratorTests
 
         // Classic device uses default IsConnected=true
         var watched = new List<WatchedDevice> { ClassicDevice("classic-1", "Keyboard") };
-        var results = await orchestrator.ReadAllAsync(watched, CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync(watched, TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal("Keyboard", results[0].Name);
@@ -240,7 +240,7 @@ public sealed class BatteryReaderOrchestratorTests
         var cache = new DeviceCapabilityCache();
         var orchestrator = new BatteryReaderOrchestrator(gattManager, classicReader, cache);
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal("Speaker", results[0].Name);
@@ -262,7 +262,7 @@ public sealed class BatteryReaderOrchestratorTests
             new DeviceCapabilityCache(),
             FilterEnabled());
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal("Headphones", results[0].Name);
@@ -282,7 +282,7 @@ public sealed class BatteryReaderOrchestratorTests
             new DeviceCapabilityCache(),
             FilterEnabled());
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal("Mystery Device", results[0].Name);
@@ -303,7 +303,7 @@ public sealed class BatteryReaderOrchestratorTests
             new DeviceCapabilityCache(),
             FilterEnabled());
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Empty(results);
     }
@@ -325,7 +325,7 @@ public sealed class BatteryReaderOrchestratorTests
             new DeviceCapabilityCache(),
             settings);
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal("Smart Fridge", results[0].Name);
@@ -347,7 +347,7 @@ public sealed class BatteryReaderOrchestratorTests
             new DeviceCapabilityCache(),
             FilterDisabled());
 
-        var results = await orchestrator.ReadAllAsync([], CancellationToken.None);
+        var results = await orchestrator.ReadAllAsync([], TestContext.Current.CancellationToken);
 
         Assert.Equal(2, results.Count);
     }
