@@ -28,9 +28,19 @@ jobs:
 
       - name: Debug test EXE presence
         run: |
-          echo "Listing test output directories..."
-          dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0
-          dir .\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64
+          Write-Host "Listing test output directories (tolerant)"
+          $paths = @(
+            ".\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0",
+            ".\tests\BTChargeTrayWatcher.Tests\bin\Release\net10.0-windows10.0.19041.0\win-x64"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "Contents of: $p"
+              Get-ChildItem -Path $p -Force | ForEach-Object { Write-Host $_.Name }
+            } else {
+              Write-Host "Path not found: $p"
+            }
+          }
 
       - name: Run tests (dotnet test, Release)
         run: |
