@@ -56,9 +56,7 @@ internal sealed class TrayMenuBuilder
                     {
                         trend = BatteryTrendHelper.GetArrow(null, dev.Battery.Value);
                     }
-                    int poll = settings.GetPollIntervalForDevice(dev.DeviceId, dev.Name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds;
-                    string pollText = $"({poll}s)";
-                    string text = trend.Length > 0 ? $"{name}  {battery} {trend} {pollText}" : $"{name}  {battery} {pollText}";
+                        string text = trend.Length > 0 ? $"{name}  {battery} {trend}" : $"{name}  {battery}";
                     var item = new ToolStripMenuItem(text) { Enabled = false };
                     menu.Items.Insert(insertIndex, item);
                     insertIndex++;
