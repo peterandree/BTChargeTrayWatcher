@@ -24,6 +24,7 @@ public sealed class TrayApp : IDisposable
     private bool _disposed;
     private bool _hasBluetoothAlert;
     private bool _hasLaptopAlert;
+    private System.ComponentModel.CancelEventHandler? _contextMenuOpeningHandler;
 
     /// <param name="settings">Application threshold settings.</param>
     /// <param name="monitor">Bluetooth battery monitor.</param>
@@ -63,7 +64,7 @@ public sealed class TrayApp : IDisposable
         _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
-        _trayIcon.ContextMenuStrip = TrayMenuBuilder.Build(
+        var contextMenu = TrayMenuBuilder.Build(
             _settings,
             _laptopMenuItem,
             () => monitor.LastKnownDevices,
@@ -72,6 +73,10 @@ public sealed class TrayApp : IDisposable
             _highMenu,
             onExit: () => _ = ExitAsync(),
             onOptions: _showOptions);
+
+        _contextMenuOpeningHandler = (s, e) => { if (!_disposed) UpdateTooltip(); };
+        contextMenu.Opening += _contextMenuOpeningHandler;
+        _trayIcon.ContextMenuStrip = contextMenu;
 
         _trayIcon.MouseClick  += OnTrayMouseClick;
         _trayIcon.DoubleClick += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
@@ -310,6 +315,9 @@ public sealed class TrayApp : IDisposable
         _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
 
         _scanner.Dispose();
+
+        if (_trayIcon.ContextMenuStrip is not null && _contextMenuOpeningHandler is not null)
+            _trayIcon.ContextMenuStrip.Opening -= _contextMenuOpeningHandler;
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();

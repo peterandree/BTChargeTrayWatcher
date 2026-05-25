@@ -22,30 +22,56 @@ internal sealed class TrayMenuBuilder
         Action? onOptions = null)
     {
         var menu = new ContextMenuStrip();
+        // Static header: laptop status + separator
         menu.Items.Add(laptopMenuItem);
-        menu.Items.Add(new ToolStripSeparator());
-        // Flat device list: name, battery, trend/charging
-        try
+        var startDevicesSeparator = new ToolStripSeparator();
+        menu.Items.Add(startDevicesSeparator);
+
+        // End marker for dynamic device entries
+        var endDevicesSeparator = new ToolStripSeparator();
+        menu.Items.Add(endDevicesSeparator);
+
+        // Populate devices dynamically when the menu opens so values are always current
+        menu.Opening += (_, _) =>
         {
-            var devices = getDevices();
-            foreach (var dev in devices)
+            try
             {
-                string name = settings.GetDisplayName(dev.DeviceId, dev.Name);
-                string battery = dev.Battery.HasValue ? BatteryDisplay.FormatBattery(dev.Battery.Value, dev.IsCharging) : "N/A";
-                string trend = string.Empty;
-                if (dev.Battery.HasValue)
+                // Remove existing dynamic items between the separators
+                int startIndex = menu.Items.IndexOf(startDevicesSeparator);
+                int endIndex = menu.Items.IndexOf(endDevicesSeparator);
+                while (startIndex + 1 < endIndex)
                 {
-                    trend = BatteryTrendHelper.GetArrow(null, dev.Battery.Value); // TODO: pass previous value if available
+                    menu.Items.RemoveAt(startIndex + 1);
+                    endIndex--;
                 }
-                int poll = settings.GetPollIntervalForDevice(dev.DeviceId, dev.Name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds;
-                string pollText = $"({poll}s)";
-                string text = trend.Length > 0 ? $"{name}  {battery} {trend} {pollText}" : $"{name}  {battery} {pollText}";
-                var item = new ToolStripMenuItem(text) { Enabled = false };
-                menu.Items.Add(item);
+
+                var devices = getDevices();
+                int insertIndex = menu.Items.IndexOf(endDevicesSeparator);
+                foreach (var dev in devices)
+                {
+                    string name = settings.GetDisplayName(dev.DeviceId, dev.Name);
+                    string battery = dev.Battery.HasValue ? BatteryDisplay.FormatBattery(dev.Battery.Value, dev.IsCharging) : "N/A";
+                    string trend = string.Empty;
+                    if (dev.Battery.HasValue)
+                    {
+                        trend = BatteryTrendHelper.GetArrow(null, dev.Battery.Value);
+                    }
+                    int poll = settings.GetPollIntervalForDevice(dev.DeviceId, dev.Name) ?? (int)PollingDefaults.PollingInterval.TotalSeconds;
+                    string pollText = $"({poll}s)";
+                    string text = trend.Length > 0 ? $"{name}  {battery} {trend} {pollText}" : $"{name}  {battery} {pollText}";
+                    var item = new ToolStripMenuItem(text) { Enabled = false };
+                    menu.Items.Insert(insertIndex, item);
+                    insertIndex++;
+                }
             }
-        }
-        catch { menu.Items.Add("(device error)"); }
-        menu.Items.Add(new ToolStripSeparator());
+            catch
+            {
+                // If device listing fails, show a single error entry between separators
+                int insertIndex = menu.Items.IndexOf(endDevicesSeparator);
+                menu.Items.Insert(insertIndex, new ToolStripMenuItem("(device error)") { Enabled = false });
+            }
+        };
+
         menu.Items.Add(scanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         var optionsMenuItem = new ToolStripMenuItem("Options…");
