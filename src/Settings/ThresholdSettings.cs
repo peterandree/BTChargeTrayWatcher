@@ -1,8 +1,33 @@
 namespace BTChargeTrayWatcher;
 
+/// <summary>
+/// Pure domain model for all user-configurable battery thresholds, device
+/// overrides, aliases, and feature flags.
+///
+/// Threading: all mutations acquire <c>_lock</c>.  Events are dispatched via
+/// <see cref="SettingsEventBus.Raise"/> AFTER releasing the lock so that
+/// subscribers can safely call back into this class without deadlocking
+/// (fixes the re-entrancy risk identified in #130 / #134).
+/// </summary>
 public sealed class ThresholdSettings
 {
-    private readonly Lock _thresholdLock = new();
+    private readonly Lock _lock = new();
+    internal readonly SettingsEventBus Bus = new();
+
+    // ── Convenience forwarders (preserve existing public API surface) ────────────────
+    // These allow existing callers that subscribed to ThresholdSettings.Changed /
+    // LaptopSettingsChanged to keep working without modification.
+    public event Action? Changed
+    {
+        add    => Bus.Changed += value;
+        remove => Bus.Changed -= value;
+    }
+
+    public event Action? LaptopSettingsChanged
+    {
+        add    => Bus.LaptopSettingsChanged += value;
+        remove => Bus.LaptopSettingsChanged -= value;
+    }
 
     private int _low;
     private int _high;
@@ -12,128 +37,195 @@ public sealed class ThresholdSettings
     private HashSet<string> _trayIconOverlayExcludedDevices = new(StringComparer.OrdinalIgnoreCase);
     private bool _excludeLaptopFromTrayIconOverlay;
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
-
     private NtfyIntegrationSettings _ntfy = new();
-
-    // Per-device poll interval (seconds)
     private Dictionary<string, int> _devicePollIntervals = new(StringComparer.OrdinalIgnoreCase);
-    // Optional user-specified display name aliases keyed by device id
     private Dictionary<string, string> _displayNameAliases = new(StringComparer.OrdinalIgnoreCase);
-
-    // ADR-016: category filter
     private bool _categoryFilterEnabled = true;
     private HashSet<string> _categoryFilterOverrides = new(StringComparer.OrdinalIgnoreCase);
-
-    // ADR-015: alias map — historical name variant (any casing) → canonical DeviceId
     private Dictionary<string, string> _aliasMap = new(StringComparer.OrdinalIgnoreCase);
-    
-    // Per-device suppression for alias suggestions (persisted)
     private HashSet<string> _suppressedAliasSuggestions = new(StringComparer.OrdinalIgnoreCase);
 
-    // ── ADR-015: alias map ───────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns a snapshot of the alias map (historical name variant → canonical DeviceId).
-    /// </summary>
-    public IReadOnlyDictionary<string, string> AliasMap
+    public ThresholdSettings()
     {
-        get
+        _low        = 20;
+        _high       = 80;
+        _laptopLow  = 20;
+        _laptopHigh = 80;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────────
+
+    // Pattern: every mutation
+    //   1. acquires _lock
+    //   2. computes PendingRaise inside the lock
+    //   3. releases the lock
+    //   4. calls Bus.Raise(pending) — outside the lock
+
+    private void RaiseChanged() =>
+        Bus.Raise(SettingsEventBus.PendingRaise.Changed);
+
+    private void RaiseLaptopChanged() =>
+        Bus.Raise(SettingsEventBus.PendingRaise.Changed | SettingsEventBus.PendingRaise.LaptopSettingsChanged);
+
+    // ── Global thresholds ────────────────────────────────────────────────────────────
+
+    public int Low
+    {
+        get { lock (_lock) return _low; }
+        set
         {
-            lock (_thresholdLock)
-                return new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase);
+            bool changed;
+            lock (_lock)
+            {
+                if (_low == value) return;
+                if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
+                _low = value;
+                changed = true;
+            }
+            if (changed) RaiseChanged();
         }
     }
 
-    /// <summary>
-    /// Replaces the alias map wholesale. Pass an empty enumerable to clear all aliases.
-    /// </summary>
-    public void SetAliasMap(IEnumerable<KeyValuePair<string, string>> entries)
+    public int High
     {
-        lock (_thresholdLock)
+        get { lock (_lock) return _high; }
+        set
         {
-            _aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in entries)
-                if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
-                    _aliasMap[kv.Key] = kv.Value;
+            bool changed;
+            lock (_lock)
+            {
+                if (_high == value) return;
+                if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
+                _high = value;
+                changed = true;
+            }
+            if (changed) RaiseChanged();
         }
-        Changed?.Invoke();
     }
 
-    /// <summary>
-    /// Adds or updates a single alias entry. Raises <see cref="Changed"/>.
-    /// </summary>
-    public void AddAlias(string nameVariant, string canonicalDeviceId)
+    public int LaptopLow
     {
-        if (string.IsNullOrWhiteSpace(nameVariant)) throw new ArgumentException("Name variant must not be empty.", nameof(nameVariant));
-        if (string.IsNullOrWhiteSpace(canonicalDeviceId)) throw new ArgumentException("Canonical device ID must not be empty.", nameof(canonicalDeviceId));
-        lock (_thresholdLock)
-            _aliasMap[nameVariant] = canonicalDeviceId;
-        Changed?.Invoke();
-    }
-
-    /// <summary>
-    /// Removes an alias entry by its name variant key. No-op if the key is absent.
-    /// </summary>
-    public void RemoveAlias(string nameVariant)
-    {
-        bool changed;
-        lock (_thresholdLock)
-            changed = _aliasMap.Remove(nameVariant);
-        if (changed) Changed?.Invoke();
-    }
-
-    // ── ADR-016: category filter ─────────────────────────────────────────────────────
-
-    /// <summary>
-    /// When <c>true</c> (default), <see cref="BatteryReaderOrchestrator"/> excludes devices
-    /// whose <see cref="DeviceBatteryInfo.Category"/> is a known but non-battery-bearing
-    /// category. Set to <c>false</c> to pass all devices through regardless of category.
-    /// </summary>
-    public bool CategoryFilterEnabled
-    {
-        get { lock (_thresholdLock) return _categoryFilterEnabled; }
-    }
-
-    public void SetCategoryFilterEnabled(bool value)
-    {
-        lock (_thresholdLock)
+        get { lock (_lock) return _laptopLow; }
+        set
         {
-            if (_categoryFilterEnabled == value) return;
-            _categoryFilterEnabled = value;
+            bool changed;
+            lock (_lock)
+            {
+                if (_laptopLow == value) return;
+                if (value >= _laptopHigh) throw new ArgumentOutOfRangeException(nameof(value), "Laptop Low threshold must be below Laptop High threshold.");
+                _laptopLow = value;
+                changed = true;
+            }
+            if (changed) RaiseLaptopChanged();
         }
-        Changed?.Invoke();
     }
 
-    /// <summary>
-    /// Returns a snapshot of the device IDs that bypass the category filter.
-    /// </summary>
-    public IReadOnlyCollection<string> CategoryFilterOverrides
+    public int LaptopHigh
     {
-        get { lock (_thresholdLock) return new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase); }
+        get { lock (_lock) return _laptopHigh; }
+        set
+        {
+            bool changed;
+            lock (_lock)
+            {
+                if (_laptopHigh == value) return;
+                if (value <= _laptopLow) throw new ArgumentOutOfRangeException(nameof(value), "Laptop High threshold must be above Laptop Low threshold.");
+                _laptopHigh = value;
+                changed = true;
+            }
+            if (changed) RaiseLaptopChanged();
+        }
     }
 
-    /// <summary>
-    /// Returns <c>true</c> when <paramref name="deviceId"/> is present in the
-    /// category filter override set and should bypass filtering unconditionally.
-    /// </summary>
-    public bool IsCategoryFilterOverridden(string deviceId)
+    // ── Tray icon overlay exclusion ──────────────────────────────────────────────────
+
+    public bool ExcludeLaptopFromTrayIconOverlay
     {
-        lock (_thresholdLock) return _categoryFilterOverrides.Contains(deviceId);
+        get { lock (_lock) return _excludeLaptopFromTrayIconOverlay; }
+        set
+        {
+            bool changed;
+            lock (_lock)
+            {
+                if (_excludeLaptopFromTrayIconOverlay == value) return;
+                _excludeLaptopFromTrayIconOverlay = value;
+                changed = true;
+            }
+            if (changed) RaiseChanged();
+        }
     }
 
-    public void SetCategoryFilterOverrides(IEnumerable<string> deviceIds)
+    public bool IsTrayIconOverlayExcluded(string deviceId, string displayName)
     {
-        lock (_thresholdLock)
-            _categoryFilterOverrides = new HashSet<string>(deviceIds, StringComparer.OrdinalIgnoreCase);
-        Changed?.Invoke();
+        lock (_lock)
+            return _trayIconOverlayExcludedDevices.Contains(deviceId)
+                || _trayIconOverlayExcludedDevices.Contains(displayName);
     }
 
+    public void SetTrayIconOverlayExcludedDevices(IEnumerable<string> devices)
+    {
+        lock (_lock)
+            _trayIconOverlayExcludedDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
 
-    // ── Device-id-aware APIs (preferred) ────────────────────────────────────────────
+    // ── Device sets ──────────────────────────────────────────────────────────────────
+
+    public IReadOnlyCollection<string> IgnoredDevices
+    {
+        get { lock (_lock) return new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices
+    {
+        get { lock (_lock) return new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    public bool IsIgnored(string deviceId, string displayName)
+    {
+        lock (_lock)
+            return _ignoredDevices.Contains(deviceId) || _ignoredDevices.Contains(displayName);
+    }
+
+    public void SetIgnoredDevices(IEnumerable<string> devices)
+    {
+        lock (_lock)
+            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
+
+    public void SetIgnoredDevicesByIds(IEnumerable<string> devices)
+    {
+        lock (_lock)
+            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
+
+    public void ToggleIgnoreDevice(string deviceName)
+    {
+        lock (_lock)
+        {
+            if (!_ignoredDevices.Remove(deviceName))
+                _ignoredDevices.Add(deviceName);
+        }
+        RaiseChanged();
+    }
+
+    public void ToggleExcludeFromTrayIconOverlay(string deviceName)
+    {
+        lock (_lock)
+        {
+            if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
+                _trayIconOverlayExcludedDevices.Add(deviceName);
+        }
+        RaiseChanged();
+    }
+
+    // ── Device-id-aware threshold APIs ───────────────────────────────────────────────
 
     public int GetLowForDevice(string deviceId, string displayName)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (_deviceOverrides.TryGetValue(deviceId, out var t) && t.Low.HasValue) return t.Low.Value;
             if (_deviceOverrides.TryGetValue(displayName, out var t2) && t2.Low.HasValue) return t2.Low.Value;
@@ -143,7 +235,7 @@ public sealed class ThresholdSettings
 
     public int GetHighForDevice(string deviceId, string displayName)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (_deviceOverrides.TryGetValue(deviceId, out var t) && t.High.HasValue) return t.High.Value;
             if (_deviceOverrides.TryGetValue(displayName, out var t2) && t2.High.HasValue) return t2.High.Value;
@@ -153,7 +245,7 @@ public sealed class ThresholdSettings
 
     public void SetLowForDevice(string deviceId, int? value)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (!_deviceOverrides.TryGetValue(deviceId, out var t))
             {
@@ -175,12 +267,12 @@ public sealed class ThresholdSettings
             if (!t.Low.HasValue && !t.High.HasValue)
                 _deviceOverrides.Remove(deviceId);
         }
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     public void SetHighForDevice(string deviceId, int? value)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (!_deviceOverrides.TryGetValue(deviceId, out var t))
             {
@@ -202,12 +294,14 @@ public sealed class ThresholdSettings
             if (!t.Low.HasValue && !t.High.HasValue)
                 _deviceOverrides.Remove(deviceId);
         }
-        Changed?.Invoke();
+        RaiseChanged();
     }
+
+    // ── Per-device poll intervals ────────────────────────────────────────────────────
 
     public int? GetPollIntervalForDevice(string deviceId, string displayName)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (_devicePollIntervals.TryGetValue(deviceId, out var v)) return v;
             if (_devicePollIntervals.TryGetValue(displayName, out var v2)) return v2;
@@ -217,230 +311,39 @@ public sealed class ThresholdSettings
 
     public void SetPollIntervalForDevice(string deviceId, int? interval)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (interval.HasValue)
                 _devicePollIntervals[deviceId] = interval.Value;
             else
                 _devicePollIntervals.Remove(deviceId);
         }
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     public bool HasCustomPollIntervalForDevice(string deviceId)
     {
-        lock (_thresholdLock) return _devicePollIntervals.ContainsKey(deviceId);
+        lock (_lock) return _devicePollIntervals.ContainsKey(deviceId);
     }
 
-    public bool IsIgnored(string deviceId, string displayName)
-    {
-        lock (_thresholdLock)
-            return _ignoredDevices.Contains(deviceId) || _ignoredDevices.Contains(displayName);
-    }
-
-    public void SetIgnoredDevicesByIds(IEnumerable<string> devices)
-    {
-        lock (_thresholdLock)
-            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
-        Changed?.Invoke();
-    }
-
-    public event Action? Changed;
-    public event Action? LaptopSettingsChanged;
-
-    public ThresholdSettings()
-    {
-        _low = 20;
-        _high = 80;
-        _laptopLow = 20;
-        _laptopHigh = 80;
-    }
-
-    /// <summary>
-    /// Returns true when alias suggestions for the specified deviceId have been
-    /// suppressed by the user and should not be emitted.
-    /// </summary>
-    public bool IsAliasSuggestionSuppressed(string deviceId)
-    {
-        if (string.IsNullOrWhiteSpace(deviceId)) return false;
-        lock (_thresholdLock) return _suppressedAliasSuggestions.Contains(deviceId);
-    }
-
-    /// <summary>
-    /// Persistently suppress alias suggestions for the given device id.
-    /// </summary>
-    public void SuppressAliasSuggestion(string deviceId)
-    {
-        if (string.IsNullOrWhiteSpace(deviceId)) return;
-        lock (_thresholdLock)
-        {
-            if (!_suppressedAliasSuggestions.Add(deviceId)) return;
-        }
-        Changed?.Invoke();
-    }
-
-    /// <summary>
-    /// Remove suppression for the given device id.
-    /// </summary>
-    public void UnsuppressAliasSuggestion(string deviceId)
-    {
-        if (string.IsNullOrWhiteSpace(deviceId)) return;
-        lock (_thresholdLock)
-        {
-            if (!_suppressedAliasSuggestions.Remove(deviceId)) return;
-        }
-        Changed?.Invoke();
-    }
-
-    // ── Global thresholds ────────────────────────────────────────────────────────────
-
-    public int Low
-    {
-        get { lock (_thresholdLock) return _low; }
-        set
-        {
-            lock (_thresholdLock)
-            {
-                if (_low == value) return;
-                if (value >= _high) throw new ArgumentOutOfRangeException(nameof(value), "Low threshold must be below High threshold.");
-                _low = value;
-            }
-            Changed?.Invoke();
-        }
-    }
-
-    public int High
-    {
-        get { lock (_thresholdLock) return _high; }
-        set
-        {
-            lock (_thresholdLock)
-            {
-                if (_high == value) return;
-                if (value <= _low) throw new ArgumentOutOfRangeException(nameof(value), "High threshold must be above Low threshold.");
-                _high = value;
-            }
-            Changed?.Invoke();
-        }
-    }
-
-    public int LaptopLow
-    {
-        get { lock (_thresholdLock) return _laptopLow; }
-        set
-        {
-            lock (_thresholdLock)
-            {
-                if (_laptopLow == value) return;
-                if (value >= _laptopHigh) throw new ArgumentOutOfRangeException(nameof(value), "Laptop Low threshold must be below Laptop High threshold.");
-                _laptopLow = value;
-            }
-            Changed?.Invoke();
-            LaptopSettingsChanged?.Invoke();
-        }
-    }
-
-    public int LaptopHigh
-    {
-        get { lock (_thresholdLock) return _laptopHigh; }
-        set
-        {
-            lock (_thresholdLock)
-            {
-                if (_laptopHigh == value) return;
-                if (value <= _laptopLow) throw new ArgumentOutOfRangeException(nameof(value), "Laptop High threshold must be above Laptop Low threshold.");
-                _laptopHigh = value;
-            }
-            Changed?.Invoke();
-            LaptopSettingsChanged?.Invoke();
-        }
-    }
-
-    // ── Tray icon overlay exclusion ──────────────────────────────────────────────────
-
-    public bool ExcludeLaptopFromTrayIconOverlay
-    {
-        get { lock (_thresholdLock) return _excludeLaptopFromTrayIconOverlay; }
-        set
-        {
-            lock (_thresholdLock)
-            {
-                if (_excludeLaptopFromTrayIconOverlay == value) return;
-                _excludeLaptopFromTrayIconOverlay = value;
-            }
-            Changed?.Invoke();
-        }
-    }
-
-    public bool IsTrayIconOverlayExcluded(string deviceId, string displayName)
-    {
-        lock (_thresholdLock)
-            return _trayIconOverlayExcludedDevices.Contains(deviceId)
-                || _trayIconOverlayExcludedDevices.Contains(displayName);
-    }
-
-    public void SetTrayIconOverlayExcludedDevices(IEnumerable<string> devices)
-    {
-        lock (_thresholdLock)
-            _trayIconOverlayExcludedDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
-        Changed?.Invoke();
-    }
-
-    // ── Device sets ──────────────────────────────────────────────────────────────────
-
-    public IReadOnlyCollection<string> IgnoredDevices
-    {
-        get { lock (_thresholdLock) return new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase); }
-    }
-
-    public IReadOnlyCollection<string> TrayIconOverlayExcludedDevices
-    {
-        get { lock (_thresholdLock) return new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase); }
-    }
-
-    public void SetIgnoredDevices(IEnumerable<string> devices)
-    {
-        lock (_thresholdLock)
-            _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
-        Changed?.Invoke();
-    }
+    // ── Display name aliases ─────────────────────────────────────────────────────────
 
     public void SetDisplayNameAlias(string deviceId, string? alias)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
             if (string.IsNullOrWhiteSpace(alias))
                 _displayNameAliases.Remove(deviceId);
             else
                 _displayNameAliases[deviceId] = alias!;
         }
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     public string GetDisplayName(string deviceId, string defaultName)
     {
-        lock (_thresholdLock)
+        lock (_lock)
             return _displayNameAliases.TryGetValue(deviceId, out var a) ? a : defaultName;
-    }
-
-    public void ToggleIgnoreDevice(string deviceName)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_ignoredDevices.Remove(deviceName))
-                _ignoredDevices.Add(deviceName);
-        }
-        Changed?.Invoke();
-    }
-
-    public void ToggleExcludeFromTrayIconOverlay(string deviceName)
-    {
-        lock (_thresholdLock)
-        {
-            if (!_trayIconOverlayExcludedDevices.Remove(deviceName))
-                _trayIconOverlayExcludedDevices.Add(deviceName);
-        }
-        Changed?.Invoke();
     }
 
     // ── ntfy integration ─────────────────────────────────────────────────────────────
@@ -448,37 +351,132 @@ public sealed class ThresholdSettings
     /// <summary>Returns a snapshot copy of the current ntfy settings. Never null.</summary>
     public NtfyIntegrationSettings GetNtfySettings()
     {
-        lock (_thresholdLock) return _ntfy.Clone();
+        lock (_lock) return _ntfy.Clone();
     }
 
     /// <summary>
-    /// Applies mutations to the ntfy settings using a copy-out / mutate / assign-back
-    /// pattern so that the caller's delegate runs outside <c>_thresholdLock</c>,
-    /// preventing re-entrant deadlocks (fix #134).
+    /// Applies mutations to the ntfy settings using copy-out / mutate / assign-back
+    /// so the caller's delegate runs outside <c>_lock</c>, preventing re-entrant
+    /// deadlocks (ADR-014 compliance, #134).
     /// </summary>
     public void UpdateNtfySettings(Action<NtfyIntegrationSettings> mutate)
     {
-        // Copy out — no lock held during the caller's delegate.
         NtfyIntegrationSettings copy;
-        lock (_thresholdLock) copy = _ntfy.Clone();
-
+        lock (_lock) copy = _ntfy.Clone();
         mutate(copy);
-
-        // Assign back under lock.
-        lock (_thresholdLock) _ntfy = copy;
-
-        Changed?.Invoke();
+        lock (_lock) _ntfy = copy;
+        RaiseChanged();
     }
 
+    // ── ADR-016: category filter ─────────────────────────────────────────────────────
+
+    public bool CategoryFilterEnabled
+    {
+        get { lock (_lock) return _categoryFilterEnabled; }
+    }
+
+    public void SetCategoryFilterEnabled(bool value)
+    {
+        bool changed;
+        lock (_lock)
+        {
+            if (_categoryFilterEnabled == value) return;
+            _categoryFilterEnabled = value;
+            changed = true;
+        }
+        if (changed) RaiseChanged();
+    }
+
+    public IReadOnlyCollection<string> CategoryFilterOverrides
+    {
+        get { lock (_lock) return new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    public bool IsCategoryFilterOverridden(string deviceId)
+    {
+        lock (_lock) return _categoryFilterOverrides.Contains(deviceId);
+    }
+
+    public void SetCategoryFilterOverrides(IEnumerable<string> deviceIds)
+    {
+        lock (_lock)
+            _categoryFilterOverrides = new HashSet<string>(deviceIds, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
+
+    // ── ADR-015: alias map ───────────────────────────────────────────────────────────
+
+    public IReadOnlyDictionary<string, string> AliasMap
+    {
+        get
+        {
+            lock (_lock)
+                return new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public void SetAliasMap(IEnumerable<KeyValuePair<string, string>> entries)
+    {
+        lock (_lock)
+        {
+            _aliasMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in entries)
+                if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                    _aliasMap[kv.Key] = kv.Value;
+        }
+        RaiseChanged();
+    }
+
+    public void AddAlias(string nameVariant, string canonicalDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(nameVariant)) throw new ArgumentException("Name variant must not be empty.", nameof(nameVariant));
+        if (string.IsNullOrWhiteSpace(canonicalDeviceId)) throw new ArgumentException("Canonical device ID must not be empty.", nameof(canonicalDeviceId));
+        lock (_lock)
+            _aliasMap[nameVariant] = canonicalDeviceId;
+        RaiseChanged();
+    }
+
+    public void RemoveAlias(string nameVariant)
+    {
+        bool changed;
+        lock (_lock)
+            changed = _aliasMap.Remove(nameVariant);
+        if (changed) RaiseChanged();
+    }
+
+    // ── Alias suggestion suppression ─────────────────────────────────────────────────
+
+    public bool IsAliasSuggestionSuppressed(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return false;
+        lock (_lock) return _suppressedAliasSuggestions.Contains(deviceId);
+    }
+
+    public void SuppressAliasSuggestion(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return;
+        bool changed;
+        lock (_lock)
+            changed = _suppressedAliasSuggestions.Add(deviceId);
+        if (changed) RaiseChanged();
+    }
+
+    public void UnsuppressAliasSuggestion(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId)) return;
+        bool changed;
+        lock (_lock)
+            changed = _suppressedAliasSuggestions.Remove(deviceId);
+        if (changed) RaiseChanged();
+    }
 
     // ── Snapshot / restore ───────────────────────────────────────────────────────────
 
     internal SettingsSnapshot Snapshot()
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
-            var overridesCopy = new Dictionary<string, DeviceThresholds>(
-                StringComparer.OrdinalIgnoreCase);
+            var overridesCopy = new Dictionary<string, DeviceThresholds>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in _deviceOverrides)
                 overridesCopy[kvp.Key] = kvp.Value with { };
 
@@ -498,35 +496,33 @@ public sealed class ThresholdSettings
         }
     }
 
+    // ApplySnapshot does NOT raise Changed — callers (SettingsPersistence.Load)
+    // intentionally suppress events during bulk load to avoid redundant saves.
     internal void ApplySnapshot(SettingsSnapshot s)
     {
-        lock (_thresholdLock)
+        lock (_lock)
         {
-            _low = s.Low;
-            _high = s.High;
-            _laptopLow = s.LaptopLow;
-            _laptopHigh = s.LaptopHigh;
-            _ignoredDevices = s.IgnoredDevices;
-            _trayIconOverlayExcludedDevices = s.TrayIconOverlayExcludedDevices;
+            _low                              = s.Low;
+            _high                             = s.High;
+            _laptopLow                        = s.LaptopLow;
+            _laptopHigh                       = s.LaptopHigh;
+            _ignoredDevices                   = s.IgnoredDevices;
+            _trayIconOverlayExcludedDevices   = s.TrayIconOverlayExcludedDevices;
             _excludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay;
-            _deviceOverrides = s.DeviceOverrides;
-            _devicePollIntervals = s.DevicePollIntervals;
-            _displayNameAliases = s.DeviceDisplayNameAliases;
-            _ntfy = s.Ntfy;
-            _categoryFilterEnabled = s.CategoryFilterEnabled;
-            _categoryFilterOverrides = s.CategoryFilterOverrides;
-            _aliasMap = s.AliasMap;
-            _suppressedAliasSuggestions = s.SuppressedAliasSuggestions;
+            _deviceOverrides                  = s.DeviceOverrides;
+            _devicePollIntervals              = s.DevicePollIntervals;
+            _displayNameAliases               = s.DeviceDisplayNameAliases;
+            _ntfy                             = s.Ntfy;
+            _categoryFilterEnabled            = s.CategoryFilterEnabled;
+            _categoryFilterOverrides          = s.CategoryFilterOverrides;
+            _aliasMap                         = s.AliasMap;
+            _suppressedAliasSuggestions       = s.SuppressedAliasSuggestions;
         }
     }
 }
 
 // ── Shared types ─────────────────────────────────────────────────────────────────────
 
-/// <summary>
-/// Per-device low/high battery threshold overrides.
-/// Use init-only setters to preserve value semantics; mutate via 'with' expressions.
-/// </summary>
 public sealed record DeviceThresholds
 {
     public int? Low  { get; init; }
