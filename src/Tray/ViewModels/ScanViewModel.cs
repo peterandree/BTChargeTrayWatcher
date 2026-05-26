@@ -8,13 +8,13 @@ internal sealed class ScanViewModel : IDisposable
     private readonly ThresholdSettings _settings;
     private const int AutoRefreshIntervalSeconds = 30;
 
-    // ── Scan state ────────────────────────────────────────────────────────
+    // ── Scan state ───────────────────────────────────────────────────────────
 
     public bool ScanComplete   { get; private set; }
     public bool AutoRefreshOn  { get; set; } = true;
     public int  Countdown      { get; private set; } = AutoRefreshIntervalSeconds;
 
-    // ── Device list model ────────────────────────────────────────────────
+    // ── Device list model ─────────────────────────────────────────────────────
 
     public sealed class DeviceItem
     {
@@ -31,17 +31,22 @@ internal sealed class ScanViewModel : IDisposable
         public bool    TrendDown   { get; init; }
     }
 
-    // Raised on the caller's thread (the UI timer tick or scan event handler).
+    // Raised on the caller’s thread (the UI timer tick or scan event handler).
     public event Action<DeviceItem>?               DeviceUpserted;
     public event Action<IReadOnlyList<DeviceItem>>? ScanCompleted;
     public event Action<string>?                   StatusChanged;
     public event Action?                           AutoRefreshTriggered;
     public event Action?                           ScanRestarted;
 
-    private readonly Dictionary<string, int> _previousBattery    = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _currentScanValues  = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _previousBattery   = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _currentScanValues = new(StringComparer.OrdinalIgnoreCase);
 
-    // ── Timer ─────────────────────────────────────────────────────────────
+    // Populated by SetShownItems() before OnScanComplete() so the dedup guard
+    // knows which rows are already visible in the ListView.
+    private HashSet<string> _shownIds   = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _shownNames = new(StringComparer.OrdinalIgnoreCase);
+
+    // ── Timer ───────────────────────────────────────────────────────────────────
 
     private System.Threading.Timer? _timer;
 
@@ -72,7 +77,7 @@ internal sealed class ScanViewModel : IDisposable
         EmitStatus();
     }
 
-    // ── Scan lifecycle ────────────────────────────────────────────────────
+    // ── Scan lifecycle ─────────────────────────────────────────────────────────
 
     public void OnScanStarted()
     {
@@ -86,7 +91,7 @@ internal sealed class ScanViewModel : IDisposable
     public DeviceItem OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null)
     {
         bool isIgnored = _settings.IsIgnored(deviceId, name);
-        string arrow = string.Empty;
+        string arrow   = string.Empty;
         bool trendUp = false, trendDown = false;
 
         if (!isIgnored && battery.HasValue)
@@ -128,6 +133,22 @@ internal sealed class ScanViewModel : IDisposable
         return item;
     }
 
+    /// <summary>
+    /// Must be called by the shell immediately before <see cref="OnScanComplete"/>,
+    /// passing the IDs and names of rows already visible in the ListView.
+    /// OnScanComplete uses these sets to suppress duplicate “sleeping” rows.
+    /// </summary>
+    public void SetShownItems(IEnumerable<(string id, string name)> existingItems)
+    {
+        _shownIds.Clear();
+        _shownNames.Clear();
+        foreach (var (id, name) in existingItems)
+        {
+            _shownIds.Add(id);
+            _shownNames.Add(name);
+        }
+    }
+
     public IReadOnlyList<DeviceItem> OnScanComplete(IReadOnlyList<WatchedDevice> trackedDevices)
     {
         ScanComplete = true;
@@ -136,14 +157,12 @@ internal sealed class ScanViewModel : IDisposable
             _previousBattery[kvp.Key] = kvp.Value;
         _currentScanValues.Clear();
 
-        var shownIds   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var shownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var extras     = new List<DeviceItem>();
+        var extras = new List<DeviceItem>();
 
         foreach (var device in trackedDevices)
         {
-            if (shownIds.Contains(device.DeviceId))  continue;
-            if (shownNames.Contains(device.Name))    continue;
+            if (_shownIds.Contains(device.DeviceId)) continue;
+            if (_shownNames.Contains(device.Name))   continue;
 
             string reason = device.IsConnected ? "[No battery service]" : "[Sleeping / not connected]";
             extras.Add(new DeviceItem
@@ -154,26 +173,14 @@ internal sealed class ScanViewModel : IDisposable
                 PollText    = reason,
                 IsIgnored   = true
             });
-            shownNames.Add(device.Name);
+            // Register in shown sets so duplicates within trackedDevices are also suppressed.
+            _shownIds.Add(device.DeviceId);
+            _shownNames.Add(device.Name);
         }
 
         ScanCompleted?.Invoke(extras);
         EmitStatus();
         return extras;
-    }
-
-    /// <summary>Builds the shownIds/shownNames sets from the ScanWindow's current ListView items.</summary>
-    public (HashSet<string> ids, HashSet<string> names) BuildShownSets(
-        IEnumerable<(string id, string name)> existingItems)
-    {
-        var ids   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (id, name) in existingItems)
-        {
-            ids.Add(id);
-            names.Add(name);
-        }
-        return (ids, names);
     }
 
     private void EmitStatus()

@@ -111,7 +111,7 @@ public partial class ScanWindow : Form
                 _vm.StopTimer();
         };
 
-        Shown     += (_, _) => _vm.StartTimer();
+        Shown      += (_, _) => _vm.StartTimer();
         FormClosed += (_, _) => { _vm.StopTimer(); _vm.Dispose(); };
     }
 
@@ -124,10 +124,11 @@ public partial class ScanWindow : Form
 
     internal void OnScanComplete(IReadOnlyList<WatchedDevice> trackedDevices)
     {
-        var existing = _list.Items
+        // Snapshot current ListView state into the VM before it builds the extras list.
+        _vm.SetShownItems(_list.Items
             .Cast<ListViewItem>()
-            .Select(i => (id: i.Tag as string ?? string.Empty, name: i.Text));
-        _vm.BuildShownSets(existing);
+            .Select(i => (id: i.Tag as string ?? string.Empty, name: i.Text)));
+
         _vm.OnScanComplete(trackedDevices);
     }
 
