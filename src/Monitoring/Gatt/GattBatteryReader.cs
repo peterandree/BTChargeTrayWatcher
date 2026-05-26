@@ -4,7 +4,7 @@ using Windows.Devices.Enumeration;
 
 namespace BTChargeTrayWatcher;
 
-public sealed class GattBatteryReader : IDisposable, IBatteryReader
+public sealed class GattBatteryReader : IDisposable
 {
     private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
     private static readonly TimeSpan DefaultPerDeviceTimeout = TimeSpan.FromSeconds(4);
@@ -18,7 +18,6 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
     {
     }
 
-    // Internal constructor used by tests to inject a processor override and a custom per-device timeout.
     internal GattBatteryReader(Func<string, string, CancellationToken, Task<GattDeviceReadResult>>? testProcessOverride, TimeSpan? perDeviceTimeout)
     {
         _perDeviceTimeout = perDeviceTimeout ?? DefaultPerDeviceTimeout;
@@ -48,8 +47,6 @@ public sealed class GattBatteryReader : IDisposable, IBatteryReader
         return await ReadAllAsync(deviceList, cancellationToken).ConfigureAwait(false);
     }
 
-    // Internal helper: process a provided device list. This enables deterministic tests
-    // without depending on WinRT device enumeration.
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(IEnumerable<(string Id, string Name)> deviceInfos, CancellationToken cancellationToken)
     {
         var list = deviceInfos.ToList();

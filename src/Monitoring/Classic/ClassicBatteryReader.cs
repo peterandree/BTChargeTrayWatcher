@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
-public sealed class ClassicBatteryReader : IBatteryReader
+public sealed class ClassicBatteryReader
 {
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(3);
 
@@ -56,9 +56,6 @@ public sealed class ClassicBatteryReader : IBatteryReader
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
         }, cancellationToken).ConfigureAwait(false);
 
-        // DeviceId = InstanceId (stable SetupAPI identity); Name is display-only.
-        // TryGetValue returns false for devices the property reader could not read;
-        // those get null battery so they are filtered out downstream.
         return connected
             .Select(c =>
             {
