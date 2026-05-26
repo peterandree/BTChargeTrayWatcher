@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
-internal sealed class ClassicBatteryPropertyReader
+internal sealed class ClassicBatteryPropertyReader : IClassicBatteryPropertyReader
 {
     private static readonly Guid BatteryPropertyGuid =
         new("104EA319-6EE2-4701-BD47-8DDBF425BBE5");

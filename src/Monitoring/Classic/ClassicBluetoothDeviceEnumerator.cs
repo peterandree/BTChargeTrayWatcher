@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace BTChargeTrayWatcher;
 
-internal sealed class ClassicBluetoothDeviceEnumerator
+internal sealed class ClassicBluetoothDeviceEnumerator : IClassicBluetoothDeviceEnumerator
 {
     private const string HfagPattern = "_HCIBYPASS_";
 
@@ -118,7 +118,7 @@ internal sealed class ClassicBluetoothDeviceEnumerator
     }
 }
 
-internal readonly record struct ClassicBluetoothCandidate(
+public readonly record struct ClassicBluetoothCandidate(
     string Name,
     string InstanceId,
     ulong Address);

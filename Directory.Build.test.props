@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <UseMicrosoftNETTestSdk>true</UseMicrosoftNETTestSdk>
+    <IsTestProject>true</IsTestProject>
+    <VSTestTestAdapterPath>$(MSBuildThisFileDirectory)</VSTestTestAdapterPath>
+    <TestRunner>VSTest</TestRunner>
+  </PropertyGroup>
+</Project>

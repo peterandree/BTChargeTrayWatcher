@@ -1,0 +1,40 @@
+# Build outputs
+bin/
+obj/
+dist/
+build/
+out/
+coverage/
+
+# Dependencies
+node_modules/
+packages/*/node_modules/
+
+# IDE / tooling
+.vs/
+.idea/
+.vscode/
+.continue/
+
+# Logs and caches
+*.log
+.cache/
+tmp/
+temp/
+
+# Generated files
+*.generated.*
+*.g.cs
+*.Designer.cs
+*.min.js
+*.min.css
+*.snap
+
+# Test artifacts
+TestResults/
+playwright-report/
+
+# Environment / secrets
+.env
+.env.*
+secrets.*

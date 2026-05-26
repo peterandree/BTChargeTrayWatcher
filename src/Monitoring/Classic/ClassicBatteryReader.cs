@@ -2,13 +2,30 @@ using System.Runtime.InteropServices;
 
 namespace BTChargeTrayWatcher;
 
+
 public sealed class ClassicBatteryReader
 {
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(3);
 
-    private readonly ClassicBluetoothDeviceEnumerator _deviceEnumerator = new();
-    private readonly ClassicBluetoothConnectionChecker _connectionChecker = new();
-    private readonly ClassicBatteryPropertyReader _batteryPropertyReader = new();
+    private readonly IClassicBluetoothDeviceEnumerator _deviceEnumerator;
+    private readonly IClassicBluetoothConnectionChecker _connectionChecker;
+    private readonly IClassicBatteryPropertyReader _batteryPropertyReader;
+
+    public ClassicBatteryReader()
+        : this(new ClassicBluetoothDeviceEnumerator(), new ClassicBluetoothConnectionChecker(), new ClassicBatteryPropertyReader())
+    {
+    }
+
+    // Internal constructor for test injection
+    internal ClassicBatteryReader(
+        IClassicBluetoothDeviceEnumerator deviceEnumerator,
+        IClassicBluetoothConnectionChecker connectionChecker,
+        IClassicBatteryPropertyReader batteryPropertyReader)
+    {
+        _deviceEnumerator = deviceEnumerator;
+        _connectionChecker = connectionChecker;
+        _batteryPropertyReader = batteryPropertyReader;
+    }
 
     public Task<List<DeviceBatteryInfo>> ReadAllAsync() =>
         ReadAllAsync(CancellationToken.None);

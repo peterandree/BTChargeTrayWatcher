@@ -1,0 +1,43 @@
+name: CI - Test & Coverage
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-test-coverage:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+      - name: Run tests (no coverage)
+        run: dotnet test tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release
+      - name: Install Coverlet and ReportGenerator
+        run: |
+          dotnet tool install --global coverlet.console
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+      - name: Run coverage with Coverlet
+        run: |
+          coverlet ./tests/BTChargeTrayWatcher.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/BTChargeTrayWatcher.Tests.dll \
+            --target "dotnet" \
+            --targetargs "test ./tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release" \
+            --format cobertura \
+            --output coverage.cobertura.xml
+      - name: Generate coverage HTML
+        run: |
+          reportgenerator -reports:coverage.cobertura.xml -targetdir:CoverageReport -reporttypes:Html
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: CoverageReport

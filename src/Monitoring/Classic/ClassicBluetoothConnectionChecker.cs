@@ -3,7 +3,7 @@ using Windows.Devices.Bluetooth;
 
 namespace BTChargeTrayWatcher;
 
-internal sealed class ClassicBluetoothConnectionChecker
+internal sealed class ClassicBluetoothConnectionChecker : IClassicBluetoothConnectionChecker
 {
     public async Task<bool> IsConnectedAsync(
         ulong bluetoothAddress,
