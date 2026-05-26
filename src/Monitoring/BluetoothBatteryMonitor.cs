@@ -60,17 +60,18 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (infrastructure.AliasSuggestionService is { } svc)
             infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
 
-        // Wire ClassicBatteryReader as a delegate — same pattern as Scanner._readClassic.
-        var classicReader = infrastructure.ClassicBatteryReader;
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic =
-            ct => classicReader.ReadAllAsync(ct);
-
         Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readGatt = ct =>
         {
             infrastructure.AliasSuggestionService?.BeginCycle();
             return infrastructure.Orchestrator.ReadAllAsync(
                 infrastructure.DeviceWatcher.CurrentDevices, ct);
         };
+
+        // Classic read is already wired into the orchestrator's delegate in Program.cs.
+        // For the Scanner's direct classic path we reuse the same orchestrator call;
+        // supply a no-op classic stub here so Scanner uses readGatt exclusively.
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassicPassthrough =
+            ct => Task.FromResult(new List<DeviceBatteryInfo>());
 
         _taskTracker = new TaskTracker();
 
@@ -88,7 +89,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
         _scanner = new Scanner(new ScannerOptions(
             ReadGatt:      readGatt,
-            ReadClassic:   readClassic,
+            ReadClassic:   readClassicPassthrough,
             LastKnown:     _lastKnown,
             Poller:        _poller,
             Tracker:       _taskTracker,
