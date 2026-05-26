@@ -1,11 +1,7 @@
 // src/Tray/ViewModels/ScanViewModel.cs
 // Presentation logic for ScanWindow: scan state machine, countdown timer,
 // device list model. No WinForms dependency — fully unit-testable.
-using BTChargeTrayWatcher.Monitoring;
-using BTChargeTrayWatcher.Settings;
-using BTChargeTrayWatcher.Utilities;
-
-namespace BTChargeTrayWatcher.Tray.ViewModels;
+namespace BTChargeTrayWatcher;
 
 internal sealed class ScanViewModel : IDisposable
 {
@@ -36,14 +32,14 @@ internal sealed class ScanViewModel : IDisposable
     }
 
     // Raised on the caller's thread (the UI timer tick or scan event handler).
-    public event Action<DeviceItem>?          DeviceUpserted;
+    public event Action<DeviceItem>?               DeviceUpserted;
     public event Action<IReadOnlyList<DeviceItem>>? ScanCompleted;
-    public event Action<string>?              StatusChanged;
-    public event Action?                      AutoRefreshTriggered;
-    public event Action?                      ScanRestarted;
+    public event Action<string>?                   StatusChanged;
+    public event Action?                           AutoRefreshTriggered;
+    public event Action?                           ScanRestarted;
 
-    private readonly Dictionary<string, int> _previousBattery = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _currentScanValues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _previousBattery    = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _currentScanValues  = new(StringComparer.OrdinalIgnoreCase);
 
     // ── Timer ─────────────────────────────────────────────────────────────
 
@@ -136,22 +132,18 @@ internal sealed class ScanViewModel : IDisposable
     {
         ScanComplete = true;
 
-        // Promote current scan values to previous snapshot
         foreach (var kvp in _currentScanValues)
             _previousBattery[kvp.Key] = kvp.Value;
         _currentScanValues.Clear();
 
-        // Build the list of devices that had no battery data
         var shownIds   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var shownNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var extras     = new List<DeviceItem>();
 
-        // Caller must populate shownIds/shownNames from existing list items before calling;
-        // this method returns the extra items that should be appended.
         foreach (var device in trackedDevices)
         {
-            if (shownIds.Contains(device.DeviceId))   continue;
-            if (shownNames.Contains(device.Name))     continue;
+            if (shownIds.Contains(device.DeviceId))  continue;
+            if (shownNames.Contains(device.Name))    continue;
 
             string reason = device.IsConnected ? "[No battery service]" : "[Sleeping / not connected]";
             extras.Add(new DeviceItem
@@ -170,8 +162,7 @@ internal sealed class ScanViewModel : IDisposable
         return extras;
     }
 
-    /// <summary>Builds the shownIds/shownNames sets from the ScanWindow's current ListView items.
-    /// Call before OnScanComplete so it can skip already-shown devices.</summary>
+    /// <summary>Builds the shownIds/shownNames sets from the ScanWindow's current ListView items.</summary>
     public (HashSet<string> ids, HashSet<string> names) BuildShownSets(
         IEnumerable<(string id, string name)> existingItems)
     {

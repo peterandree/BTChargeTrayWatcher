@@ -1,10 +1,7 @@
 // src/Tray/ViewModels/DevicesViewModel.cs
 // Presentation logic for the Devices tab of OptionsForm.
 // No WinForms dependency — fully unit-testable.
-using BTChargeTrayWatcher.Monitoring;
-using BTChargeTrayWatcher.Settings;
-
-namespace BTChargeTrayWatcher.Tray.ViewModels;
+namespace BTChargeTrayWatcher;
 
 internal sealed class DevicesViewModel
 {
@@ -13,7 +10,7 @@ internal sealed class DevicesViewModel
 
     public sealed class DeviceRow
     {
-        public string DeviceId   { get; set; } = string.Empty;
+        public string DeviceId    { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
         public int?   Low         { get; set; }
         public int?   High        { get; set; }

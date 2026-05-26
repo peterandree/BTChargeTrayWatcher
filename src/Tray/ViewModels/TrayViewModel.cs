@@ -1,10 +1,7 @@
 // src/Tray/ViewModels/TrayViewModel.cs
 // Presentation logic for TrayApp: tooltip text assembly, combined alert state.
 // No WinForms dependency — fully unit-testable.
-using BTChargeTrayWatcher.Monitoring;
-using BTChargeTrayWatcher.Settings;
-
-namespace BTChargeTrayWatcher.Tray.ViewModels;
+namespace BTChargeTrayWatcher;
 
 internal sealed class TrayViewModel
 {

@@ -1,10 +1,7 @@
 // src/Tray/ViewModels/OptionsViewModel.cs
 // Presentation logic for the General and Notifications tabs of OptionsForm.
 // No WinForms dependency — fully unit-testable.
-using BTChargeTrayWatcher.Notifications;
-using BTChargeTrayWatcher.Settings;
-
-namespace BTChargeTrayWatcher.Tray.ViewModels;
+namespace BTChargeTrayWatcher;
 
 internal sealed class OptionsViewModel
 {
