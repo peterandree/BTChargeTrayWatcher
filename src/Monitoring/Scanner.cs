@@ -6,14 +6,11 @@ internal sealed class Scanner
 {
     private readonly IBatteryReader _gattReader;
     private readonly IBatteryReader _classicReader;
-    private readonly Action<string, string, int?> _onDeviceFound;
+    private readonly ScannerCallbacks _callbacks;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
     private readonly TaskTracker _tracker;
     private readonly CancellationToken _shutdownToken;
-    private readonly Action<string, int?> _onBatteryRead;
-    private readonly Action _onScanStarted;
-    private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
 
     private readonly SemaphoreSlim _scanLock = new(1, 1);
     private volatile bool _isScanning;
@@ -23,19 +20,16 @@ internal sealed class Scanner
 
     public Scanner(ScannerOptions options)
     {
-        _gattReader     = options.GattReader;
-        _classicReader  = options.ClassicReader;
-        _onDeviceFound  = options.OnDeviceFound;
-        _lastKnown      = options.LastKnown;
-        _poller         = options.Poller;
-        _tracker        = options.Tracker;
-        _shutdownToken  = options.ShutdownToken;
-        _onBatteryRead  = options.OnBatteryRead;
-        _onScanStarted  = options.OnScanStarted;
-        _onScanCompleted = options.OnScanCompleted;
+        _gattReader    = options.GattReader;
+        _classicReader = options.ClassicReader;
+        _callbacks     = options.Callbacks;
+        _lastKnown     = options.LastKnown;
+        _poller        = options.Poller;
+        _tracker       = options.Tracker;
+        _shutdownToken = options.ShutdownToken;
     }
 
-    // ── Core merge ───────────────────────────────────────────────────────────
+    // ── Core merge ───────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Runs both readers concurrently and merges results, deduplicating by
@@ -51,7 +45,6 @@ internal sealed class Scanner
         var classicTask = _classicReader.ReadAllAsync(ct);
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
-        // Merge: GATT wins on DeviceId collision.
         var merged = new Dictionary<string, DeviceBatteryInfo>(
             StringComparer.OrdinalIgnoreCase);
 
@@ -59,18 +52,18 @@ internal sealed class Scanner
             merged[d.DeviceId] = d;
 
         foreach (var d in gattTask.Result)
-            merged[d.DeviceId] = d;  // overwrites Classic on collision
+            merged[d.DeviceId] = d;  // GATT wins on collision
 
         var results = new List<DeviceBatteryInfo>(merged.Values);
 
         if (raiseDeviceFound)
             foreach (var d in results)
-                _onDeviceFound(d.DeviceId, d.Name, d.Battery);
+                _callbacks.OnDeviceFound(d.DeviceId, d.Name, d.Battery);
 
         return results;
     }
 
-    // ── Public scan surface ──────────────────────────────────────────────────
+    // ── Public scan surface ─────────────────────────────────────────────────────────
 
     public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
         ScanNowAsync(_shutdownToken);
@@ -86,7 +79,7 @@ internal sealed class Scanner
         try
         {
             _isScanning = true;
-            _onScanStarted();
+            _callbacks.OnScanStarted();
 
             results = await ReadMergedAsync(raiseDeviceFound: true, ct)
                 .ConfigureAwait(false);
@@ -99,7 +92,7 @@ internal sealed class Scanner
                     if (device.Battery is null) continue;
                     _lastKnown[device.DeviceId] = device;
                     _poller.UpdateAlertState(device.DeviceId, device.Name, device.Battery.Value);
-                    _onBatteryRead(device.Name, device.Battery);
+                    _callbacks.OnBatteryRead(device.Name, device.Battery);
                 }
             }
             finally
@@ -115,7 +108,7 @@ internal sealed class Scanner
             _isScanning = false;
             _scanLock.Release();
             if (scanSucceeded)
-                _onScanCompleted(results);
+                _callbacks.OnScanCompleted(results);
         }
     }
 
@@ -161,14 +154,23 @@ internal sealed class Scanner
     }
 }
 
+/// <summary>
+/// Delegate surface for <see cref="Scanner"/> — extracted from <see cref="ScannerOptions"/>
+/// so the callback group can be passed and validated independently of infrastructure.
+/// Closes #119.
+/// </summary>
+internal sealed record ScannerCallbacks(
+    Action<string, string, int?> OnDeviceFound,
+    Action<string, int?> OnBatteryRead,
+    Action OnScanStarted,
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
+
+/// ADR-009: options record keeps infrastructure separate from callbacks.
 internal sealed record ScannerOptions(
     IBatteryReader GattReader,
     IBatteryReader ClassicReader,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
-    Action<string, string, int?> OnDeviceFound,
-    Action<string, int?> OnBatteryRead,
-    Action OnScanStarted,
-    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    ScannerCallbacks Callbacks,
     CancellationToken ShutdownToken);
