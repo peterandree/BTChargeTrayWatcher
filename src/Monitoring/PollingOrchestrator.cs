@@ -12,9 +12,7 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly TaskTracker _tracker;
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readDevices;
     private readonly CancellationToken _shutdownToken;
-    private readonly Action<string, int?> _onBatteryRead;
-    private readonly Action<IReadOnlyList<DeviceBatteryInfo>> _onScanCompleted;
-    private readonly Action<bool> _onAlertStateChanged;
+    private readonly PollingOrchestratorCallbacks _callbacks;
 
     private readonly SemaphoreSlim _pollLock = new(1, 1);
     private readonly ConcurrentDictionary<string, BatteryAlertState> _alertStates =
@@ -23,7 +21,6 @@ internal sealed class PollingOrchestrator : IDisposable
     private readonly ConcurrentDictionary<string, int> _missCount =
         new(StringComparer.OrdinalIgnoreCase);
 
-    // Timestamp of last processed update per device (UTC)
     private readonly ConcurrentDictionary<string, DateTime> _lastProcessed =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -39,15 +36,13 @@ internal sealed class PollingOrchestrator : IDisposable
 
     public PollingOrchestrator(PollingOrchestratorOptions options)
     {
-        _settings = options.Settings;
-        _notifier = options.Notifier;
-        _lastKnown = options.LastKnown;
-        _tracker = options.Tracker;
+        _settings    = options.Settings;
+        _notifier    = options.Notifier;
+        _lastKnown   = options.LastKnown;
+        _tracker     = options.Tracker;
         _readDevices = options.ReadDevices;
         _shutdownToken = options.ShutdownToken;
-        _onBatteryRead = options.OnBatteryRead;
-        _onScanCompleted = options.OnScanCompleted;
-        _onAlertStateChanged = options.OnAlertStateChanged;
+        _callbacks   = options.Callbacks;
     }
 
     public void OnTimerTick()
@@ -84,8 +79,6 @@ internal sealed class PollingOrchestrator : IDisposable
         await _pollLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Re-check after acquiring the lock: Dispose() may have run between the
-            // pre-WaitAsync guard in OnTimerTick and this point (TOCTOU window).
             if (_disposed || ct.IsCancellationRequested) return;
 
             bool thresholdsChanged = Interlocked.Exchange(ref _thresholdsChanged, 0) == 1;
@@ -111,9 +104,6 @@ internal sealed class PollingOrchestrator : IDisposable
                 int prev = prevInfo?.Battery ?? 0;
                 bool isNew = prevInfo is null;
 
-                // Reset miss count for presence tracking regardless of whether the
-                // reading is processed (honours presence detection while allowing
-                // per-device throttling of updates/alerts).
                 _missCount[device.DeviceId] = 0;
 
                 bool due = !honorPerDeviceIntervals;
@@ -125,17 +115,12 @@ internal sealed class PollingOrchestrator : IDisposable
                     else if ((DateTime.UtcNow - last).TotalSeconds >= intervalSec) due = true;
                 }
 
-                if (!due)
-                {
-                    // Still update presence; skip processing/notifications for now.
-                    continue;
-                }
+                if (!due) continue;
 
-                // Mark processed timestamp
                 _lastProcessed[device.DeviceId] = DateTime.UtcNow;
 
                 _lastKnown[device.DeviceId] = device;
-                _onBatteryRead(device.Name, device.Battery);
+                _callbacks.OnBatteryRead(device.Name, device.Battery);
 
                 BatteryAlertState previousState = _alertStates.TryGetValue(device.DeviceId, out var es)
                     ? es
@@ -180,16 +165,14 @@ internal sealed class PollingOrchestrator : IDisposable
                 }
             }
 
-            _onScanCompleted([.. _lastKnown.Values]);
+            _callbacks.OnScanCompleted([.. _lastKnown.Values]);
 
-            // Emit the authoritative combined alert state derived from classified states.
-            // This is the single source of truth for the tray icon overlay (ADR-011).
             bool hasAlert = false;
             foreach (var state in _alertStates.Values)
             {
                 if (state != BatteryAlertState.Normal) { hasAlert = true; break; }
             }
-            _onAlertStateChanged(hasAlert);
+            _callbacks.OnAlertStateChanged(hasAlert);
         }
         finally
         {
@@ -223,7 +206,6 @@ internal sealed class PollingOrchestrator : IDisposable
 
         if (battery <= low) return BatteryAlertState.Low;
 
-        // Suppress High alert when the device is confirmed charging (ADR-004 extension).
         if (battery >= high && isCharging != true) return BatteryAlertState.High;
 
         if (previousState == BatteryAlertState.Low && battery <= low + hysteresis)
@@ -249,13 +231,22 @@ internal sealed class PollingOrchestrator : IDisposable
     }
 }
 
+/// <summary>
+/// Callback delegates for <see cref="PollingOrchestrator"/> — separated from infrastructure
+/// fields in <see cref="PollingOrchestratorOptions"/>.
+/// Closes #120.
+/// </summary>
+internal sealed record PollingOrchestratorCallbacks(
+    Action<string, int?> OnBatteryRead,
+    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
+    Action<bool> OnAlertStateChanged);
+
+/// ADR-009: infrastructure fields separated from callback delegates.
 internal sealed record PollingOrchestratorOptions(
     ThresholdSettings Settings,
     INotificationService Notifier,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     TaskTracker Tracker,
     Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
-    Action<string, int?> OnBatteryRead,
-    Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
-    Action<bool> OnAlertStateChanged,
+    PollingOrchestratorCallbacks Callbacks,
     CancellationToken ShutdownToken);

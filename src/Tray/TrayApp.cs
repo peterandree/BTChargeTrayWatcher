@@ -1,20 +1,21 @@
-// src/Tray/TrayApp.cs
+// src/Tray/TrayApp.cs  — thin orchestration shell; tooltip/alert logic in TrayViewModel.
 using System.Diagnostics;
 
 namespace BTChargeTrayWatcher;
 
 public sealed class TrayApp : IDisposable
 {
-    private readonly ThresholdSettings _settings;
+    private readonly ThresholdSettings       _settings;
     private readonly BluetoothBatteryMonitor _monitor;
-    private readonly LaptopBatteryMonitor _laptopMonitor;
-    private readonly Action _showOptions;
-    private readonly Action _unsubscribeNotificationClicked;
-    private readonly NotifyIcon _trayIcon;
-    private readonly TrayIconRenderer _iconRenderer;
-    private readonly ScanCoordinator _scanner;
-    private readonly SynchronizationContext _uiContext;
-    private readonly AliasSuggestionService _aliasSuggestionService;
+    private readonly LaptopBatteryMonitor    _laptopMonitor;
+    private readonly Action                  _showOptions;
+    private readonly Action                  _unsubscribeNotificationClicked;
+    private readonly NotifyIcon              _trayIcon;
+    private readonly TrayIconRenderer        _iconRenderer;
+    private readonly ScanCoordinator         _scanner;
+    private readonly SynchronizationContext  _uiContext;
+    private readonly AliasSuggestionService  _aliasSuggestionService;
+    private readonly TrayViewModel           _trayVm;
 
     private readonly ToolStripMenuItem _scanMenuItem;
     private readonly ToolStripMenuItem _lowMenu;
@@ -22,19 +23,8 @@ public sealed class TrayApp : IDisposable
     private readonly ToolStripMenuItem _laptopMenuItem;
 
     private bool _disposed;
-    private bool _hasBluetoothAlert;
-    private bool _hasLaptopAlert;
     private System.ComponentModel.CancelEventHandler? _contextMenuOpeningHandler;
 
-    /// <param name="settings">Application threshold settings.</param>
-    /// <param name="monitor">Bluetooth battery monitor.</param>
-    /// <param name="laptopMonitor">Laptop battery monitor.</param>
-    /// <param name="aliasSuggestionService">Alias suggestion service.</param>
-    /// <param name="showOptions">Action that opens the Options form (injected from composition root so TrayApp does not depend on INotificationService).</param>
-    /// <param name="subscribeNotificationClicked">
-    /// Receives the scan-window-open callback; composition root wires it to the notifier's
-    /// OnNotificationClicked event and returns an unsubscribe action.
-    /// </param>
     internal TrayApp(
         ThresholdSettings       settings,
         BluetoothBatteryMonitor monitor,
@@ -46,13 +36,15 @@ public sealed class TrayApp : IDisposable
         _uiContext = SynchronizationContext.Current
             ?? throw new InvalidOperationException("TrayApp must be created on the UI thread.");
         _aliasSuggestionService = aliasSuggestionService;
-
         _settings      = settings;
         _monitor       = monitor;
         _laptopMonitor = laptopMonitor;
         _showOptions   = showOptions;
         _iconRenderer  = new TrayIconRenderer();
         _scanner       = new ScanCoordinator(monitor, settings, _uiContext);
+
+        _trayVm = new TrayViewModel(settings, monitor, laptopMonitor);
+        _trayVm.AlertChanged += hasAlert => UpdateTrayIcon(hasAlert);
 
         _trayIcon = new NotifyIcon { Visible = true };
 
@@ -61,17 +53,14 @@ public sealed class TrayApp : IDisposable
         _highMenu       = menuBuilder.BuildHighMenu();
         _laptopMenuItem = menuBuilder.BuildLaptopMenuItem();
 
-        _scanMenuItem = new ToolStripMenuItem("Scan devices\u2026");
+        _scanMenuItem       = new ToolStripMenuItem("Scan devices\u2026");
         _scanMenuItem.Click += (_, _) => _scanner.OpenScanWindowAndTriggerScan();
 
         var contextMenu = TrayMenuBuilder.Build(
             _settings,
-            _laptopMenuItem,
+            new TrayMenuItems(_laptopMenuItem, _scanMenuItem, _lowMenu, _highMenu),
             () => monitor.LastKnownDevices,
-            _scanMenuItem,
-            _lowMenu,
-            _highMenu,
-            onExit: () => _ = ExitAsync(),
+            onExit:    () => _ = ExitAsync(),
             onOptions: _showOptions);
 
         _contextMenuOpeningHandler = (s, e) => { if (!_disposed) UpdateTooltip(); };
@@ -83,7 +72,7 @@ public sealed class TrayApp : IDisposable
 
         _scanner.ScanStarted       += OnScanStarted;
         _scanner.ScanCompleted     += OnScanCompleted;
-        _scanner.AlertStateChanged += OnBluetoothAlertStateChanged;
+        _scanner.AlertStateChanged += alert => _trayVm.ApplyBluetoothAlert(alert);
         _scanner.ScanFaulted       += OnScanFaulted;
 
         _monitor.BackgroundRefreshCompleted += OnDevicesRefreshed;
@@ -107,19 +96,15 @@ public sealed class TrayApp : IDisposable
             if (_disposed) return;
             try
             {
-                string message = $"Suggested alias for '{suggestion.DeviceName}'\n" +
-                                 $"Match: '{suggestion.MatchedAliasKey}' (score {suggestion.Score:P0})\n\n" +
-                                 "Yes = Apply alias, No = Ignore, Cancel = Suppress suggestions for this device.";
-
-                var res = MessageBox.Show(message, "Alias suggestion", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                string message = $"Suggested alias for '{suggestion.DeviceName}'\n"
+                               + $"Match: '{suggestion.MatchedAliasKey}' (score {suggestion.Score:P0})\n\n"
+                               + "Yes = Apply alias, No = Ignore, Cancel = Suppress suggestions for this device.";
+                var res = MessageBox.Show(message, "Alias suggestion",
+                    MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (res == DialogResult.Yes)
-                {
                     _settings.AddAlias(suggestion.DeviceName, suggestion.CanonicalDeviceId);
-                }
                 else if (res == DialogResult.Cancel)
-                {
                     _settings.SuppressAliasSuggestion(suggestion.DeviceId);
-                }
             }
             catch (Exception ex)
             {
@@ -133,7 +118,7 @@ public sealed class TrayApp : IDisposable
         if (_laptopMonitor.LastKnownBattery is { } info)
         {
             UpdateLaptopMenuItem(info);
-            UpdateLaptopAlertState(info);
+            _trayVm.ApplyLaptopBattery(info);
         }
     }
 
@@ -155,70 +140,18 @@ public sealed class TrayApp : IDisposable
             _trayIcon.ContextMenuStrip?.Show(Cursor.Position);
     }
 
-    private void OnBluetoothAlertStateChanged(bool hasAlert)
-    {
-        _hasBluetoothAlert = hasAlert;
-        RefreshTrayIcon();
-    }
-
     private void OnSettingsChanged()
     {
-        UpdateLaptopAlertState();
+        _trayVm.ApplyLaptopBattery();
         UpdateTooltip();
     }
 
-    private void UpdateLaptopAlertState(LaptopBatteryInfo? info = null)
-    {
-        info ??= _laptopMonitor.LastKnownBattery;
-        bool alert = false;
-        if (!_settings.ExcludeLaptopFromTrayIconOverlay
-            && info is { HasBattery: true, BatteryPercent: >= 0 })
-        {
-            alert = info.BatteryPercent <= _settings.LaptopLow
-                 || info.BatteryPercent >= _settings.LaptopHigh;
-        }
-        _hasLaptopAlert = alert;
-        RefreshTrayIcon();
-    }
-
-    private void RefreshTrayIcon()
-    {
-        UpdateTrayIcon(_hasBluetoothAlert || _hasLaptopAlert);
-    }
+    private void RefreshTrayIcon() => UpdateTrayIcon(_trayVm.HasAlert);
 
     private void OnDevicesRefreshed(IReadOnlyList<DeviceBatteryInfo> _) =>
         _uiContext.Post(_ => { if (!_disposed) UpdateTooltip(); }, null);
 
-    private void UpdateTooltip()
-    {
-        var sb = new System.Text.StringBuilder();
-
-            foreach (var d in _monitor.LastKnownDevices)
-        {
-            if (d.Battery is null) continue;
-            if (sb.Length > 0) sb.Append('\n');
-                bool alert = d.Battery.Value <= _settings.GetLowForDevice(d.DeviceId, d.Name)
-                          || d.Battery.Value >= _settings.GetHighForDevice(d.DeviceId, d.Name);
-            if (alert) sb.Append("! ");
-            sb.Append(d.Name).Append(' ').Append(BatteryDisplay.FormatBattery(d.Battery.Value, d.IsCharging));
-        }
-
-        if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
-        {
-            if (sb.Length > 0) sb.Append('\n');
-            bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
-                            || laptop.BatteryPercent >= _settings.LaptopHigh;
-            if (laptopAlert) sb.Append("! ");
-            sb.Append("Laptop ").Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
-            if (laptop.IsCharging) sb.Append(" (charging)");
-        }
-
-        if (sb.Length == 0)
-            sb.Append($"BT Battery Alert \u25bc{_settings.Low}% \u25b2{_settings.High}%");
-
-        string text = sb.ToString();
-        _trayIcon.Text = text.Length > 127 ? text[..127] : text;
-    }
+    private void UpdateTooltip() => _trayIcon.Text = _trayVm.BuildTooltip();
 
     private void OnLaptopBatteryUpdated(LaptopBatteryInfo info)
     {
@@ -229,7 +162,7 @@ public sealed class TrayApp : IDisposable
             {
                 UpdateLaptopMenuItem(info);
                 UpdateTooltip();
-                UpdateLaptopAlertState(info);
+                _trayVm.ApplyLaptopBattery(info);
             }
             catch (Exception ex)
             {
@@ -238,20 +171,8 @@ public sealed class TrayApp : IDisposable
         }, null);
     }
 
-    private void UpdateLaptopMenuItem(LaptopBatteryInfo info)
-    {
-        if (!info.HasBattery)
-        {
-            _laptopMenuItem.Text = "\U0001f4bb Laptop: No battery";
-            return;
-        }
-
-        string chargeExtra = info.IsOnAcPower && !info.IsCharging ? " \U0001f50c Plugged in"
-            : !info.IsOnAcPower ? " On battery"
-            : string.Empty;
-
-        _laptopMenuItem.Text = $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
-    }
+    private void UpdateLaptopMenuItem(LaptopBatteryInfo info) =>
+        _laptopMenuItem.Text = _trayVm.BuildLaptopMenuText(info);
 
     private void OnScanStarted()
     {
@@ -266,17 +187,14 @@ public sealed class TrayApp : IDisposable
         UpdateTooltip();
     }
 
-    private static void OnScanFaulted(string operationName, Exception ex)
-    {
+    private static void OnScanFaulted(string operationName, Exception ex) =>
         Trace.TraceError($"[TrayApp] Background operation '{operationName}' faulted: {ex}");
-    }
 
     private async Task ExitAsync()
     {
         _scanMenuItem.Enabled = false;
         _lowMenu.Enabled      = false;
         _highMenu.Enabled     = false;
-
         try
         {
             Debug.WriteLine("[TrayApp] Exit started.");
@@ -286,31 +204,23 @@ public sealed class TrayApp : IDisposable
             await _laptopMonitor.DisposeAsync().ConfigureAwait(true);
             Debug.WriteLine("[TrayApp] Laptop monitor disposed.");
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[TrayApp] Exit fault: {ex}");
-        }
-        finally
-        {
-            Application.Exit();
-        }
+        catch (Exception ex) { Debug.WriteLine($"[TrayApp] Exit fault: {ex}"); }
+        finally { Application.Exit(); }
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-
         Debug.WriteLine("[TrayApp] Disposing.");
 
         _scanner.ScanStarted       -= OnScanStarted;
         _scanner.ScanCompleted     -= OnScanCompleted;
-        _scanner.AlertStateChanged -= OnBluetoothAlertStateChanged;
         _scanner.ScanFaulted       -= OnScanFaulted;
         _monitor.BackgroundRefreshCompleted -= OnDevicesRefreshed;
         _monitor.ManualScanCompleted        -= OnDevicesRefreshed;
-        _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
-        _settings.Changed             -= OnSettingsChanged;
+        _laptopMonitor.BatteryUpdated       -= OnLaptopBatteryUpdated;
+        _settings.Changed                   -= OnSettingsChanged;
         _unsubscribeNotificationClicked();
         _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
 
@@ -322,7 +232,6 @@ public sealed class TrayApp : IDisposable
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _iconRenderer.Dispose();
-
         GC.SuppressFinalize(this);
     }
 }
