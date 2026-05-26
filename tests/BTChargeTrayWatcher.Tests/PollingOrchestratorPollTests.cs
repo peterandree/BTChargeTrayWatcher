@@ -42,10 +42,11 @@ public sealed class PollingOrchestratorPollTests
             LastKnown:           last,
             Tracker:             new TaskTracker(),
             ReadDevices:         readDevices,
-            OnBatteryRead:       (_, _) => { },
-            OnScanCompleted:     onScanCompleted ?? (_ => { }),
-            OnAlertStateChanged: onAlertStateChanged ?? (_ => { }),
-            ShutdownToken:       TestContext.Current.CancellationToken);
+            ShutdownToken: TestContext.Current.CancellationToken,
+            Callbacks: new PollingOrchestratorCallbacks(
+                OnBatteryRead: (_, _) => { },
+                OnScanCompleted: _ => { },
+                OnAlertStateChanged: _ => { }));
         return (new PollingOrchestrator(opts), spy, last);
     }
 

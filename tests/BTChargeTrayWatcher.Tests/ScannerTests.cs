@@ -53,24 +53,26 @@ public sealed class ScannerTests : IAsyncDisposable
             LastKnown:          lastKnown,
             Tracker:            tracker,
             ReadDevices:        _ => Task.FromResult(new List<DeviceBatteryInfo>()),
-            ShutdownToken:      shutdownCts.Token,
-            OnBatteryRead:      (_, _) => { },
-            OnScanCompleted:    _ => { },
-            OnAlertStateChanged:_ => { });
+            ShutdownToken: TestContext.Current.CancellationToken,
+            Callbacks: new PollingOrchestratorCallbacks(
+                OnBatteryRead: (_, _) => { },
+                OnScanCompleted: _ => { },
+                OnAlertStateChanged: _ => { }));
 
         var poller = new PollingOrchestrator(pollerOpts);
 
         var opts = new ScannerOptions(
-            GattReader:      gatt,
-            ClassicReader:   classic,
-            LastKnown:       lastKnown,
-            Poller:          poller,
-            Tracker:         tracker,
-            OnDeviceFound:   (_, _, _) => { },
-            OnBatteryRead:   (n, p) => batteryReads.Add((n, p)),
-            OnScanStarted:   () => scanStarted.Add(true),
-            OnScanCompleted: list => scanCompletions.Add(list),
-            ShutdownToken:   shutdownCts.Token);
+            GattReader: gatt,
+            ClassicReader: classic,
+            LastKnown: lastKnown,
+            Poller: poller,
+            Tracker: tracker,
+            ShutdownToken: shutdownCts.Token,
+            Callbacks: new ScannerCallbacks(
+                OnDeviceFound: (_, _, _) => { },
+                OnBatteryRead: (n, p) => batteryReads.Add((n, p)),
+                OnScanStarted: () => scanStarted.Add(true),
+                OnScanCompleted: list => scanCompletions.Add(list)));
 
         tracker.Start(_ => Task.CompletedTask, TestContext.Current.CancellationToken);
 
