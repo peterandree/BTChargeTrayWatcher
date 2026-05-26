@@ -6,8 +6,6 @@ namespace BTChargeTrayWatcher;
 public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 {
     private readonly ThresholdSettings _settings;
-    private readonly IBatteryReader _gattReader;
-    private readonly IBatteryReader _classicReader;
 
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown =
         new(StringComparer.OrdinalIgnoreCase);
@@ -77,12 +75,22 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         INotificationService              notifier,
         BluetoothMonitoringInfrastructure infrastructure)
     {
-        _settings      = settings;
-        _gattReader    = new OrchestratorBatteryReaderAdapter(
-                             infrastructure.Orchestrator,
-                             infrastructure.DeviceWatcher,
-                             infrastructure.AliasSuggestionService);
-        _classicReader = NullBatteryReader.Instance;
+        _settings = settings;
+
+        // Wire alias suggestion service to orchestrator — inlined from the former
+        // OrchestratorBatteryReaderAdapter. Closes #131.
+        if (infrastructure.AliasSuggestionService is { } svc)
+            infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
+
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readGatt = ct =>
+        {
+            infrastructure.AliasSuggestionService?.BeginCycle();
+            return infrastructure.Orchestrator.ReadAllAsync(
+                infrastructure.DeviceWatcher.CurrentDevices, ct);
+        };
+
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic =
+            _ => Task.FromResult(new List<DeviceBatteryInfo>());
 
         _taskTracker = new TaskTracker();
 
@@ -99,8 +107,8 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
                 OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert))));
 
         _scanner = new Scanner(new ScannerOptions(
-            GattReader:    _gattReader,
-            ClassicReader: _classicReader,
+            ReadGatt:      readGatt,
+            ReadClassic:   readClassic,
             LastKnown:     _lastKnown,
             Poller:        _poller,
             Tracker:       _taskTracker,
@@ -241,8 +249,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _poller.Dispose();
         _scanner.Dispose();
 
-        if (_gattReader is IDisposable gd) gd.Dispose();
-        if (_classicReader is IDisposable cd) cd.Dispose();
         _gattConnectionManager?.Dispose();
         if (_deviceWatcher is not null)
             await _deviceWatcher.DisposeAsync().ConfigureAwait(false);
