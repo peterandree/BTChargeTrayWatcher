@@ -451,9 +451,22 @@ public sealed class ThresholdSettings
         lock (_thresholdLock) return _ntfy.Clone();
     }
 
+    /// <summary>
+    /// Applies mutations to the ntfy settings using a copy-out / mutate / assign-back
+    /// pattern so that the caller's delegate runs outside <c>_thresholdLock</c>,
+    /// preventing re-entrant deadlocks (fix #134).
+    /// </summary>
     public void UpdateNtfySettings(Action<NtfyIntegrationSettings> mutate)
     {
-        lock (_thresholdLock) mutate(_ntfy);
+        // Copy out — no lock held during the caller's delegate.
+        NtfyIntegrationSettings copy;
+        lock (_thresholdLock) copy = _ntfy.Clone();
+
+        mutate(copy);
+
+        // Assign back under lock.
+        lock (_thresholdLock) _ntfy = copy;
+
         Changed?.Invoke();
     }
 
