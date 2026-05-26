@@ -4,8 +4,8 @@ namespace BTChargeTrayWatcher;
 
 internal sealed class Scanner
 {
-    private readonly IBatteryReader _gattReader;
-    private readonly IBatteryReader _classicReader;
+    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readGatt;
+    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
     private readonly ScannerCallbacks _callbacks;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
@@ -20,8 +20,8 @@ internal sealed class Scanner
 
     public Scanner(ScannerOptions options)
     {
-        _gattReader    = options.GattReader;
-        _classicReader = options.ClassicReader;
+        _readGatt      = options.ReadGatt;
+        _readClassic   = options.ReadClassic;
         _callbacks     = options.Callbacks;
         _lastKnown     = options.LastKnown;
         _poller        = options.Poller;
@@ -29,7 +29,7 @@ internal sealed class Scanner
         _shutdownToken = options.ShutdownToken;
     }
 
-    // ── Core merge ───────────────────────────────────────────────────────────────
+    // ── Core merge ────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Runs both readers concurrently and merges results, deduplicating by
@@ -41,8 +41,8 @@ internal sealed class Scanner
         bool raiseDeviceFound,
         CancellationToken ct)
     {
-        var gattTask    = _gattReader.ReadAllAsync(ct);
-        var classicTask = _classicReader.ReadAllAsync(ct);
+        var gattTask    = _readGatt(ct);
+        var classicTask = _readClassic(ct);
         await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
 
         var merged = new Dictionary<string, DeviceBatteryInfo>(
@@ -63,7 +63,7 @@ internal sealed class Scanner
         return results;
     }
 
-    // ── Public scan surface ─────────────────────────────────────────────────────────
+    // ── Public scan surface ────────────────────────────────────────────────────────────────────
 
     public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
         ScanNowAsync(_shutdownToken);
@@ -167,8 +167,8 @@ internal sealed record ScannerCallbacks(
 
 /// ADR-009: options record keeps infrastructure separate from callbacks.
 internal sealed record ScannerOptions(
-    IBatteryReader GattReader,
-    IBatteryReader ClassicReader,
+    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadGatt,
+    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadClassic,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
