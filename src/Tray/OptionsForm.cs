@@ -35,7 +35,10 @@ public sealed class OptionsForm : Form
     // ── View models ─────────────────────────────────────────────────────────
     private OptionsViewModel? _optionsVm;
     private DevicesViewModel? _devicesVm;
+    // Backing list (underscore) and a non-underscored alias `deviceRows` kept
+    // for legacy reflection access in tests and external callers.
     private List<DevicesViewModel.DeviceRow> _deviceRows = new();
+    private List<DevicesViewModel.DeviceRow> deviceRows;
 
     public OptionsForm(MessageBoxHandler? messageBoxHandler = null)
     {
@@ -195,6 +198,9 @@ public sealed class OptionsForm : Form
         tabControl.TabPages.Add(notificationsTab);
         tabControl.TabPages.Add(generalTab);
         Controls.Add(tabControl);
+        // Keep the legacy `deviceRows` field referencing the same list instance
+        // so reflection-based callers (tests) can find and modify rows.
+        deviceRows = _deviceRows;
     }
 
     // ── Initialize: inject VMs, bind controls ─────────────────────────────────
@@ -330,7 +336,9 @@ public sealed class OptionsForm : Form
 
     private void ReloadDeviceRows()
     {
-        _deviceRows = _devicesVm!.BuildRows().ToList();
+        var newRows = _devicesVm!.BuildRows().ToList();
+        _deviceRows.Clear();
+        _deviceRows.AddRange(newRows);
         devicesGrid.DataSource = null;
         devicesGrid.DataSource = _deviceRows;
     }
