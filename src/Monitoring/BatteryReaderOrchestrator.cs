@@ -12,15 +12,12 @@ namespace BTChargeTrayWatcher;
 /// <remarks>
 /// <para>
 /// <b>Execution path: cooperation-stack (production) path only.</b>
-/// This class is the sole production-path aggregator. It is used exclusively by
-/// <see cref="OrchestratorBatteryReaderAdapter"/>, which is injected into <see cref="Scanner"/>
-/// via the 6-argument internal <see cref="BluetoothBatteryMonitor"/> constructor wired in
-/// <c>Program.cs</c>.
+/// This class is the sole production-path aggregator. It is wired directly by
+/// <see cref="BluetoothBatteryMonitor"/> via the internal constructor in <c>Program.cs</c>.
 /// </para>
 /// <para>
 /// All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018
-/// (discovery logging) implementations that affect aggregation live here, not in
-/// the legacy pipeline (deleted in issue #100).
+/// (discovery logging) implementations that affect aggregation live here.
 /// </para>
 /// </remarks>
 internal sealed class BatteryReaderOrchestrator
@@ -30,9 +27,6 @@ internal sealed class BatteryReaderOrchestrator
     /// <summary>Jaro-Winkler threshold above which a fuzzy match becomes an alias suggestion (ADR-015 Stage 4).</summary>
     private const double FuzzyThreshold = 0.92;
 
-    /// <summary>
-    /// Device categories that are allowed through the filter by default (ADR-016).
-    /// </summary>
     private static readonly IReadOnlySet<DeviceCategory> AllowedCategories =
         new HashSet<DeviceCategory>
         {
@@ -42,21 +36,15 @@ internal sealed class BatteryReaderOrchestrator
         };
 
     private readonly GattConnectionManager _gattManager;
-    private readonly IBatteryReader _classicReader;
+    private readonly ClassicBatteryReader _classicReader;
     private readonly DeviceCapabilityCache _capabilityCache;
     private readonly ThresholdSettings? _settings;
 
-    /// <summary>
-    /// Raised when Stage 4 (Jaro-Winkler fuzzy match) finds a high-confidence alias
-    /// candidate that is not yet confirmed by the user. The UI should present the
-    /// suggestion for confirmation before calling <see cref="ThresholdSettings.AddAlias"/>.
-    /// The device is NOT merged into results until the user confirms.
-    /// </summary>
     internal event Action<AliasSuggestion>? AliasSuggested;
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
-        IBatteryReader classicReader,
+        ClassicBatteryReader classicReader,
         DeviceCapabilityCache capabilityCache,
         ThresholdSettings? settings = null)
     {
@@ -66,10 +54,6 @@ internal sealed class BatteryReaderOrchestrator
         _settings = settings;
     }
 
-    /// <summary>
-    /// Reads batteries for all watched BLE devices (GATT) and all Classic devices (batch),
-    /// merging results with GATT taking priority.
-    /// </summary>
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(
         IReadOnlyList<WatchedDevice> watchedDevices,
         CancellationToken ct)
@@ -118,19 +102,9 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
-        var classicResults = classicTask.Result;
-
-        return MergeResults(gattResults, classicResults);
+        return MergeResults(gattResults, classicTask.Result);
     }
 
-    // ── ADR-015: alias resolution ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Attempts to resolve a canonical DeviceId for <paramref name="device"/> via the
-    /// 4-stage ADR-015 alias pipeline.
-    /// Returns <c>null</c> when Stage 4 fires a fuzzy suggestion (device must not be merged).
-    /// Returns the (possibly remapped) DeviceId otherwise.
-    /// </summary>
     private string? ResolveCanonicalId(DeviceBatteryInfo device)
     {
         if (_settings is null) return device.DeviceId;
@@ -138,11 +112,9 @@ internal sealed class BatteryReaderOrchestrator
         var aliasMap = _settings.AliasMap;
         if (aliasMap.Count == 0) return device.DeviceId;
 
-        // Stage 2: exact name lookup (OrdinalIgnoreCase via dictionary comparer)
         if (aliasMap.TryGetValue(device.Name, out var exactCanonical))
             return exactCanonical;
 
-        // Stage 3: normalised name lookup
         var normalizedDeviceName = DeviceNameNormalizer.Normalize(device.Name);
         foreach (var kv in aliasMap)
         {
@@ -150,9 +122,6 @@ internal sealed class BatteryReaderOrchestrator
                 return kv.Value;
         }
 
-        // Stage 4: Jaro-Winkler fuzzy match
-        // FIX #123: suppression must be checked BEFORE firing the AliasSuggested event.
-        // Previously the event was raised even for suppressed devices, causing spurious UI prompts.
         if (_settings.IsAliasSuggestionSuppressed(device.DeviceId))
             return device.DeviceId;
 
@@ -175,20 +144,16 @@ internal sealed class BatteryReaderOrchestrator
         if (bestScore >= FuzzyThreshold && bestKey is not null && bestCanonical is not null)
         {
             AliasSuggested?.Invoke(new AliasSuggestion(
-                DeviceId:         device.DeviceId,
-                DeviceName:       device.Name,
-                MatchedAliasKey:  bestKey,
+                DeviceId:          device.DeviceId,
+                DeviceName:        device.Name,
+                MatchedAliasKey:   bestKey,
                 CanonicalDeviceId: bestCanonical,
-                Score:            bestScore));
-            // Do NOT merge — return null to signal skip
+                Score:             bestScore));
             return null;
         }
 
-        // No alias match — use the device's own ID
         return device.DeviceId;
     }
-
-    // ── ADR-016: category filter ─────────────────────────────────────────────────────
 
     private bool IsAllowedByFilter(DeviceBatteryInfo device)
     {
@@ -199,40 +164,31 @@ internal sealed class BatteryReaderOrchestrator
         return AllowedCategories.Contains(device.Category);
     }
 
-    // ── Merge ────────────────────────────────────────────────────────────────────────
-
     private List<DeviceBatteryInfo> MergeResults(
         List<DeviceBatteryInfo> gattResults,
         List<DeviceBatteryInfo> classicResults)
     {
         var merged = new List<DeviceBatteryInfo>();
-        // seenIds tracks canonical IDs after alias resolution
-        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenIds   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // GATT first (higher priority)
         foreach (var device in gattResults)
         {
             if (!IsAllowedByFilter(device)) continue;
-
-            // Stage 1: DeviceId dedup
             if (seenIds.Contains(device.DeviceId)) continue;
 
-            // Stages 2-4: alias resolution
             var canonicalId = ResolveCanonicalId(device);
-            if (canonicalId is null) continue;          // Stage 4 fuzzy suggestion — skip
-            if (seenIds.Contains(canonicalId)) continue; // already have this physical device
+            if (canonicalId is null) continue;
+            if (seenIds.Contains(canonicalId)) continue;
 
             seenIds.Add(canonicalId);
             seenNames.Add(device.Name);
 
-            // Emit with canonical ID if remapped
             merged.Add(canonicalId == device.DeviceId
                 ? device
                 : device with { DeviceId = canonicalId });
         }
 
-        // Classic fallback
         foreach (var device in classicResults)
         {
             if (!IsAllowedByFilter(device)) continue;
@@ -254,8 +210,6 @@ internal sealed class BatteryReaderOrchestrator
 
         return merged;
     }
-
-    // ── GATT / Classic helpers ───────────────────────────────────────────────────────
 
     private async Task<GattReadOutcome> SafeGattReadAsync(WatchedDevice device, CancellationToken ct)
     {
