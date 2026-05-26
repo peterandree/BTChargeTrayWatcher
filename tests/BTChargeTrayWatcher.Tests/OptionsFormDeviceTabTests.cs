@@ -34,27 +34,30 @@ namespace BTChargeTrayWatcher.Tests
             var monitor = CreateMonitor(settings);
             var deviceId = "dev-xyz";
             var device = new DeviceBatteryInfo(deviceId, "Test Device", 50, null, BatterySource.Gatt);
-            var field = typeof(BluetoothBatteryMonitor).GetField("_lastKnown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.NotNull(field);
-            var dict = (System.Collections.Concurrent.ConcurrentDictionary<string, DeviceBatteryInfo>)field.GetValue(monitor)!;
+
+            // Inject device into monitor._lastKnown via reflection
+            var lastKnownField = typeof(BluetoothBatteryMonitor).GetField(
+                "_lastKnown",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(lastKnownField);
+            var dict = (System.Collections.Concurrent.ConcurrentDictionary<string, DeviceBatteryInfo>)lastKnownField!.GetValue(monitor)!;
             dict[deviceId] = device;
             Assert.Single(monitor.LastKnownDevices);
             Assert.Equal(deviceId, monitor.LastKnownDevices[0].DeviceId);
+
             var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
             form.Initialize(settings, monitor);
 
-            // Debug: print actual column names
             var debugGrid = GetGrid(form, "devicesGrid");
             var colNames = string.Join(", ", debugGrid.Columns.Cast<DataGridViewColumn>().Select(c => $"{c.Name} ({c.HeaderText})"));
             System.Diagnostics.Debug.WriteLine($"Grid columns: {colNames}");
 
-            // Get the DataGridView and edit values (find columns by DataPropertyName)
             var grid = debugGrid;
-            var colLow = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Low");
-            var colHigh = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "High");
-            var colPoll = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "PollInterval");
+            var colLow         = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Low");
+            var colHigh        = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "High");
+            var colPoll        = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "PollInterval");
             var colDisplayName = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "DisplayName");
-            var colExcluded = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Excluded");
+            var colExcluded    = grid.Columns.Cast<DataGridViewColumn>().FirstOrDefault(c => c.DataPropertyName == "Excluded");
 
             Assert.NotNull(colLow);
             Assert.NotNull(colHigh);
@@ -62,55 +65,57 @@ namespace BTChargeTrayWatcher.Tests
             Assert.NotNull(colDisplayName);
             Assert.NotNull(colExcluded);
 
-            int idxLow = colLow.Index;
-            int idxHigh = colHigh.Index;
-            int idxPoll = colPoll.Index;
-            int idxDisplayName = colDisplayName.Index;
-            int idxExcluded = colExcluded.Index;
+            int idxLow         = colLow!.Index;
+            int idxHigh        = colHigh!.Index;
+            int idxPoll        = colPoll!.Index;
+            int idxDisplayName = colDisplayName!.Index;
+            int idxExcluded    = colExcluded!.Index;
 
-            grid.Rows[0].Cells[idxLow].Value = 10;
-            grid.Rows[0].Cells[idxHigh].Value = 90;
-            grid.Rows[0].Cells[idxPoll].Value = 123;
+            grid.Rows[0].Cells[idxLow].Value         = 10;
+            grid.Rows[0].Cells[idxHigh].Value        = 90;
+            grid.Rows[0].Cells[idxPoll].Value        = 123;
             grid.Rows[0].Cells[idxDisplayName].Value = "Alias";
-            grid.Rows[0].Cells[idxExcluded].Value = true;
+            grid.Rows[0].Cells[idxExcluded].Value    = true;
 
-            // Commit edits so the form's CellValueChanged handler runs
             grid.CurrentCell = grid.Rows[0].Cells[idxDisplayName];
             grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
 
-            // Ensure the monitor reports the tracked device name so the form's logic can
-            // compare the typed alias against the device's default tracked name.
-            var deviceWatcher = new DeviceWatcherService();
-            var devicesField = deviceWatcher.GetType().GetField("_devices", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            // Inject a WatchedDevice into DeviceWatcherService._devices using typed access
+            var deviceWatcher  = new DeviceWatcherService();
+            var devicesField   = typeof(DeviceWatcherService).GetField(
+                "_devices",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(devicesField);
-            var devicesDict = (System.Collections.IDictionary)devicesField!.GetValue(deviceWatcher)!;
-            var watchedType = typeof(BluetoothBatteryMonitor).Assembly.GetType("BTChargeTrayWatcher.WatchedDevice");
-            Assert.NotNull(watchedType);
-            var watchedInstance = Activator.CreateInstance(watchedType!, new object[] { deviceId, "Test Device", true, true });
-            devicesDict.GetType().GetMethod("Add")!.Invoke(devicesDict, new object[] { deviceId, watchedInstance! });
+            var devicesDict = (Dictionary<string, WatchedDevice>)devicesField!.GetValue(deviceWatcher)!;
+            devicesDict[deviceId] = new WatchedDevice(deviceId, "Test Device", IsBle: true, IsConnected: true);
 
-            var dwField = typeof(BluetoothBatteryMonitor).GetField("_deviceWatcher", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var dwField = typeof(BluetoothBatteryMonitor).GetField(
+                "_deviceWatcher",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(dwField);
             dwField!.SetValue(monitor, deviceWatcher);
 
-            // The form stores a private List<DeviceRow> called 'deviceRows'. Update it via reflection
-            var drField = form.GetType().GetField("deviceRows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            // Update the form's private DeviceRow list so its CellValueChanged handler sees "Alias"
+            var drField = form.GetType().GetField(
+                "deviceRows",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(drField);
-            var drList = (System.Collections.IList)drField!.GetValue(form)!;
-            var firstRow = drList[0];
+            var drList    = (System.Collections.IList)drField!.GetValue(form)!;
+            var firstRow  = drList[0];
             Assert.NotNull(firstRow);
-            var displayNameProp = firstRow.GetType().GetProperty("DisplayName");
+            var displayNameProp = firstRow!.GetType().GetProperty("DisplayName");
             Assert.NotNull(displayNameProp);
             displayNameProp!.SetValue(firstRow, "Alias");
 
-            // Invoke the form's DevicesGrid_CellValueChanged handler to apply the setting change
-            var handler = form.GetType().GetMethod("DevicesGrid_CellValueChanged", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var handler = form.GetType().GetMethod(
+                "DevicesGrid_CellValueChanged",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.NotNull(handler);
             handler!.Invoke(form, new object[] { grid, new DataGridViewCellEventArgs(idxDisplayName, 0) });
 
-            Assert.Equal(10, settings.GetLowForDevice(deviceId, "Test Device"));
-            Assert.Equal(90, settings.GetHighForDevice(deviceId, "Test Device"));
-            Assert.Equal(123, settings.GetPollIntervalForDevice(deviceId, "Test Device"));
+            Assert.Equal(10,      settings.GetLowForDevice(deviceId, "Test Device"));
+            Assert.Equal(90,      settings.GetHighForDevice(deviceId, "Test Device"));
+            Assert.Equal(123,     settings.GetPollIntervalForDevice(deviceId, "Test Device"));
             Assert.Equal("Alias", settings.GetDisplayName(deviceId, "Test Device"));
             Assert.True(settings.IsIgnored(deviceId, "Test Device"));
         }
