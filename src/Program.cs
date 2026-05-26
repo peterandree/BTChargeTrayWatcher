@@ -89,12 +89,16 @@ internal static class Program
             // eliminating the deadlock risk that existed when disposal ran inside
             // the ApplicationExit handler.
             if (monitor is not null)
+            {
                 Task.Run(async () => await monitor.DisposeAsync().ConfigureAwait(false))
                     .GetAwaiter().GetResult();
+            }
 
             if (laptopMonitor is not null)
+            {
                 Task.Run(async () => await laptopMonitor.DisposeAsync().ConfigureAwait(false))
                     .GetAwaiter().GetResult();
+            }
 
             if (createdNew) _mutex.ReleaseMutex();
             _mutex.Dispose();

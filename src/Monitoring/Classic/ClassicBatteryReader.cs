@@ -17,7 +17,7 @@ public sealed class ClassicBatteryReader
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        IReadOnlyList<ClassicBluetoothCandidate> candidates;
+        List<ClassicBluetoothCandidate> candidates;
         try
         {
             candidates = _deviceEnumerator.EnumerateCandidates();
@@ -29,24 +29,21 @@ public sealed class ClassicBatteryReader
         }
 
         if (candidates.Count == 0)
-            return new();
+            return [];
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        Task<ConnectionCheckResult>[] connectionTasks = candidates
-            .Select(candidate => CheckConnectedAsync(candidate, cancellationToken))
-            .ToArray();
+        Task<ConnectionCheckResult>[] connectionTasks = [.. candidates.Select(candidate => CheckConnectedAsync(candidate, cancellationToken))];
 
         ConnectionCheckResult[] connectionResults =
             await Task.WhenAll(connectionTasks).ConfigureAwait(false);
 
-        List<ClassicBluetoothCandidate> connected = connectionResults
+        List<ClassicBluetoothCandidate> connected = [.. connectionResults
             .Where(r => r.Connected)
-            .Select(r => r.Candidate)
-            .ToList();
+            .Select(r => r.Candidate)];
 
         if (connected.Count == 0)
-            return new();
+            return [];
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -56,7 +53,7 @@ public sealed class ClassicBatteryReader
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
         }, cancellationToken).ConfigureAwait(false);
 
-        return connected
+        return [.. connected
             .Select(c =>
             {
                 bool found = batteryMap.TryGetValue(c.InstanceId, out var props);
@@ -67,8 +64,7 @@ public sealed class ClassicBatteryReader
                     props.IsCharging,
                     BatterySource.Classic);
             })
-            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)
-            .ToList();
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)];
     }
 
     private async Task<ConnectionCheckResult> CheckConnectedAsync(

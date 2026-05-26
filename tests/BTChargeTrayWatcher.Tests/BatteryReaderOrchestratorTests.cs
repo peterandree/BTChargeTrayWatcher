@@ -14,7 +14,7 @@ public sealed class BatteryReaderOrchestratorTests
     private static Func<CancellationToken, Task<List<DeviceBatteryInfo>>>
         ClassicStubCounting(List<DeviceBatteryInfo> results, int[] counter)
     {
-        return ct =>
+        return _ =>
         {
             counter[0]++;
             return Task.FromResult(results);
@@ -258,7 +258,7 @@ public sealed class BatteryReaderOrchestratorTests
     [Fact]
     public async Task Non_allowed_category_is_filtered_out_on_production_path()
     {
-        var unknownCategory = (DeviceCategory)99;
+        const DeviceCategory unknownCategory = (DeviceCategory)99;
 
         using var gattManager = new GattConnectionManager(1);
         var orchestrator = new BatteryReaderOrchestrator(
@@ -276,7 +276,7 @@ public sealed class BatteryReaderOrchestratorTests
     [Fact]
     public async Task Category_override_bypasses_filter_on_production_path()
     {
-        var unknownCategory = (DeviceCategory)99;
+        const DeviceCategory unknownCategory = (DeviceCategory)99;
         var settings = FilterEnabled();
         settings.SetCategoryFilterOverrides(["classic-1"]);
 
@@ -297,7 +297,7 @@ public sealed class BatteryReaderOrchestratorTests
     [Fact]
     public async Task Disabled_filter_passes_all_categories_on_production_path()
     {
-        var unknownCategory = (DeviceCategory)99;
+        const DeviceCategory unknownCategory = (DeviceCategory)99;
 
         using var gattManager = new GattConnectionManager(1);
         var orchestrator = new BatteryReaderOrchestrator(

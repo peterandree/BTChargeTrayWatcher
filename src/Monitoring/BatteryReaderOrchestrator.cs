@@ -16,13 +16,12 @@ internal sealed class BatteryReaderOrchestrator
 
     private const double FuzzyThreshold = 0.92;
 
-    private static readonly IReadOnlySet<DeviceCategory> AllowedCategories =
-        new HashSet<DeviceCategory>
-        {
+    private static readonly HashSet<DeviceCategory> AllowedCategories =
+        [
             DeviceCategory.Audio,
             DeviceCategory.Hid,
             DeviceCategory.Controller,
-        };
+        ];
 
     private readonly GattConnectionManager _gattManager;
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;

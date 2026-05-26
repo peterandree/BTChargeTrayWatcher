@@ -37,8 +37,8 @@ public sealed class OptionsForm : Form
     private DevicesViewModel? _devicesVm;
     // Backing list (underscore) and a non-underscored alias `deviceRows` kept
     // for legacy reflection access in tests and external callers.
-    private List<DevicesViewModel.DeviceRow> _deviceRows = new();
-    private List<DevicesViewModel.DeviceRow> deviceRows;
+    private readonly List<DevicesViewModel.DeviceRow> _deviceRows = [];
+    private readonly List<DevicesViewModel.DeviceRow> deviceRows;
 
     public OptionsForm(MessageBoxHandler? messageBoxHandler = null)
     {
