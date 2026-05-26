@@ -34,9 +34,9 @@ public sealed class PollingOrchestratorPollTests
             Action<IReadOnlyList<DeviceBatteryInfo>>? onScanCompleted = null,
             Action<bool>? onAlertStateChanged = null)
     {
-        var spy      = new NotificationSpy();
-        var last     = new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase);
-        var opts     = new PollingOrchestratorOptions(
+        var spy  = new NotificationSpy();
+        var last = new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase);
+        var opts = new PollingOrchestratorOptions(
             Settings:            settings ?? new ThresholdSettings(),
             Notifier:            spy,
             LastKnown:           last,
@@ -44,9 +44,9 @@ public sealed class PollingOrchestratorPollTests
             ReadDevices:         readDevices,
             ShutdownToken: TestContext.Current.CancellationToken,
             Callbacks: new PollingOrchestratorCallbacks(
-                OnBatteryRead: (_, _) => { },
-                OnScanCompleted: _ => { },
-                OnAlertStateChanged: _ => { }));
+                OnBatteryRead:       (_, _) => { },
+                OnScanCompleted:     list  => onScanCompleted?.Invoke(list),
+                OnAlertStateChanged: v     => onAlertStateChanged?.Invoke(v)));
         return (new PollingOrchestrator(opts), spy, last);
     }
 
@@ -79,12 +79,10 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Same_battery_value_on_second_poll_fires_no_notification()
     {
-        // First poll: normal range
         var (o, spy, _) = Build(_ => Result(Dev("id1", "Headphones", 50)));
         await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
 
-        // Second poll: same value -> no transition -> no notification
         await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
     }
@@ -100,9 +98,9 @@ public sealed class PollingOrchestratorPollTests
             return Result(Dev("id1", "Keyboard", battery));
         });
 
-        await o.PollAsync(TestContext.Current.CancellationToken); // battery=50, Normal
+        await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
-        await o.PollAsync(TestContext.Current.CancellationToken); // battery=15, Low -> alert
+        await o.PollAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("Low:Keyboard:15", spy.Calls);
     }
@@ -145,7 +143,7 @@ public sealed class PollingOrchestratorPollTests
 
         await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.Empty(spy.Calls);
-        Assert.Empty(last); // not added to lastKnown
+        Assert.Empty(last);
     }
 
     // ── Threshold-change reset ────────────────────────────────────────────────────────
@@ -153,7 +151,6 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task ThresholdsChanged_re_evaluates_alert_state_from_scratch()
     {
-        // First poll: device at 85% — High alert fires, state = High.
         int call = 0;
         var (o, spy, _) = Build(_ =>
         {
@@ -165,15 +162,11 @@ public sealed class PollingOrchestratorPollTests
         Assert.Contains("High:Dev:85", spy.Calls);
         spy.Calls.Clear();
 
-        // Signal threshold change (clears alert state cache).
         o.SignalThresholdsChanged();
-        // Wait for the background task that SignalThresholdsChanged fires.
         await Task.WhenAll(o.PollLock.WaitAsync(TestContext.Current.CancellationToken).ContinueWith(_ => o.PollLock.Release()));
 
-        // Run another explicit poll to get a deterministic result.
         await o.PollAsync(TestContext.Current.CancellationToken);
 
-        // After reset the device is treated as new — High fires again.
         Assert.Contains("High:Dev:85", spy.Calls);
     }
 
@@ -182,19 +175,17 @@ public sealed class PollingOrchestratorPollTests
     [Fact]
     public async Task Device_absent_for_MissCountThreshold_polls_is_evicted()
     {
-        // Poll 1: device present -> added to lastKnown
         int call = 0;
         var (o, _, last) = Build(_ =>
         {
             call++;
             if (call == 1) return Result(Dev("id1", "Dev", 50));
-            return Task.FromResult(new List<DeviceBatteryInfo>()); // absent
+            return Task.FromResult(new List<DeviceBatteryInfo>());
         });
 
-        await o.PollAsync(TestContext.Current.CancellationToken); // call=1, device added
+        await o.PollAsync(TestContext.Current.CancellationToken);
         Assert.True(last.ContainsKey("id1"));
 
-        // Poll MissCountThreshold times while absent
         for (int i = 0; i < PollingDefaults.MissCountThreshold; i++)
             await o.PollAsync(TestContext.Current.CancellationToken);
 
@@ -213,7 +204,6 @@ public sealed class PollingOrchestratorPollTests
         });
 
         await o.PollAsync(TestContext.Current.CancellationToken);
-        // Only MissCountThreshold - 1 absent polls: not yet evicted
         for (int i = 0; i < PollingDefaults.MissCountThreshold - 1; i++)
             await o.PollAsync(TestContext.Current.CancellationToken);
 
@@ -264,21 +254,19 @@ public sealed class PollingOrchestratorPollTests
     public async Task Per_device_poll_interval_is_respected()
     {
         var settings = new ThresholdSettings();
-        // Set a long poll interval for device id1 so second immediate poll is skipped
         settings.SetPollIntervalForDevice("id1", 3600);
 
         int call = 0;
         var (o, spy, _) = Build(_ =>
         {
             call++;
-            int battery = call == 1 ? 50 : 10; // second poll would normally trigger Low
+            int battery = call == 1 ? 50 : 10;
             return Result(Dev("id1", "Headset", battery));
         }, settings: settings);
 
-        await o.PollAsync(TestContext.Current.CancellationToken); // first poll processed
+        await o.PollAsync(TestContext.Current.CancellationToken);
         spy.Calls.Clear();
 
-        // Trigger a scheduled poll path which enforces per-device intervals
         o.OnTimerTick();
         await Task.WhenAll(o.PollLock.WaitAsync(TestContext.Current.CancellationToken).ContinueWith(_ => o.PollLock.Release()));
 
