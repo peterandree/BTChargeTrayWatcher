@@ -4,7 +4,7 @@ namespace BTChargeTrayWatcher.Tests;
 
 public sealed class BatteryReaderOrchestratorTests
 {
-    // ── Helpers ──────────────────────────────────────────────────────────────────────────
+    // ── Helpers ────────────────────────────────────────────────────────────────────────────────────
 
     // Delegate-based stubs — no IBatteryReader required.
     private static Func<CancellationToken, Task<List<DeviceBatteryInfo>>>
@@ -12,14 +12,11 @@ public sealed class BatteryReaderOrchestratorTests
             _ => { onCall?.Invoke(); return Task.FromResult(results); };
 
     private static Func<CancellationToken, Task<List<DeviceBatteryInfo>>>
-        ClassicStubCounting(List<DeviceBatteryInfo> results, ref int counter)
+        ClassicStubCounting(List<DeviceBatteryInfo> results, int[] counter)
     {
-        // ref locals cannot be captured; use a 1-element array as a mutable box.
-        var box = new int[1];
         return ct =>
         {
-            box[0]++;
-            counter = box[0];
+            counter[0]++;
             return Task.FromResult(results);
         };
     }
@@ -56,7 +53,7 @@ public sealed class BatteryReaderOrchestratorTests
         return s;
     }
 
-    // ── Classic fallback ─────────────────────────────────────────────────────────────────────
+    // ── Classic fallback ───────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Classic_results_returned_when_no_BLE_devices()
@@ -95,8 +92,8 @@ public sealed class BatteryReaderOrchestratorTests
     [Fact]
     public async Task Classic_reader_always_called_even_with_BLE_devices()
     {
-        int callCount = 0;
-        var readClassic = ClassicStubCounting([], ref callCount);
+        var counter = new int[1];
+        var readClassic = ClassicStubCounting([], counter);
 
         using var gattManager = new GattConnectionManager(1);
         var orchestrator = new BatteryReaderOrchestrator(
@@ -106,10 +103,10 @@ public sealed class BatteryReaderOrchestratorTests
             [BleDevice("ble-1", "Mouse")],
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, callCount);
+        Assert.Equal(1, counter[0]);
     }
 
-    // ── Merge: name-based dedup ────────────────────────────────────────────────────────────
+    // ── Merge: name-based dedup ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Classic_device_with_same_name_as_GATT_device_is_deduplicated()
@@ -132,7 +129,7 @@ public sealed class BatteryReaderOrchestratorTests
         Assert.Equal(2, results.Count);
     }
 
-    // ── Capability cache integration ──────────────────────────────────────────────────────────
+    // ── Capability cache integration ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task GATT_not_attempted_for_non_BLE_devices()
@@ -150,7 +147,7 @@ public sealed class BatteryReaderOrchestratorTests
         Assert.Null(cache.GetKnownSource("classic-1"));
     }
 
-    // ── IsConnected skipping (#78) ────────────────────────────────────────────────────────────
+    // ── IsConnected skipping (#78) ───────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Disconnected_BLE_device_skipped_for_GATT_read()
@@ -222,7 +219,7 @@ public sealed class BatteryReaderOrchestratorTests
         Assert.Equal("Speaker", results[0].Name);
     }
 
-    // ── ADR-016: category filtering on production path ─────────────────────────────────────
+    // ── ADR-016: category filtering on production path ─────────────────────────────────────────────────────
 
     [Fact]
     public async Task Allowed_category_passes_through_on_production_path()
