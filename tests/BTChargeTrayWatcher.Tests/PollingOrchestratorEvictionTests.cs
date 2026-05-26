@@ -55,10 +55,11 @@ public sealed class PollingOrchestratorEvictionTests
             LastKnown:           lastKnown,
             Tracker:             new TaskTracker(),
             ReadDevices:         readDevices,
-            OnBatteryRead:       (_, _) => { },
-            OnScanCompleted:     _ => { },
-            OnAlertStateChanged: v => alertStates.Add(v),
-            ShutdownToken:       TestContext.Current.CancellationToken);
+            ShutdownToken: TestContext.Current.CancellationToken,
+            Callbacks: new PollingOrchestratorCallbacks(
+                OnBatteryRead: (_, _) => { },
+                OnScanCompleted: _ => { },
+                OnAlertStateChanged: _ => { }));
 
         return new BuildResult(new PollingOrchestrator(opts), spy, lastKnown, alertStates);
     }

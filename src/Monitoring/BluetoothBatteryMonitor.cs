@@ -87,27 +87,29 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _taskTracker = new TaskTracker();
 
         _poller = new PollingOrchestrator(new PollingOrchestratorOptions(
-            Settings:            settings,
-            Notifier:            notifier,
-            LastKnown:           _lastKnown,
-            Tracker:             _taskTracker,
-            ReadDevices:         ct => _scanner!.QuietReadAsync(ct),
-            ShutdownToken:       _shutdownCts.Token,
-            OnBatteryRead:       (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanCompleted:     list => BackgroundRefreshCompleted?.Invoke(list),
-            OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert)));
+            Settings:      settings,
+            Notifier:      notifier,
+            LastKnown:     _lastKnown,
+            Tracker:       _taskTracker,
+            ReadDevices:   ct => _scanner!.QuietReadAsync(ct),
+            ShutdownToken: _shutdownCts.Token,
+            Callbacks:     new PollingOrchestratorCallbacks(
+                OnBatteryRead:       (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+                OnScanCompleted:     list => BackgroundRefreshCompleted?.Invoke(list),
+                OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert))));
 
         _scanner = new Scanner(new ScannerOptions(
-            GattReader:      _gattReader,
-            ClassicReader:   _classicReader,
-            LastKnown:       _lastKnown,
-            Poller:          _poller,
-            Tracker:         _taskTracker,
-            ShutdownToken:   _shutdownCts.Token,
-            OnDeviceFound:   (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
-            OnBatteryRead:   (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
-            OnScanStarted:   () => ScanStarted?.Invoke(),
-            OnScanCompleted: list => ManualScanCompleted?.Invoke(list)));
+            GattReader:    _gattReader,
+            ClassicReader: _classicReader,
+            LastKnown:     _lastKnown,
+            Poller:        _poller,
+            Tracker:       _taskTracker,
+            ShutdownToken: _shutdownCts.Token,
+            Callbacks:     new ScannerCallbacks(
+                OnDeviceFound:   (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
+                OnBatteryRead:   (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
+                OnScanStarted:   () => ScanStarted?.Invoke(),
+                OnScanCompleted: list => ManualScanCompleted?.Invoke(list))));
 
         _timer = new System.Threading.Timer(
             _ => OnTimerTick(),

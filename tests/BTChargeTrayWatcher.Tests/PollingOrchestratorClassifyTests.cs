@@ -18,15 +18,16 @@ public sealed class PollingOrchestratorClassifyTests
     {
         var s = settings ?? new ThresholdSettings();
         var opts = new PollingOrchestratorOptions(
-            Settings:          s,
-            Notifier:          NullNotificationService.Instance,
-            LastKnown:         new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase),
-            Tracker:           new TaskTracker(),
-            ReadDevices:       _ => Task.FromResult(new List<DeviceBatteryInfo>()),
-            OnBatteryRead:     (_, _) => { },
-            OnScanCompleted:   _ => { },
-            OnAlertStateChanged: _ => { },
-            ShutdownToken:     TestContext.Current.CancellationToken);
+            Settings: s,
+            Notifier: NullNotificationService.Instance,
+            LastKnown: new ConcurrentDictionary<string, DeviceBatteryInfo>(StringComparer.OrdinalIgnoreCase),
+            Tracker: new TaskTracker(),
+            ReadDevices: _ => Task.FromResult(new List<DeviceBatteryInfo>()),
+            ShutdownToken: TestContext.Current.CancellationToken,
+            Callbacks: new PollingOrchestratorCallbacks(
+                OnBatteryRead: (_, _) => { },
+                OnScanCompleted: _ => { },
+                OnAlertStateChanged: _ => { }));
         return new PollingOrchestrator(opts);
     }
 
