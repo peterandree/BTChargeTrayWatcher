@@ -1,6 +1,5 @@
 // src/Tray/TrayApp.cs  — thin orchestration shell; tooltip/alert logic in TrayViewModel.
 using System.Diagnostics;
-using BTChargeTrayWatcher.Tray.ViewModels;
 
 namespace BTChargeTrayWatcher;
 
@@ -26,14 +25,6 @@ public sealed class TrayApp : IDisposable
     private bool _disposed;
     private System.ComponentModel.CancelEventHandler? _contextMenuOpeningHandler;
 
-    /// <param name="settings">Application threshold settings.</param>
-    /// <param name="monitor">Bluetooth battery monitor.</param>
-    /// <param name="laptopMonitor">Laptop battery monitor.</param>
-    /// <param name="aliasSuggestionService">Alias suggestion service.</param>
-    /// <param name="showOptions">Action that opens the Options form.</param>
-    /// <param name="subscribeNotificationClicked">
-    /// Receives the scan-window-open callback; returns an unsubscribe action.
-    /// </param>
     internal TrayApp(
         ThresholdSettings       settings,
         BluetoothBatteryMonitor monitor,
@@ -231,8 +222,8 @@ public sealed class TrayApp : IDisposable
         _scanner.ScanFaulted       -= OnScanFaulted;
         _monitor.BackgroundRefreshCompleted -= OnDevicesRefreshed;
         _monitor.ManualScanCompleted        -= OnDevicesRefreshed;
-        _laptopMonitor.BatteryUpdated -= OnLaptopBatteryUpdated;
-        _settings.Changed             -= OnSettingsChanged;
+        _laptopMonitor.BatteryUpdated       -= OnLaptopBatteryUpdated;
+        _settings.Changed                   -= OnSettingsChanged;
         _unsubscribeNotificationClicked();
         _aliasSuggestionService.SuggestionQueued -= OnAliasSuggestionQueued;
 

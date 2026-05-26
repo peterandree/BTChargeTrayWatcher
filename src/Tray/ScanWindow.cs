@@ -1,6 +1,4 @@
 // src/Tray/ScanWindow.cs  — thin binding shell; all logic in ScanViewModel.
-using BTChargeTrayWatcher.Tray.ViewModels;
-
 namespace BTChargeTrayWatcher;
 
 public partial class ScanWindow : Form
@@ -83,15 +81,15 @@ public partial class ScanWindow : Form
 
         Resize += (_, _) => AdjustColumns();
 
-        // ── VM event bindings ─────────────────────────────────────────────
+        // ── VM event bindings ─────────────────────────────────────────────────────
 
-        _vm.StatusChanged  += text  => SafeInvoke(() => _status.Text = text);
-        _vm.ScanRestarted  += ()    => SafeInvoke(() =>
+        _vm.StatusChanged  += text   => SafeInvoke(() => _status.Text = text);
+        _vm.ScanRestarted  += ()     => SafeInvoke(() =>
         {
             _progress.Style = ProgressBarStyle.Marquee;
             _progress.Value = 0;
         });
-        _vm.DeviceUpserted += item  => SafeInvoke(() => UpsertListItem(item));
+        _vm.DeviceUpserted += item   => SafeInvoke(() => UpsertListItem(item));
         _vm.ScanCompleted  += extras => SafeInvoke(() =>
         {
             foreach (var item in extras)
@@ -102,7 +100,7 @@ public partial class ScanWindow : Form
         _vm.AutoRefreshTriggered += () =>
             SafeInvoke(() => AutoRefreshRequested?.Invoke(this, EventArgs.Empty));
 
-        // ── UI → VM bindings ──────────────────────────────────────────────
+        // ── UI → VM bindings ──────────────────────────────────────────────────────
 
         _autoRefreshCheckBox.CheckedChanged += (_, _) =>
         {
@@ -113,16 +111,11 @@ public partial class ScanWindow : Form
                 _vm.StopTimer();
         };
 
-        Shown += (_, _) => _vm.StartTimer();
-
-        FormClosed += (_, _) =>
-        {
-            _vm.StopTimer();
-            _vm.Dispose();
-        };
+        Shown     += (_, _) => _vm.StartTimer();
+        FormClosed += (_, _) => { _vm.StopTimer(); _vm.Dispose(); };
     }
 
-    // ── Public scan surface (called by ScanCoordinator) ───────────────────
+    // ── Public scan surface (called by ScanCoordinator) ───────────────────────────
 
     public void OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null) =>
         _vm.OnDeviceFound(deviceId, name, battery, isCharging);
@@ -131,15 +124,14 @@ public partial class ScanWindow : Form
 
     internal void OnScanComplete(IReadOnlyList<WatchedDevice> trackedDevices)
     {
-        // Build shownIds/shownNames from the current list before delegating.
         var existing = _list.Items
             .Cast<ListViewItem>()
             .Select(i => (id: i.Tag as string ?? string.Empty, name: i.Text));
-        _vm.BuildShownSets(existing); // populates internal sets used by OnScanComplete
+        _vm.BuildShownSets(existing);
         _vm.OnScanComplete(trackedDevices);
     }
 
-    // ── List view helpers ─────────────────────────────────────────────────
+    // ── List view helpers ───────────────────────────────────────────────────────────
 
     private void UpsertListItem(ScanViewModel.DeviceItem item)
     {
@@ -168,7 +160,7 @@ public partial class ScanWindow : Form
 
     private static void ApplyToListItem(ListViewItem lvi, ScanViewModel.DeviceItem item)
     {
-        lvi.SubItems[1].Text     = item.BatteryText;
+        lvi.SubItems[1].Text      = item.BatteryText;
         lvi.SubItems[1].ForeColor = item.TrendUp   ? Color.Green
                                   : item.TrendDown ? Color.Red
                                   : SystemColors.WindowText;
