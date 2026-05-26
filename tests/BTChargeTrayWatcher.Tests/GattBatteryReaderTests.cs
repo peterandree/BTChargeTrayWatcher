@@ -10,7 +10,7 @@ public sealed class GattBatteryReaderTests
         var reader = new GattBatteryReader((id, name, ct) =>
             Task.FromResult(new GattDeviceReadResult(id, name, 33, false)), TimeSpan.FromMilliseconds(1000));
 
-        var devices = new[] { (Id: "dev1", Name: "D1"), (Id: "dev2", Name: "D2") };
+        var devices = new[] { new DeviceIdentifier("dev1", "D1"), new DeviceIdentifier("dev2", "D2") };
 
         var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);
 
@@ -29,7 +29,7 @@ public sealed class GattBatteryReaderTests
             return new GattDeviceReadResult(id, name, 77);
         }, TimeSpan.FromMilliseconds(50));
 
-        var devices = new[] { (Id: "slow", Name: "Slow") };
+        var devices = new[] { new DeviceIdentifier("slow", "Slow") };
         var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);
 
         Assert.Single(results);
@@ -61,7 +61,7 @@ public sealed class GattBatteryReaderTests
         var reader = new GattBatteryReader(slow, TimeSpan.FromSeconds(2));
 
         var devices = Enumerable.Range(0, PollingDefaults.GattMaxConcurrentReads * 3)
-            .Select(i => (Id: $"d{i}", Name: $"D{i}"))
+            .Select(i => new DeviceIdentifier($"d{i}", $"D{i}"))
             .ToArray();
 
         var results = await reader.ReadAllAsync(devices, TestContext.Current.CancellationToken);

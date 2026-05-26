@@ -93,6 +93,7 @@ winget/                         – WinGet submission artefacts
 - **Hysteresis and polling timing** are centralised in `PollingDefaults`. Change constants there, not inline in logic.
 - **`sealed` by default.** Mark classes `sealed` unless inheritance is explicitly required.
 - **Records for options.** Pass constructor parameter groups as `sealed record` option types (see `ScannerOptions`, `PollingOrchestratorOptions`).
+- **Avoid tuples for API surface.** Avoid using tuples for public-facing APIs, method return types, parameters, or collection element types that cross component boundaries. Prefer small, named types (for example `sealed record` or `record struct` for compact value-like data) with explicit property names — this improves readability, discoverability, and future extensibility. Tuples may be used for very short-lived local groupings inside a single method or narrow test helpers only.
 
 ---
 

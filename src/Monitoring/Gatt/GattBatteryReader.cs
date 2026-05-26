@@ -43,11 +43,11 @@ public sealed class GattBatteryReader : IDisposable
             return new List<DeviceBatteryInfo>();
         }
 
-        var deviceList = dis.Select(i => (Id: i.Id, Name: i.Name)).ToList();
+        var deviceList = dis.Select(i => new DeviceIdentifier(i.Id, i.Name)).ToList();
         return await ReadAllAsync(deviceList, cancellationToken).ConfigureAwait(false);
     }
 
-    internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(IEnumerable<(string Id, string Name)> deviceInfos, CancellationToken cancellationToken)
+    internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(IEnumerable<DeviceIdentifier> deviceInfos, CancellationToken cancellationToken)
     {
         var list = deviceInfos.ToList();
 

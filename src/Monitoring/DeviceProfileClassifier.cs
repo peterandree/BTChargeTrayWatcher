@@ -16,7 +16,7 @@ internal sealed class DeviceProfileClassifier
     /// The raw 24-bit Bluetooth Class of Device value, or <c>null</c> if unavailable.
     /// Major Device Class is extracted from bits 12–8.
     /// </param>
-    internal (DeviceTransport Transport, DeviceCategory Category) Classify(
+    internal DeviceProfile Classify(
         bool isBle, bool isClassic, uint? classOfDevice)
     {
         var transport = (isBle, isClassic) switch
@@ -40,6 +40,6 @@ internal sealed class DeviceProfileClassifier
             };
         }
 
-        return (transport, category);
+        return new DeviceProfile(transport, category);
     }
 }

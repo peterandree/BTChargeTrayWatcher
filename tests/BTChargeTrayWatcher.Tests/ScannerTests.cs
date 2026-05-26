@@ -17,20 +17,22 @@ public sealed class ScannerTests : IAsyncDisposable
     // ── Factory ───────────────────────────────────────────────────────────────────────
 
     private readonly List<IAsyncDisposable> _teardown = [];
+    private sealed record BatteryRead(string Name, int? Pct);
 
-    private (Scanner scanner,
-             ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown,
-             List<DeviceBatteryInfo> gattResults,
-             List<(string name, int? pct)> batteryReads,
-             List<IReadOnlyList<DeviceBatteryInfo>> scanCompletions,
-             List<bool> scanStarted)
-        Build()
+    private sealed record ScannerBuildResult(
+        Scanner scanner,
+        ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown,
+        List<DeviceBatteryInfo> gattResults,
+        List<BatteryRead> batteryReads,
+        List<IReadOnlyList<DeviceBatteryInfo>> scanCompletions,
+        List<bool> scanStarted);
+
+    private ScannerBuildResult Build()
     {
         var gattResults  = new List<DeviceBatteryInfo>();
         var lastKnown    = new ConcurrentDictionary<string, DeviceBatteryInfo>(
             StringComparer.OrdinalIgnoreCase);
-
-        var batteryReads    = new List<(string, int?)>();
+        var batteryReads    = new List<BatteryRead>();
         var scanCompletions = new List<IReadOnlyList<DeviceBatteryInfo>>();
         var scanStarted     = new List<bool>();
 
@@ -62,7 +64,7 @@ public sealed class ScannerTests : IAsyncDisposable
             ShutdownToken: shutdownCts.Token,
             Callbacks:     new ScannerCallbacks(
                 OnDeviceFound:   (_, _, _) => { },
-                OnBatteryRead:   (n, p) => batteryReads.Add((n, p)),
+                OnBatteryRead:   (n, p) => batteryReads.Add(new BatteryRead(n, p)),
                 OnScanStarted:   () => scanStarted.Add(true),
                 OnScanCompleted: list => scanCompletions.Add(list)));
 
@@ -79,7 +81,7 @@ public sealed class ScannerTests : IAsyncDisposable
             poller.Dispose();
         }));
 
-        return (scanner, lastKnown, gattResults, batteryReads, scanCompletions, scanStarted);
+        return new ScannerBuildResult(scanner, lastKnown, gattResults, batteryReads, scanCompletions, scanStarted);
     }
 
     private sealed class AsyncDisposableAction(Func<Task> action) : IAsyncDisposable
@@ -159,8 +161,8 @@ public sealed class ScannerTests : IAsyncDisposable
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, batteryReads.Count);
-        Assert.Contains(batteryReads, r => r.name == "Mouse"   && r.pct == 60);
-        Assert.Contains(batteryReads, r => r.name == "Headset" && r.pct == 40);
+        Assert.Contains(batteryReads, r => r.Name == "Mouse"   && r.Pct == 60);
+        Assert.Contains(batteryReads, r => r.Name == "Headset" && r.Pct == 40);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════

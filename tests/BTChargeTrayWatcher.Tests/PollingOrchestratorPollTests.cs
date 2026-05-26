@@ -26,9 +26,12 @@ public sealed class PollingOrchestratorPollTests
 
     private static Task<List<DeviceBatteryInfo>> Result(params DeviceBatteryInfo[] devices)
         => Task.FromResult(new List<DeviceBatteryInfo>(devices));
+    private sealed record PollingOrchestratorBuildResult(
+        PollingOrchestrator orchestrator,
+        NotificationSpy spy,
+        ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown);
 
-    private static (PollingOrchestrator orchestrator, NotificationSpy spy, ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown)
-        Build(
+    private static PollingOrchestratorBuildResult Build(
             Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices,
             ThresholdSettings? settings = null,
             Action<IReadOnlyList<DeviceBatteryInfo>>? onScanCompleted = null,
@@ -47,7 +50,7 @@ public sealed class PollingOrchestratorPollTests
                 OnBatteryRead:       (_, _) => { },
                 OnScanCompleted:     list  => onScanCompleted?.Invoke(list),
                 OnAlertStateChanged: v     => onAlertStateChanged?.Invoke(v)));
-        return (new PollingOrchestrator(opts), spy, last);
+        return new PollingOrchestratorBuildResult(new PollingOrchestrator(opts), spy, last);
     }
 
     // ── Alert routing ──────────────────────────────────────────────────────────────────

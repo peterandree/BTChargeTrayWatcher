@@ -127,7 +127,7 @@ public partial class ScanWindow : Form
         // Snapshot current ListView state into the VM before it builds the extras list.
         _vm.SetShownItems(_list.Items
             .Cast<ListViewItem>()
-            .Select(i => (id: i.Tag as string ?? string.Empty, name: i.Text)));
+            .Select(i => new DeviceIdentifier(i.Tag as string ?? string.Empty, i.Text)));
 
         _vm.OnScanComplete(trackedDevices);
     }

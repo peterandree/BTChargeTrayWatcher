@@ -138,14 +138,14 @@ internal sealed class ScanViewModel : IDisposable
     /// passing the IDs and names of rows already visible in the ListView.
     /// OnScanComplete uses these sets to suppress duplicate “sleeping” rows.
     /// </summary>
-    public void SetShownItems(IEnumerable<(string id, string name)> existingItems)
+    public void SetShownItems(IEnumerable<DeviceIdentifier> existingItems)
     {
         _shownIds.Clear();
         _shownNames.Clear();
-        foreach (var (id, name) in existingItems)
+        foreach (var info in existingItems)
         {
-            _shownIds.Add(id);
-            _shownNames.Add(name);
+            _shownIds.Add(info.Id);
+            _shownNames.Add(info.Name);
         }
     }
 
