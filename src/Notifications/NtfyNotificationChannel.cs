@@ -12,6 +12,12 @@ public sealed class NtfyNotificationChannel : INotificationChannel
     private const string NtfyBaseUrl = "https://ntfy.sh/";
     private const string AppTitle    = "BTChargeTrayWatcher";
 
+    /// <summary>
+    /// Per-request HTTP timeout. Keeps fire-and-forget calls from hanging the process
+    /// indefinitely when the ntfy server is slow or unreachable (fix #128).
+    /// </summary>
+    private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly HttpClient _http = new();
 
     private readonly NtfyIntegrationSettings _ntfySettings;
@@ -96,15 +102,37 @@ public sealed class NtfyNotificationChannel : INotificationChannel
 
     // ── Private ─────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Fire-and-forget publish. Exceptions and non-2xx responses are logged to Debug
+    /// and do not propagate to the caller.
+    /// FIX #128: a per-request CTS with <see cref="HttpTimeout"/> prevents the task from
+    /// hanging the ThreadPool when ntfy is unreachable.
+    /// </summary>
     private void Fire(string body, string priority)
     {
         if (!_ntfySettings.IsEnabled || string.IsNullOrWhiteSpace(_ntfySettings.Topic))
             return;
 
-        _ = PublishAsync(body, priority);
+        _ = Task.Run(async () =>
+        {
+            using var cts = new CancellationTokenSource(HttpTimeout);
+            try
+            {
+                await PublishAsync(body, priority, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.WriteLine("[NtfyNotificationChannel] Fire timed out.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[NtfyNotificationChannel] Fire fault: {ex}");
+            }
+        });
     }
 
-    private async Task<bool> PublishAsync(string body, string priority)
+    private async Task<bool> PublishAsync(string body, string priority,
+        CancellationToken ct = default)
     {
         try
         {
@@ -117,11 +145,15 @@ public sealed class NtfyNotificationChannel : INotificationChannel
             request.Headers.TryAddWithoutValidation("Title",    AppTitle);
             request.Headers.TryAddWithoutValidation("Priority", priority);
 
-            using var response = await _http.SendAsync(request).ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 Debug.WriteLine($"[NtfyNotificationChannel] Publish failed: HTTP {(int)response.StatusCode}");
 
             return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

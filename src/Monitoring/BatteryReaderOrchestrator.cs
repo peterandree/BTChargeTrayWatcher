@@ -151,6 +151,11 @@ internal sealed class BatteryReaderOrchestrator
         }
 
         // Stage 4: Jaro-Winkler fuzzy match
+        // FIX #123: suppression must be checked BEFORE firing the AliasSuggested event.
+        // Previously the event was raised even for suppressed devices, causing spurious UI prompts.
+        if (_settings.IsAliasSuggestionSuppressed(device.DeviceId))
+            return device.DeviceId;
+
         string? bestKey = null;
         string? bestCanonical = null;
         double bestScore = 0.0;
@@ -166,10 +171,6 @@ internal sealed class BatteryReaderOrchestrator
                 bestCanonical = kv.Value;
             }
         }
-
-        // If the user has suppressed alias suggestions for this device, treat as no alias.
-        if (_settings.IsAliasSuggestionSuppressed(device.DeviceId))
-            return device.DeviceId;
 
         if (bestScore >= FuzzyThreshold && bestKey is not null && bestCanonical is not null)
         {
