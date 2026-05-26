@@ -1,5 +1,16 @@
 namespace BTChargeTrayWatcher;
 
+/// <summary>
+/// Pre-constructed <see cref="ToolStripMenuItem"/> instances required by
+/// <see cref="TrayMenuBuilder.Build"/>. Extracted as a parameter object to
+/// eliminate the 4 same-typed positional parameters (closes #121).
+/// </summary>
+internal sealed record TrayMenuItems(
+    ToolStripMenuItem LaptopMenuItem,
+    ToolStripMenuItem ScanMenuItem,
+    ToolStripMenuItem LowMenu,
+    ToolStripMenuItem HighMenu);
+
 internal sealed class TrayMenuBuilder
 {
     private readonly ThresholdSettings _settings;
@@ -13,32 +24,25 @@ internal sealed class TrayMenuBuilder
 
     public static ContextMenuStrip Build(
         ThresholdSettings settings,
-        ToolStripMenuItem laptopMenuItem,
+        TrayMenuItems items,
         Func<IReadOnlyList<DeviceBatteryInfo>> getDevices,
-        ToolStripMenuItem scanMenuItem,
-        ToolStripMenuItem lowMenu,
-        ToolStripMenuItem highMenu,
         Action onExit,
         Action? onOptions = null)
     {
         var menu = new ContextMenuStrip();
-        // Static header: laptop status + separator
-        menu.Items.Add(laptopMenuItem);
+        menu.Items.Add(items.LaptopMenuItem);
         var startDevicesSeparator = new ToolStripSeparator();
         menu.Items.Add(startDevicesSeparator);
 
-        // End marker for dynamic device entries
         var endDevicesSeparator = new ToolStripSeparator();
         menu.Items.Add(endDevicesSeparator);
 
-        // Populate devices dynamically when the menu opens so values are always current
         menu.Opening += (_, _) =>
         {
             try
             {
-                // Remove existing dynamic items between the separators
                 int startIndex = menu.Items.IndexOf(startDevicesSeparator);
-                int endIndex = menu.Items.IndexOf(endDevicesSeparator);
+                int endIndex   = menu.Items.IndexOf(endDevicesSeparator);
                 while (startIndex + 1 < endIndex)
                 {
                     menu.Items.RemoveAt(startIndex + 1);
@@ -49,28 +53,25 @@ internal sealed class TrayMenuBuilder
                 int insertIndex = menu.Items.IndexOf(endDevicesSeparator);
                 foreach (var dev in devices)
                 {
-                    string name = settings.GetDisplayName(dev.DeviceId, dev.Name);
-                    string battery = dev.Battery.HasValue ? BatteryDisplay.FormatBattery(dev.Battery.Value, dev.IsCharging) : "N/A";
-                    string trend = string.Empty;
-                    if (dev.Battery.HasValue)
-                    {
-                        trend = BatteryTrendHelper.GetArrow(null, dev.Battery.Value);
-                    }
-                        string text = trend.Length > 0 ? $"{name}  {battery} {trend}" : $"{name}  {battery}";
-                    var item = new ToolStripMenuItem(text) { Enabled = false };
-                    menu.Items.Insert(insertIndex, item);
-                    insertIndex++;
+                    string name    = settings.GetDisplayName(dev.DeviceId, dev.Name);
+                    string battery = dev.Battery.HasValue
+                        ? BatteryDisplay.FormatBattery(dev.Battery.Value, dev.IsCharging)
+                        : "N/A";
+                    string trend = dev.Battery.HasValue
+                        ? BatteryTrendHelper.GetArrow(null, dev.Battery.Value)
+                        : string.Empty;
+                    string text = trend.Length > 0 ? $"{name}  {battery} {trend}" : $"{name}  {battery}";
+                    menu.Items.Insert(insertIndex++, new ToolStripMenuItem(text) { Enabled = false });
                 }
             }
             catch
             {
-                // If device listing fails, show a single error entry between separators
                 int insertIndex = menu.Items.IndexOf(endDevicesSeparator);
                 menu.Items.Insert(insertIndex, new ToolStripMenuItem("(device error)") { Enabled = false });
             }
         };
 
-        menu.Items.Add(scanMenuItem);
+        menu.Items.Add(items.ScanMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         var optionsMenuItem = new ToolStripMenuItem("Options…");
         optionsMenuItem.Click += (_, _) =>
@@ -82,39 +83,21 @@ internal sealed class TrayMenuBuilder
         };
         menu.Items.Add(optionsMenuItem);
         menu.Items.Add(new ToolStripSeparator());
-        // Removed: Low threshold, High threshold, and Run on startup (now in Options dialog)
         menu.Items.Add("Exit", null, (_, _) => onExit());
         return menu;
     }
 
-    // Minimal stub implementations to restore build
-    public ToolStripMenuItem BuildLowMenu()
-    {
-        return new ToolStripMenuItem("Low threshold");
-    }
-
-    public ToolStripMenuItem BuildHighMenu()
-    {
-        return new ToolStripMenuItem("High threshold");
-    }
-
-    public ToolStripMenuItem BuildLaptopMenuItem()
-    {
-        return new ToolStripMenuItem("Laptop battery");
-    }
+    public ToolStripMenuItem BuildLowMenu()    => new("Low threshold");
+    public ToolStripMenuItem BuildHighMenu()   => new("High threshold");
+    public ToolStripMenuItem BuildLaptopMenuItem() => new("Laptop battery");
 
     public ToolStripMenuItem BuildDevicesMenu(Func<IReadOnlyList<object>> getDevices)
     {
         var menu = new ToolStripMenuItem("Devices");
         try
         {
-            var devices = getDevices();
-            foreach (var dev in devices)
-            {
-                string name = dev?.ToString() ?? "(unknown)";
-                var item = new ToolStripMenuItem(name) { Enabled = false };
-                menu.DropDownItems.Add(item);
-            }
+            foreach (var dev in getDevices())
+                menu.DropDownItems.Add(new ToolStripMenuItem(dev?.ToString() ?? "(unknown)") { Enabled = false });
         }
         catch { menu.DropDownItems.Add("(error)"); }
         return menu;

@@ -58,11 +58,8 @@ public sealed class TrayApp : IDisposable
 
         var contextMenu = TrayMenuBuilder.Build(
             _settings,
-            _laptopMenuItem,
+            new TrayMenuItems(_laptopMenuItem, _scanMenuItem, _lowMenu, _highMenu),
             () => monitor.LastKnownDevices,
-            _scanMenuItem,
-            _lowMenu,
-            _highMenu,
             onExit:    () => _ = ExitAsync(),
             onOptions: _showOptions);
 
