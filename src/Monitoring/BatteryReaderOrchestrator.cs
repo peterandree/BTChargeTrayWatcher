@@ -6,25 +6,14 @@ namespace BTChargeTrayWatcher;
 /// <summary>
 /// Reads batteries from all available sources with protocol fallback.
 /// GATT is attempted first for BLE devices (per-device via <see cref="GattConnectionManager"/>),
-/// then Classic batch reader runs as fallback. Results are merged with GATT winning on conflicts.
+/// then the classic reader delegate runs as fallback.
+/// Results are merged with GATT winning on conflicts.
 /// Capability cache prevents repeated GATT attempts on devices known to lack the battery service.
 /// </summary>
-/// <remarks>
-/// <para>
-/// <b>Execution path: cooperation-stack (production) path only.</b>
-/// This class is the sole production-path aggregator. It is wired directly by
-/// <see cref="BluetoothBatteryMonitor"/> via the internal constructor in <c>Program.cs</c>.
-/// </para>
-/// <para>
-/// All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018
-/// (discovery logging) implementations that affect aggregation live here.
-/// </para>
-/// </remarks>
 internal sealed class BatteryReaderOrchestrator
 {
     private const string ReaderName = "BatteryReaderOrchestrator";
 
-    /// <summary>Jaro-Winkler threshold above which a fuzzy match becomes an alias suggestion (ADR-015 Stage 4).</summary>
     private const double FuzzyThreshold = 0.92;
 
     private static readonly IReadOnlySet<DeviceCategory> AllowedCategories =
@@ -36,7 +25,7 @@ internal sealed class BatteryReaderOrchestrator
         };
 
     private readonly GattConnectionManager _gattManager;
-    private readonly ClassicBatteryReader _classicReader;
+    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
     private readonly DeviceCapabilityCache _capabilityCache;
     private readonly ThresholdSettings? _settings;
 
@@ -44,14 +33,14 @@ internal sealed class BatteryReaderOrchestrator
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
-        ClassicBatteryReader classicReader,
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic,
         DeviceCapabilityCache capabilityCache,
         ThresholdSettings? settings = null)
     {
-        _gattManager = gattManager;
-        _classicReader = classicReader;
+        _gattManager    = gattManager;
+        _readClassic    = readClassic;
         _capabilityCache = capabilityCache;
-        _settings = settings;
+        _settings       = settings;
     }
 
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(
@@ -125,9 +114,9 @@ internal sealed class BatteryReaderOrchestrator
         if (_settings.IsAliasSuggestionSuppressed(device.DeviceId))
             return device.DeviceId;
 
-        string? bestKey = null;
+        string? bestKey      = null;
         string? bestCanonical = null;
-        double bestScore = 0.0;
+        double  bestScore    = 0.0;
         foreach (var kv in aliasMap)
         {
             double score = JaroWinkler.Similarity(
@@ -135,8 +124,8 @@ internal sealed class BatteryReaderOrchestrator
                 DeviceNameNormalizer.Normalize(kv.Key));
             if (score > bestScore)
             {
-                bestScore = score;
-                bestKey = kv.Key;
+                bestScore     = score;
+                bestKey       = kv.Key;
                 bestCanonical = kv.Value;
             }
         }
@@ -168,7 +157,7 @@ internal sealed class BatteryReaderOrchestrator
         List<DeviceBatteryInfo> gattResults,
         List<DeviceBatteryInfo> classicResults)
     {
-        var merged = new List<DeviceBatteryInfo>();
+        var merged    = new List<DeviceBatteryInfo>();
         var seenIds   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -183,10 +172,7 @@ internal sealed class BatteryReaderOrchestrator
 
             seenIds.Add(canonicalId);
             seenNames.Add(device.Name);
-
-            merged.Add(canonicalId == device.DeviceId
-                ? device
-                : device with { DeviceId = canonicalId });
+            merged.Add(canonicalId == device.DeviceId ? device : device with { DeviceId = canonicalId });
         }
 
         foreach (var device in classicResults)
@@ -201,10 +187,7 @@ internal sealed class BatteryReaderOrchestrator
 
             seenIds.Add(canonicalId);
             seenNames.Add(device.Name);
-
-            merged.Add((canonicalId == device.DeviceId
-                ? device
-                : device with { DeviceId = canonicalId })
+            merged.Add((canonicalId == device.DeviceId ? device : device with { DeviceId = canonicalId })
                 with { Source = BatterySource.Classic });
         }
 
@@ -221,10 +204,7 @@ internal sealed class BatteryReaderOrchestrator
                 .ConfigureAwait(false);
             return new GattReadOutcome(device.DeviceId, result);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             sw.Stop();
@@ -246,12 +226,9 @@ internal sealed class BatteryReaderOrchestrator
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await _classicReader.ReadAllAsync(ct).ConfigureAwait(false);
+            return await _readClassic(ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             sw.Stop();

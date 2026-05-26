@@ -17,7 +17,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     private readonly PollingOrchestrator _poller;
     private readonly Scanner _scanner;
 
-    // Cooperation stack (null when using legacy constructor)
     private readonly DeviceWatcherService? _deviceWatcher;
     private readonly GattConnectionManager? _gattConnectionManager;
     private readonly DeviceCapabilityCache? _capabilityCache;
@@ -33,12 +32,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? ManualScanCompleted;
     public event Action<IReadOnlyList<DeviceBatteryInfo>>? BackgroundRefreshCompleted;
     public event Action? ScanStarted;
-
-    /// <summary>
-    /// Raised by the orchestrator after every poll with the authoritative combined
-    /// alert state (true = at least one non-ignored, hysteresis-consistent device is
-    /// outside its configured thresholds). Feeds <see cref="TrayApp._hasBluetoothAlert"/>.
-    /// </summary>
     public event Action<bool>? AlertStateChanged;
 
     public bool IsScanning => _scanner.IsScanning;
@@ -48,28 +41,15 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
 
     public bool HasCachedResults => !_lastKnown.IsEmpty;
 
-    /// <summary>
-    /// Returns all currently tracked devices from the device watcher (cooperation path only).
-    /// On the legacy path this returns an empty list.
-    /// </summary>
     internal IReadOnlyList<WatchedDevice> TrackedDevices =>
         _deviceWatcher?.CurrentDevices ?? [];
 
-    /// <summary>
-    /// Forces a fresh re-enumeration of all paired Bluetooth devices.
-    /// Called before manual scans to ensure the device list is up to date.
-    /// </summary>
     internal async Task RefreshTrackedDevicesAsync(CancellationToken ct = default)
     {
         if (_deviceWatcher is not null)
             await _deviceWatcher.RefreshAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Creates a monitor using the cooperation stack: device watcher for live
-    /// device tracking, GATT connection manager for per-device reads, and capability
-    /// cache for protocol fallback optimisation.
-    /// </summary>
     internal BluetoothBatteryMonitor(
         ThresholdSettings                 settings,
         INotificationService              notifier,
@@ -77,10 +57,13 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     {
         _settings = settings;
 
-        // Wire alias suggestion service to orchestrator — inlined from the former
-        // OrchestratorBatteryReaderAdapter. Closes #131.
         if (infrastructure.AliasSuggestionService is { } svc)
             infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
+
+        // Wire ClassicBatteryReader as a delegate — same pattern as Scanner._readClassic.
+        var classicReader = infrastructure.ClassicBatteryReader;
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic =
+            ct => classicReader.ReadAllAsync(ct);
 
         Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readGatt = ct =>
         {
@@ -88,9 +71,6 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             return infrastructure.Orchestrator.ReadAllAsync(
                 infrastructure.DeviceWatcher.CurrentDevices, ct);
         };
-
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic =
-            _ => Task.FromResult(new List<DeviceBatteryInfo>());
 
         _taskTracker = new TaskTracker();
 
