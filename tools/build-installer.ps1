@@ -70,7 +70,7 @@ Write-Host "Version: $Version" -ForegroundColor Green
 # ---------------------------------------------------------------------------
 if (-not $SkipPublish) {
     Write-Step "Publishing app (self-contained, compressed, single-file)"
-    & dotnet publish $CsprojPath -c Release -r win-x64
+    & dotnet publish $CsprojPath -c Release -r win-x64 /p:PublishSingleFile=true /p:EnableCompressionInSingleFile=true /p:SelfContained=true /p:PublishTrimmed=false
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 }
 

@@ -24,12 +24,6 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <!-- Release: produce a self-contained, compressed single-file EXE by default -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <SelfContained>true</SelfContained>
-    <!-- Trimming is unsupported for WinForms; ensure it's disabled for Release publishes -->
-    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>

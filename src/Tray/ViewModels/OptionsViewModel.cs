@@ -40,6 +40,17 @@ internal sealed class OptionsViewModel
         set => _settings.ExcludeLaptopFromTrayIconOverlay = value;
     }
 
+    // ── Auto-start (Windows startup) ─────────────────────────────────────
+    public bool AutoStartEnabled
+    {
+        get => StartupRegistration.IsEnabled;
+        set
+        {
+            if (value) StartupRegistration.Enable();
+            else StartupRegistration.Disable();
+        }
+    }
+
     // ── ntfy ─────────────────────────────────────────────────────────────
 
     public bool NtfyEnabled

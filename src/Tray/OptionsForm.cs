@@ -27,6 +27,7 @@ public sealed class OptionsForm : Form
     private readonly NumericUpDown laptopLowNumeric;
     private readonly NumericUpDown laptopHighNumeric;
     private readonly CheckBox      excludeLaptopOverlayCheck;
+    private readonly CheckBox      autoStartCheck;
 
     // devices controls
     private readonly DataGridView devicesGrid;
@@ -190,7 +191,11 @@ public sealed class OptionsForm : Form
         generalPanel.Controls.Add(laptopHighNumeric, 1, 3);
         excludeLaptopOverlayCheck = new CheckBox
             { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
-        generalPanel.Controls.Add(excludeLaptopOverlayCheck, 0, 4);
+        autoStartCheck = new CheckBox
+            { Text = "Start automatically with Windows", Anchor = AnchorStyles.Left, AutoSize = true };
+        generalPanel.Controls.Add(autoStartCheck, 0, 4);
+        generalPanel.SetColumnSpan(autoStartCheck, 2);
+        generalPanel.Controls.Add(excludeLaptopOverlayCheck, 0, 5);
         generalPanel.SetColumnSpan(excludeLaptopOverlayCheck, 2);
         generalTab.Controls.Add(generalPanel);
 
@@ -228,6 +233,7 @@ public sealed class OptionsForm : Form
         laptopLowNumeric.Value    = vm.LaptopLow;
         laptopHighNumeric.Value   = vm.LaptopHigh;
         excludeLaptopOverlayCheck.Checked = vm.ExcludeLaptopFromTrayIconOverlay;
+        autoStartCheck.Checked = vm.AutoStartEnabled;
 
         lowNumeric.ValueChanged += (_, _) =>
         {
@@ -267,6 +273,8 @@ public sealed class OptionsForm : Form
         };
         excludeLaptopOverlayCheck.CheckedChanged += (_, _) =>
             vm.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+        autoStartCheck.CheckedChanged += (_, _) =>
+            vm.AutoStartEnabled = autoStartCheck.Checked;
     }
 
     // ── Notifications tab binding ───────────────────────────────────────────────
