@@ -18,6 +18,7 @@ public partial class ScanWindow : Form
         _vm = new ScanViewModel(settings);
 
         Text            = "BT Battery Scan";
+        AutoScaleMode   = AutoScaleMode.Dpi;
         ClientSize      = new Size(900, 600);
         StartPosition   = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -46,15 +47,16 @@ public partial class ScanWindow : Form
             FullRowSelect = true, GridLines = true,
             ShowItemToolTips = true, Margin = new Padding(0, 0, 0, 8)
         };
-        _list.Columns.Add("Device",   420);
-        _list.Columns.Add("Battery",  100);
-        _list.Columns.Add("Poll (s)",  80);
-        _list.Columns.Add("Level",    160);
+        _list.Columns.Add("Device");
+        _list.Columns.Add("Battery");
+        _list.Columns.Add("Poll (s)");
+        _list.Columns.Add("Level");
 
         _closeBtn = new Button
         {
-            Text = "Close", Size = new Size(140, 32),
-            AutoSize = false, Margin = new Padding(0, 8, 0, 0),
+            Text = "Close",
+            AutoSize = true,
+            Margin = new Padding(0, 8, 0, 0),
             UseVisualStyleBackColor = true
         };
         _closeBtn.Click += (_, _) => Close();
@@ -68,7 +70,7 @@ public partial class ScanWindow : Form
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = false, Height = 44, WrapContents = false, Padding = new Padding(0)
+            AutoSize = true, WrapContents = false, Padding = new Padding(0)
         };
         buttonPanel.Controls.Add(_closeBtn);
         buttonPanel.Controls.Add(_autoRefreshCheckBox);
@@ -113,6 +115,9 @@ public partial class ScanWindow : Form
 
         Shown      += (_, _) => _vm.StartTimer();
         FormClosed += (_, _) => { _vm.StopTimer(); _vm.Dispose(); };
+
+        // Persist and restore window geometry and column widths
+        FormStateManager.Monitor(this, Program.UiSettingsInstance, "ScanWindow", grid: null, listView: _list);
     }
 
     // ── Public scan surface (called by ScanCoordinator) ───────────────────────────
@@ -173,14 +178,24 @@ public partial class ScanWindow : Form
 
     private void AdjustColumns()
     {
-        if (_list.Columns.Count < 3) return;
-        int padding   = SystemInformation.VerticalScrollBarWidth + 16;
-        int available = _list.ClientSize.Width
-                      - _list.Columns[1].Width
-                      - _list.Columns[2].Width
-                      - padding;
-        if (available < 400) available = 400;
-        _list.Columns[0].Width = available;
+        if (_list.Columns.Count < 1) return;
+        int padding = SystemInformation.VerticalScrollBarWidth + 16;
+        int available = Math.Max(_list.ClientSize.Width - padding, 200);
+
+        // Column ratios: Device (60%), Battery (12%), Poll (8%), Level (remaining)
+        double deviceRatio = 0.60;
+        double batteryRatio = 0.12;
+        double pollRatio = 0.08;
+        double levelRatio = 1.0 - deviceRatio - batteryRatio - pollRatio;
+
+        if (_list.Columns.Count > 0) _list.Columns[0].Width = (int)(available * deviceRatio);
+        if (_list.Columns.Count > 1) _list.Columns[1].Width = (int)(available * batteryRatio);
+        if (_list.Columns.Count > 2) _list.Columns[2].Width = (int)(available * pollRatio);
+        if (_list.Columns.Count > 3)
+        {
+            int used = _list.Columns[0].Width + _list.Columns[1].Width + _list.Columns[2].Width;
+            _list.Columns[3].Width = Math.Max(available - used, (int)(available * levelRatio));
+        }
     }
 
     private void SafeInvoke(Action action)

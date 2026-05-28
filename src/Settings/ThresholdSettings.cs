@@ -444,6 +444,9 @@ public sealed class ThresholdSettings
         if (changed) RaiseChanged();
     }
 
+    // ── UI window geometry storage ───────────────────────────────────────────
+
+
     // ── Alias suggestion suppression ─────────────────────────────────────────────────
 
     public bool IsAliasSuggestionSuppressed(string deviceId)
@@ -492,7 +495,8 @@ public sealed class ThresholdSettings
                 _categoryFilterEnabled,
                 new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase),
-                new HashSet<string>(_suppressedAliasSuggestions, StringComparer.OrdinalIgnoreCase));
+                new HashSet<string>(_suppressedAliasSuggestions, StringComparer.OrdinalIgnoreCase),
+                null);
         }
     }
 
@@ -517,6 +521,7 @@ public sealed class ThresholdSettings
             _categoryFilterOverrides          = s.CategoryFilterOverrides;
             _aliasMap                         = s.AliasMap;
             _suppressedAliasSuggestions       = s.SuppressedAliasSuggestions;
+            // _uiWindowStates removed; UI state now handled by UiSettings
         }
     }
 }
@@ -544,4 +549,5 @@ internal sealed record SettingsSnapshot(
     bool CategoryFilterEnabled,
     HashSet<string> CategoryFilterOverrides,
     Dictionary<string, string> AliasMap,
-    HashSet<string> SuppressedAliasSuggestions);
+    HashSet<string> SuppressedAliasSuggestions,
+    Dictionary<string, UiWindowState> UiWindowStates);

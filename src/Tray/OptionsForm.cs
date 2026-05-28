@@ -48,13 +48,14 @@ public sealed class OptionsForm : Form
                 MessageBox.Show(owner, text, caption, buttons, icon));
 
         Text              = "Options";
-        FormBorderStyle   = FormBorderStyle.FixedDialog;
+        AutoScaleMode     = AutoScaleMode.Dpi;
+        FormBorderStyle   = FormBorderStyle.Sizable;
         MaximizeBox       = false;
         MinimizeBox       = false;
         StartPosition     = FormStartPosition.CenterScreen;
         ShowInTaskbar     = false;
-        Width             = 600;
-        Height            = 400;
+        Size              = new Size(600, 400);
+        MinimumSize       = new Size(480, 320);
 
         tabControl = new TabControl { Dock = DockStyle.Fill };
 
@@ -69,12 +70,14 @@ public sealed class OptionsForm : Form
             SelectionMode         = DataGridViewSelectionMode.FullRowSelect,
             AutoGenerateColumns   = false
         };
+        // Make columns responsive to available width
+        devicesGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
         devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Display Name", DataPropertyName = "DisplayName",  Width = 160 });
-        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Low %",        DataPropertyName = "Low",          Width = 60,  ValueType = typeof(int) });
-        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "High %",       DataPropertyName = "High",         Width = 60,  ValueType = typeof(int) });
-        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Poll (s)",     DataPropertyName = "PollInterval", Width = 80,  ValueType = typeof(int) });
-        devicesGrid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Excluded",     DataPropertyName = "Excluded",     Width = 70 });
-        devicesGrid.Columns.Add(new DataGridViewButtonColumn   { HeaderText = "\u21ba",       Text = "Reset", UseColumnTextForButtonValue = true, Width = 60 });
+        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Low %",        DataPropertyName = "Low",          ValueType = typeof(int) });
+        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "High %",       DataPropertyName = "High",         ValueType = typeof(int) });
+        devicesGrid.Columns.Add(new DataGridViewTextBoxColumn  { HeaderText = "Poll (s)",     DataPropertyName = "PollInterval", ValueType = typeof(int) });
+        devicesGrid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Excluded",     DataPropertyName = "Excluded" });
+        devicesGrid.Columns.Add(new DataGridViewButtonColumn   { HeaderText = "\u21ba",       Text = "Reset", UseColumnTextForButtonValue = true });
         devicesTab.Controls.Add(devicesGrid);
         resetAllBtn = new Button { Text = "Reset All Devices", Dock = DockStyle.Bottom, Height = 32 };
         devicesTab.Controls.Add(resetAllBtn);
@@ -104,7 +107,7 @@ public sealed class OptionsForm : Form
             { Text = "Enable ntfy notifications", AutoSize = true, Dock = DockStyle.Top };
 
         // Topic row: label + read-only textbox
-        var topicPanel   = new Panel { Dock = DockStyle.Top, Height = 30 };
+        var topicPanel   = new Panel { Dock = DockStyle.Top, AutoSize = true };
         var topicLabel   = new Label { Text = "Topic:", AutoSize = true, Width = 40, Dock = DockStyle.Left };
         ntfyTopicTextBox = new TextBox { ReadOnly = true, Dock = DockStyle.Fill };
         topicPanel.Controls.Add(ntfyTopicTextBox);
@@ -117,8 +120,7 @@ public sealed class OptionsForm : Form
         {
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents  = false,
-            AutoSize      = false,
-            Height        = 34,                      // explicit height: button (26) + top margin (8)
+            AutoSize      = true,
             Dock          = DockStyle.Top,
             Padding       = new Padding(0, 8, 0, 0), // 8px top gap below topic row
             Margin        = new Padding(0)
@@ -178,16 +180,16 @@ public sealed class OptionsForm : Form
         generalPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
 
         generalPanel.Controls.Add(new Label { Text = "Global Low %",  Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
-        lowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+        lowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill };
         generalPanel.Controls.Add(lowNumeric, 1, 0);
         generalPanel.Controls.Add(new Label { Text = "Global High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
-        highNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+        highNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill };
         generalPanel.Controls.Add(highNumeric, 1, 1);
         generalPanel.Controls.Add(new Label { Text = "Laptop Low %",  Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
-        laptopLowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+        laptopLowNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill };
         generalPanel.Controls.Add(laptopLowNumeric, 1, 2);
         generalPanel.Controls.Add(new Label { Text = "Laptop High %", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
-        laptopHighNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Width = 60, Anchor = AnchorStyles.Left };
+        laptopHighNumeric = new NumericUpDown { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill };
         generalPanel.Controls.Add(laptopHighNumeric, 1, 3);
         excludeLaptopOverlayCheck = new CheckBox
             { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
@@ -221,6 +223,10 @@ public sealed class OptionsForm : Form
         BindGeneralTab();
         BindNotificationsTab();
         BindDevicesTab();
+
+        // Persist and restore window geometry, devices grid columns, and selected tab
+        var uiSettings = Program.UiSettingsInstance;
+        FormStateManager.Monitor(this, uiSettings, "OptionsForm", grid: devicesGrid, listView: null, tabControl: tabControl);
     }
 
     // ── General tab binding ────────────────────────────────────────────────────

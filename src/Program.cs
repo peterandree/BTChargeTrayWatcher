@@ -1,8 +1,10 @@
 namespace BTChargeTrayWatcher;
 
+
 internal static class Program
 {
     private static Mutex? _mutex;
+    public static UiSettings UiSettingsInstance { get; } = new UiSettings();
 
     [STAThread]
     static void Main()

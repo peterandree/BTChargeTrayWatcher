@@ -130,6 +130,10 @@ internal sealed class SettingsPersistence : IDisposable
             _settings.Changed -= OnChanged;
             try
             {
+                var uiStates = dto.UiWindowStates != null
+                    ? new Dictionary<string, UiWindowState>(dto.UiWindowStates, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, UiWindowState>(StringComparer.OrdinalIgnoreCase);
+
                 _settings.ApplySnapshot(new SettingsSnapshot(
                     low, high, laptopLow, laptopHigh,
                     ignored, excluded,
@@ -141,7 +145,8 @@ internal sealed class SettingsPersistence : IDisposable
                     dto.CategoryFilterEnabled,
                     categoryFilterOverrides,
                     aliasMap,
-                    suppressed));
+                    suppressed,
+                    uiStates));
             }
             finally
             {
@@ -189,6 +194,7 @@ internal sealed class SettingsPersistence : IDisposable
             CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
             AliasMap = new Dictionary<string, string>(s.AliasMap, StringComparer.OrdinalIgnoreCase),
                 SuppressedAliasSuggestions = [.. s.SuppressedAliasSuggestions],
+                UiWindowStates = new Dictionary<string, UiWindowState>(s.UiWindowStates, StringComparer.OrdinalIgnoreCase)
         };
 
         try
@@ -228,5 +234,6 @@ internal sealed class SettingsPersistence : IDisposable
         public Dictionary<string, string>? AliasMap { get; set; }
             // Suppressions for alias suggestions
             public List<string>? SuppressedAliasSuggestions { get; set; }
+            public Dictionary<string, UiWindowState>? UiWindowStates { get; set; }
     }
 }
