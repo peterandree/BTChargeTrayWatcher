@@ -496,7 +496,7 @@ public sealed class ThresholdSettings
                 new HashSet<string>(_categoryFilterOverrides, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(_aliasMap, StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(_suppressedAliasSuggestions, StringComparer.OrdinalIgnoreCase),
-                null);
+                new Dictionary<string, UiWindowState>(StringComparer.OrdinalIgnoreCase));
         }
     }
 
