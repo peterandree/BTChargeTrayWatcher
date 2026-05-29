@@ -16,7 +16,7 @@ public sealed class ClassicBatteryReaderTests
     public async Task Returns_Empty_When_No_Devices()
     {
         var reader = CreateReader(new List<ClassicBluetoothCandidate>(), new HashSet<string>(), new());
-        var result = await reader.ReadAllAsync();
+        var result = await reader.ReadAllAsync(TestContext.Current.CancellationToken);
         Assert.Empty(result);
     }
 
@@ -31,7 +31,7 @@ public sealed class ClassicBatteryReaderTests
         var connected = new HashSet<string> { "1" };
         var batteryMap = new Dictionary<string, (int, bool?)> { ["id1"] = (55, true) };
         var reader = CreateReader(candidates, connected, batteryMap);
-        var result = await reader.ReadAllAsync();
+        var result = await reader.ReadAllAsync(TestContext.Current.CancellationToken);
         Assert.Single(result);
         Assert.Equal("A", result[0].Name);
         Assert.Equal(55, result[0].Battery);
@@ -53,7 +53,7 @@ public sealed class ClassicBatteryReaderTests
             ["id2"] = (50, null)
         };
         var reader = CreateReader(candidates, connected, batteryMap);
-        var result = await reader.ReadAllAsync();
+        var result = await reader.ReadAllAsync(TestContext.Current.CancellationToken);
         Assert.Single(result);
         Assert.Equal("B", result[0].Name);
         Assert.Equal(50, result[0].Battery);
