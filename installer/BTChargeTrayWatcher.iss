@@ -5,7 +5,7 @@
 #define AppName      "BT Charge Tray Watcher"
 #define AppPublisher "Peterandree"
 #define AppExeName   "BTChargeTrayWatcher.exe"
-#define AppVersion   "3.0.0"
+#define AppVersion   "3.1.2"
 #define AppURL       "https://github.com/peterandree/BTChargeTrayWatcher"
 #define SourceExe    "..\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish\BTChargeTrayWatcher.exe"
 

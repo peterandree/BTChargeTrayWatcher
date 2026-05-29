@@ -1,15 +1,16 @@
 <#
 .SYNOPSIS
-    Full release automation for BTChargeTrayWatcher: version bump, build, manifest update, tag, push, PR.
+    Full release automation for BTChargeTrayWatcher: version bump, build, manifest update, tag, push, GitHub Release, PR.
 
 .DESCRIPTION
     - Auto-increments minor version (or major with -Major)
-    - Updates csproj and WinGet manifest
+    - Updates csproj and all three WinGet manifests
     - Builds installer
     - Computes SHA256
-    - Copies manifest to winget-pkgs fork
+    - Copies manifests to winget-pkgs fork
     - Commits, tags, pushes
-    - Opens PR via GitHub CLI
+    - Creates a GitHub Release with the installer as an asset and auto-generated notes
+    - Opens WinGet PR via GitHub CLI
     - Cleans up build artifacts (non-fatal)
 
 .PARAMETER Major
@@ -17,11 +18,26 @@
 
 .PARAMETER NoPR
     If set, do not open a PR automatically.
+
+.PARAMETER Notes
+    Optional release notes to prepend to the auto-generated GitHub Release notes.
+    Use a here-string for multi-line content:
+        -Notes @'
+        ### Highlights
+        - Fixed something
+        '@
+
+.PARAMETER Draft
+    If set, create the GitHub Release as a draft (allows manual review before publishing).
 #>
 [CmdletBinding()]
 param(
     [switch]$Major,
-    [switch]$NoPR
+    [switch]$NoPR,
+    [string]$Notes = '',
+    [switch]$Draft,
+    [string]$Version = '',
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
@@ -31,21 +47,44 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Csproj   = Join-Path $RepoRoot "BTChargeTrayWatcher.csproj"
 $InstallerScript = Join-Path $RepoRoot "tools\build-installer.ps1"
-$ManifestYaml   = Join-Path $RepoRoot "winget\peterandree.BTChargeTrayWatcher.installer.yaml"
+$WingetDir      = Join-Path $RepoRoot "winget"
+$ManifestInstaller = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.installer.yaml"
+$ManifestVersion   = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.yaml"
+$ManifestLocale    = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.locale.en-US.yaml"
 $InstallerOut   = Join-Path $RepoRoot "publish\installer"
 $WingetPkgs     = "$env:USERPROFILE\src\winget-pkgs"
 
-# 1. Parse and bump version
+
+# 1. Determine target version
 Write-Host "==> Reading current version"
 [xml]$csprojXml = Get-Content $Csproj -Raw
 $verNode = $csprojXml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1
 $parts = ($verNode -split '\.')
-if ($Major) {
+if ($Version -ne '') {
+    $newVer = $Version
+    Write-Host "  Using explicit version: $newVer" -ForegroundColor Yellow
+} elseif ($Major) {
     $newVer = "{0}.0.0" -f ([int]$parts[0] + 1)
+    Write-Host "  Old: $verNode  New: $newVer (major bump)" -ForegroundColor Green
 } else {
     $newVer = "{0}.{1}.0" -f $parts[0], ([int]$parts[1] + 1)
+    Write-Host "  Old: $verNode  New: $newVer (minor bump)" -ForegroundColor Green
 }
-Write-Host "  Old: $verNode  New: $newVer" -ForegroundColor Green
+
+# 1b. Guard: abort if this version was already released
+$tag = "v$newVer"
+$tagExistsLocal  = [bool](git -C $RepoRoot tag --list $tag 2>$null | Where-Object { $_ -ne '' })
+$tagExistsRemote = [bool](git -C $RepoRoot ls-remote --tags origin "refs/tags/$tag" 2>$null | Where-Object { $_ -ne '' })
+$releaseLines    = gh release list --repo peterandree/BTChargeTrayWatcher --limit 100 2>$null
+$releaseExists   = [bool]($releaseLines | Where-Object { $_ -match "\b$([regex]::Escape($tag))\b" })
+if ($tagExistsLocal -or $tagExistsRemote -or $releaseExists) {
+    if (-not $Force) {
+        Write-Error "Tag or release '$tag' already exists. Delete it first or use -Force to overwrite."
+        exit 1
+    } else {
+        Write-Warning "Overwriting existing tag/release for $tag due to -Force."
+    }
+}
 
 # 2. Update csproj
 Write-Host "==> Updating csproj version"
@@ -62,28 +101,38 @@ $installer = Get-Item "$InstallerOut\BTChargeTrayWatcher*Setup.exe" | Sort-Objec
 $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash
 Write-Host "  SHA256: $hash"
 
-# 5. Update WinGet manifest
-Write-Host "==> Updating WinGet manifest"
-$yaml = Get-Content $ManifestYaml -Raw
-$yaml = $yaml -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
-$yaml = $yaml -creplace 'InstallerUrl: .+', "InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v$newVer/$(Split-Path $installer.Name -Leaf)"
-$yaml = $yaml -creplace 'InstallerSha256: .+', "InstallerSha256: $hash"
-[System.IO.File]::WriteAllText($ManifestYaml, $yaml, [System.Text.UTF8Encoding]::new($false))
+# 5. Update WinGet manifests (all 3 files)
+Write-Host "==> Updating WinGet manifests"
+$yamlInstaller = Get-Content $ManifestInstaller -Raw
+$yamlInstaller = $yamlInstaller -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
+$yamlInstaller = $yamlInstaller -creplace 'InstallerUrl: .+', "InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v$newVer/$(Split-Path $installer.Name -Leaf)"
+$yamlInstaller = $yamlInstaller -creplace 'InstallerSha256: .+', "InstallerSha256: $hash"
+[System.IO.File]::WriteAllText($ManifestInstaller, $yamlInstaller, [System.Text.UTF8Encoding]::new($false))
+
+$yamlVer = Get-Content $ManifestVersion -Raw
+$yamlVer = $yamlVer -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
+[System.IO.File]::WriteAllText($ManifestVersion, $yamlVer, [System.Text.UTF8Encoding]::new($false))
+
+$yamlLocale = Get-Content $ManifestLocale -Raw
+$yamlLocale = $yamlLocale -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
+[System.IO.File]::WriteAllText($ManifestLocale, $yamlLocale, [System.Text.UTF8Encoding]::new($false))
 
 # 6. Validate manifest
 Write-Host "==> Validating manifest"
-winget validate $ManifestYaml
+winget validate $WingetDir
 
-# 7. Copy manifest to winget-pkgs fork
-Write-Host "==> Copying manifest to winget-pkgs fork"
+# 7. Copy manifests to winget-pkgs fork
+Write-Host "==> Copying manifests to winget-pkgs fork"
 $destDir = Join-Path $WingetPkgs "manifests\p\Peterandree\BTChargeTrayWatcher\$newVer"
 if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-Copy-Item $ManifestYaml (Join-Path $destDir "peterandree.BTChargeTrayWatcher.installer.yaml") -Force
+Copy-Item $ManifestInstaller (Join-Path $destDir "peterandree.BTChargeTrayWatcher.installer.yaml") -Force
+Copy-Item $ManifestVersion  (Join-Path $destDir "peterandree.BTChargeTrayWatcher.yaml") -Force
+Copy-Item $ManifestLocale   (Join-Path $destDir "peterandree.BTChargeTrayWatcher.locale.en-US.yaml") -Force
 
 # 8. Commit, tag, push (main repo)
 Write-Host "==> Committing and tagging main repo"
-git -C $RepoRoot add $Csproj $ManifestYaml
-$commitMsg = "Release v$newVer: build, manifest, installer"
+git -C $RepoRoot add $Csproj $ManifestInstaller $ManifestVersion $ManifestLocale
+$commitMsg = 'Release v' + $newVer + ': build, manifest, installer'
 git -C $RepoRoot commit -m $commitMsg
 $tag = "v$newVer"
 git -C $RepoRoot tag $tag
@@ -93,21 +142,41 @@ Write-Host "  Pushed main repo"
 git -C $RepoRoot push origin $tag
 Write-Host "  Pushed tag"
 
-# 9. Commit, push, PR (winget-pkgs fork)
+# 9. Create GitHub Release
+Write-Host "==> Creating GitHub Release"
+$releaseArgs = @(
+    'release', 'create', $tag,
+    $installer.FullName,
+    '--repo', 'peterandree/BTChargeTrayWatcher',
+    '--title', "BTChargeTrayWatcher $newVer",
+    '--generate-notes'
+)
+if ($Notes -ne '') { $releaseArgs += @('--notes', $Notes) }
+if ($Draft)        { $releaseArgs += '--draft' }
+gh @releaseArgs
+Write-Host "  GitHub Release created: https://github.com/peterandree/BTChargeTrayWatcher/releases/tag/$tag"
+
+# 10. Commit, push, PR (winget-pkgs fork)
+if (-not (Test-Path (Join-Path $WingetPkgs ".git"))) {
+    Write-Warning "winget-pkgs fork not found at $WingetPkgs — skipping winget-pkgs commit and PR."
+    Write-Warning "Clone your fork to $WingetPkgs and re-run, or copy winget\ manifests manually."
+} else {
 Write-Host "==> Committing and pushing to winget-pkgs fork"
-git -C $WingetPkgs add $destDir\peterandree.BTChargeTrayWatcher.installer.yaml
-$wingetMsg = "BTChargeTrayWatcher $newVer manifest update"
-git -C $WingetPkgs commit -m $wingetMsg
 $branch = "btchargetraywatcher-$newVer"
+$wingetMsg = "BTChargeTrayWatcher $newVer manifest update"
 git -C $WingetPkgs checkout -b $branch
 Write-Host "  Branch: $branch"
+git -C $WingetPkgs add $destDir
+git -C $WingetPkgs commit -m $wingetMsg
 git -C $WingetPkgs push -u origin $branch
 if (-not $NoPR) {
     Write-Host "==> Opening PR via GitHub CLI"
-    gh pr create --repo microsoft/winget-pkgs --base master --head $env:USERNAME:$branch --title "$wingetMsg" --body "Automated manifest update for $newVer."
+    $ghUser = (gh api user --jq '.login' 2>$null)
+    gh pr create --repo microsoft/winget-pkgs --base master --head "${ghUser}:${branch}" --title "$wingetMsg" --body "Automated manifest update for $newVer."
 }
+} # end winget-pkgs guard
 
-# 10. Cleanup (non-fatal)
+# 11. Cleanup (non-fatal)
 Write-Host "==> Cleaning up build artifacts (non-fatal)"
 $clean = @(
   "$RepoRoot\bin",
