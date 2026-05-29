@@ -105,8 +105,8 @@ Write-Host "  SHA256: $hash"
 Write-Host "==> Updating WinGet manifests"
 $yamlInstaller = Get-Content $ManifestInstaller -Raw
 $yamlInstaller = $yamlInstaller -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
-$yamlInstaller = $yamlInstaller -creplace 'InstallerUrl: .+', "InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v$newVer/$(Split-Path $installer.Name -Leaf)"
-$yamlInstaller = $yamlInstaller -creplace 'InstallerSha256: .+', "InstallerSha256: $hash"
+$yamlInstaller = $yamlInstaller -creplace '(InstallerUrl:\s*)[^\r\n]+', ('${1}' + "https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v$newVer/$(Split-Path $installer.Name -Leaf)")
+$yamlInstaller = $yamlInstaller -creplace '(InstallerSha256:\s*)[^\r\n]+', ('${1}' + $hash)
 [System.IO.File]::WriteAllText($ManifestInstaller, $yamlInstaller, [System.Text.UTF8Encoding]::new($false))
 
 $yamlVer = Get-Content $ManifestVersion -Raw
@@ -116,6 +116,17 @@ $yamlVer = $yamlVer -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newV
 $yamlLocale = Get-Content $ManifestLocale -Raw
 $yamlLocale = $yamlLocale -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
 [System.IO.File]::WriteAllText($ManifestLocale, $yamlLocale, [System.Text.UTF8Encoding]::new($false))
+
+# 5b. Verify manifests contain the expected version before proceeding
+$verifyFiles = @($ManifestInstaller, $ManifestVersion, $ManifestLocale)
+foreach ($vf in $verifyFiles) {
+    $content = Get-Content $vf -Raw
+    if ($content -notmatch "PackageVersion:\s*$([regex]::Escape($newVer))") {
+        Write-Error "Manifest verification failed: $vf does not contain PackageVersion $newVer. Aborting before any commits."
+        exit 1
+    }
+}
+Write-Host "  Manifests verified: PackageVersion $newVer confirmed in all 3 files."
 
 # 6. Validate manifest
 Write-Host "==> Validating manifest"
