@@ -15,7 +15,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>3.1.0</Version>
+    <Version>3.1.2</Version>
 
     <!-- 🔧 Prevent duplicate assembly attribute errors -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
