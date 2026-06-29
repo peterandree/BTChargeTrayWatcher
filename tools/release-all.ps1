@@ -55,6 +55,22 @@ $ManifestLocale    = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.local
 $InstallerOut   = Join-Path $RepoRoot "publish\installer"
 $WingetPkgs     = "$env:USERPROFILE\src\winget-pkgs"
 
+# Determine PackageIdentifier components from the version manifest.
+$versionManifestText = Get-Content $ManifestVersion -Raw
+$packageIdMatch = [regex]::Match($versionManifestText, '(?m)^PackageIdentifier:\s*([^\r\n]+)\s*$')
+if (-not $packageIdMatch.Success) {
+    throw "Could not read PackageIdentifier from $ManifestVersion"
+}
+$packageIdentifier = $packageIdMatch.Groups[1].Value.Trim()
+$idParts = $packageIdentifier -split '\.'
+if ($idParts.Length -lt 2) {
+    throw "PackageIdentifier '$packageIdentifier' is invalid; expected Publisher.AppName"
+}
+$publisherSegment = $idParts[0]
+$appSegment = ($idParts[1..($idParts.Length - 1)] -join '.')
+$publisherPartition = $publisherSegment.Substring(0, 1).ToLowerInvariant()
+$manifestFileBase = $packageIdentifier
+
 function Assert-Command([string]$Name)
 {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue))
@@ -167,11 +183,11 @@ winget validate $WingetDir
 
 # 7. Copy manifests to winget-pkgs fork
 Write-Host "==> Copying manifests to winget-pkgs fork"
-$destDir = Join-Path $WingetPkgs "manifests\p\Peterandree\BTChargeTrayWatcher\$newVer"
+$destDir = Join-Path $WingetPkgs "manifests\$publisherPartition\$publisherSegment\$appSegment\$newVer"
 if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
-Copy-Item $ManifestInstaller (Join-Path $destDir "peterandree.BTChargeTrayWatcher.installer.yaml") -Force
-Copy-Item $ManifestVersion  (Join-Path $destDir "peterandree.BTChargeTrayWatcher.yaml") -Force
-Copy-Item $ManifestLocale   (Join-Path $destDir "peterandree.BTChargeTrayWatcher.locale.en-US.yaml") -Force
+Copy-Item $ManifestInstaller (Join-Path $destDir "$manifestFileBase.installer.yaml") -Force
+Copy-Item $ManifestVersion  (Join-Path $destDir "$manifestFileBase.yaml") -Force
+Copy-Item $ManifestLocale   (Join-Path $destDir "$manifestFileBase.locale.en-US.yaml") -Force
 
 # 8. Commit, tag, push (main repo)
 Write-Host "==> Committing and tagging main repo"
@@ -210,9 +226,13 @@ Write-Host "==> Committing and pushing to winget-pkgs fork"
 $branch = "btchargetraywatcher-$newVer"
 $wingetMsg = "BTChargeTrayWatcher $newVer manifest update"
 git -C $WingetPkgs fetch origin
-git -C $WingetPkgs checkout master
-git -C $WingetPkgs pull --ff-only origin master
-git -C $WingetPkgs checkout -B $branch
+$baseRef = 'origin/master'
+$hasUpstream = [bool](git -C $WingetPkgs remote 2>$null | Where-Object { $_ -eq 'upstream' })
+if ($hasUpstream) {
+    git -C $WingetPkgs fetch upstream
+    $baseRef = 'upstream/master'
+}
+git -C $WingetPkgs checkout -B $branch $baseRef
 Write-Host "  Branch: $branch"
 git -C $WingetPkgs add $destDir
 git -C $WingetPkgs diff --cached --quiet
