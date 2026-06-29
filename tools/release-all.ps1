@@ -46,6 +46,7 @@ $ErrorActionPreference = "Stop"
 # Paths
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Csproj   = Join-Path $RepoRoot "BTChargeTrayWatcher.csproj"
+$IssPath  = Join-Path $RepoRoot "installer\BTChargeTrayWatcher.iss"
 $InstallerScript = Join-Path $RepoRoot "tools\build-installer.ps1"
 $WingetDir      = Join-Path $RepoRoot "winget"
 $ManifestInstaller = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.installer.yaml"
@@ -53,6 +54,26 @@ $ManifestVersion   = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.yaml"
 $ManifestLocale    = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.locale.en-US.yaml"
 $InstallerOut   = Join-Path $RepoRoot "publish\installer"
 $WingetPkgs     = "$env:USERPROFILE\src\winget-pkgs"
+
+function Assert-Command([string]$Name)
+{
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue))
+    {
+        throw "Required command '$Name' was not found in PATH."
+    }
+}
+
+Assert-Command git
+Assert-Command gh
+Assert-Command dotnet
+Assert-Command winget
+
+# Guard: release from a clean repository unless -Force is used.
+$status = git -C $RepoRoot status --porcelain
+if ($status -and -not $Force)
+{
+    throw "Working tree is not clean. Commit or stash changes before running release-all.ps1, or rerun with -Force."
+}
 
 
 # 1. Determine target version
@@ -83,6 +104,18 @@ if ($tagExistsLocal -or $tagExistsRemote -or $releaseExists) {
         exit 1
     } else {
         Write-Warning "Overwriting existing tag/release for $tag due to -Force."
+        if ($releaseExists) {
+            gh release delete $tag --repo peterandree/BTChargeTrayWatcher --yes
+            Write-Host "  Deleted existing GitHub release $tag"
+        }
+        if ($tagExistsLocal) {
+            git -C $RepoRoot tag -d $tag
+            Write-Host "  Deleted local tag $tag"
+        }
+        if ($tagExistsRemote) {
+            git -C $RepoRoot push origin ":refs/tags/$tag"
+            Write-Host "  Deleted remote tag $tag"
+        }
     }
 }
 
@@ -143,6 +176,7 @@ Copy-Item $ManifestLocale   (Join-Path $destDir "peterandree.BTChargeTrayWatcher
 # 8. Commit, tag, push (main repo)
 Write-Host "==> Committing and tagging main repo"
 git -C $RepoRoot add $Csproj $ManifestInstaller $ManifestVersion $ManifestLocale
+git -C $RepoRoot add $IssPath
 $commitMsg = 'Release v' + $newVer + ': build, manifest, installer'
 git -C $RepoRoot commit -m $commitMsg
 $tag = "v$newVer"
@@ -175,15 +209,23 @@ if (-not (Test-Path (Join-Path $WingetPkgs ".git"))) {
 Write-Host "==> Committing and pushing to winget-pkgs fork"
 $branch = "btchargetraywatcher-$newVer"
 $wingetMsg = "BTChargeTrayWatcher $newVer manifest update"
-git -C $WingetPkgs checkout -b $branch
+git -C $WingetPkgs fetch origin
+git -C $WingetPkgs checkout master
+git -C $WingetPkgs pull --ff-only origin master
+git -C $WingetPkgs checkout -B $branch
 Write-Host "  Branch: $branch"
 git -C $WingetPkgs add $destDir
-git -C $WingetPkgs commit -m $wingetMsg
-git -C $WingetPkgs push -u origin $branch
-if (-not $NoPR) {
-    Write-Host "==> Opening PR via GitHub CLI"
-    $ghUser = (gh api user --jq '.login' 2>$null)
-    gh pr create --repo microsoft/winget-pkgs --base master --head "${ghUser}:${branch}" --title "$wingetMsg" --body "Automated manifest update for $newVer."
+git -C $WingetPkgs diff --cached --quiet
+if ($LASTEXITCODE -eq 0) {
+    Write-Warning "No manifest changes detected in winget-pkgs fork; skipping commit/push/PR."
+} else {
+    git -C $WingetPkgs commit -m $wingetMsg
+    git -C $WingetPkgs push -u origin $branch --force-with-lease
+    if (-not $NoPR) {
+        Write-Host "==> Opening PR via GitHub CLI"
+        $ghUser = (gh api user --jq '.login' 2>$null)
+        gh pr create --repo microsoft/winget-pkgs --base master --head "${ghUser}:${branch}" --title "$wingetMsg" --body "Automated manifest update for $newVer."
+    }
 }
 } # end winget-pkgs guard
 
