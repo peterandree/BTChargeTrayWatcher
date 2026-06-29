@@ -36,6 +36,7 @@ public sealed class ThresholdSettings
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _trayIconOverlayExcludedDevices = new(StringComparer.OrdinalIgnoreCase);
     private bool _excludeLaptopFromTrayIconOverlay;
+    private bool _autoStartUseScheduledTaskFallback;
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
     private NtfyIntegrationSettings _ntfy = new();
     private Dictionary<string, int> _devicePollIntervals = new(StringComparer.OrdinalIgnoreCase);
@@ -149,6 +150,22 @@ public sealed class ThresholdSettings
             {
                 if (_excludeLaptopFromTrayIconOverlay == value) return;
                 _excludeLaptopFromTrayIconOverlay = value;
+                changed = true;
+            }
+            if (changed) RaiseChanged();
+        }
+    }
+
+    public bool AutoStartUseScheduledTaskFallback
+    {
+        get { lock (_lock) return _autoStartUseScheduledTaskFallback; }
+        set
+        {
+            bool changed;
+            lock (_lock)
+            {
+                if (_autoStartUseScheduledTaskFallback == value) return;
+                _autoStartUseScheduledTaskFallback = value;
                 changed = true;
             }
             if (changed) RaiseChanged();
@@ -488,6 +505,7 @@ public sealed class ThresholdSettings
                 new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase),
                 _excludeLaptopFromTrayIconOverlay,
+                _autoStartUseScheduledTaskFallback,
                 overridesCopy,
                 new Dictionary<string, int>(_devicePollIntervals, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(_displayNameAliases, StringComparer.OrdinalIgnoreCase),
@@ -513,6 +531,7 @@ public sealed class ThresholdSettings
             _ignoredDevices                   = s.IgnoredDevices;
             _trayIconOverlayExcludedDevices   = s.TrayIconOverlayExcludedDevices;
             _excludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay;
+            _autoStartUseScheduledTaskFallback = s.AutoStartUseScheduledTaskFallback;
             _deviceOverrides                  = s.DeviceOverrides;
             _devicePollIntervals              = s.DevicePollIntervals;
             _displayNameAliases               = s.DeviceDisplayNameAliases;
@@ -542,6 +561,7 @@ internal sealed record SettingsSnapshot(
     HashSet<string> IgnoredDevices,
     HashSet<string> TrayIconOverlayExcludedDevices,
     bool ExcludeLaptopFromTrayIconOverlay,
+    bool AutoStartUseScheduledTaskFallback,
     Dictionary<string, DeviceThresholds> DeviceOverrides,
     Dictionary<string, int> DevicePollIntervals,
     Dictionary<string, string> DeviceDisplayNameAliases,

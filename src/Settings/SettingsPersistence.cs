@@ -138,6 +138,7 @@ internal sealed class SettingsPersistence : IDisposable
                     low, high, laptopLow, laptopHigh,
                     ignored, excluded,
                     dto.ExcludeLaptopFromTrayIconOverlay,
+                    dto.AutoStartUseScheduledTaskFallback,
                     overrides,
                     pollIntervals,
                     displayAliases,
@@ -185,6 +186,7 @@ internal sealed class SettingsPersistence : IDisposable
             IgnoredDevices = [.. s.IgnoredDevices],
             TrayIconOverlayExcludedDevices = [.. s.TrayIconOverlayExcludedDevices],
             ExcludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay,
+            AutoStartUseScheduledTaskFallback = s.AutoStartUseScheduledTaskFallback,
             DeviceOverrides = new Dictionary<string, DeviceThresholds>(s.DeviceOverrides, StringComparer.OrdinalIgnoreCase),
             DevicePollIntervals = new Dictionary<string, int>(s.DevicePollIntervals, StringComparer.OrdinalIgnoreCase),
             DeviceDisplayNameAliases = new Dictionary<string, string>(s.DeviceDisplayNameAliases, StringComparer.OrdinalIgnoreCase),
@@ -222,6 +224,7 @@ internal sealed class SettingsPersistence : IDisposable
         public List<string>? IgnoredDevices { get; set; }
         public List<string>? TrayIconOverlayExcludedDevices { get; set; }
         public bool ExcludeLaptopFromTrayIconOverlay { get; set; }
+        public bool AutoStartUseScheduledTaskFallback { get; set; }
         public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
         public Dictionary<string, int>? DevicePollIntervals { get; set; }
         public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }

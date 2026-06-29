@@ -34,18 +34,21 @@ namespace BTChargeTrayWatcher.Tests
             var laptopLowField = GetNumeric(form, "laptopLowNumeric");
             var laptopHighField = GetNumeric(form, "laptopHighNumeric");
             var excludeCheck = GetCheckBox(form, "excludeLaptopOverlayCheck");
+            var fallbackCheck = GetCheckBox(form, "autoStartTaskFallbackCheck");
 
             lowField.Value = 15;
             highField.Value = 85;
             laptopLowField.Value = 10;
             laptopHighField.Value = 90;
             excludeCheck.Checked = true;
+            fallbackCheck.Checked = true;
 
             Assert.Equal(15, settings.Low);
             Assert.Equal(85, settings.High);
             Assert.Equal(10, settings.LaptopLow);
             Assert.Equal(90, settings.LaptopHigh);
             Assert.True(settings.ExcludeLaptopFromTrayIconOverlay);
+            Assert.True(settings.AutoStartUseScheduledTaskFallback);
         }
 
         private static NumericUpDown GetNumeric(Form form, string field)

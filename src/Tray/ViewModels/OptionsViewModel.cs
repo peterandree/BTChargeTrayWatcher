@@ -46,9 +46,27 @@ internal sealed class OptionsViewModel
         get => StartupRegistration.IsEnabled;
         set
         {
-            if (value) StartupRegistration.Enable();
-            else StartupRegistration.Disable();
+            if (value)
+            {
+                if (!StartupRegistration.TryEnable(_settings.AutoStartUseScheduledTaskFallback, out string? error))
+                {
+                    throw new InvalidOperationException(error ?? "Unable to enable startup registration.");
+                }
+            }
+            else
+            {
+                if (!StartupRegistration.TryDisable(out string? error))
+                {
+                    throw new InvalidOperationException(error ?? "Unable to disable startup registration.");
+                }
+            }
         }
+    }
+
+    public bool AutoStartUseScheduledTaskFallback
+    {
+        get => _settings.AutoStartUseScheduledTaskFallback;
+        set => _settings.AutoStartUseScheduledTaskFallback = value;
     }
 
     // ── ntfy ─────────────────────────────────────────────────────────────

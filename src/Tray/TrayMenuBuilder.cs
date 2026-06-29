@@ -27,7 +27,8 @@ internal sealed class TrayMenuBuilder
         TrayMenuItems items,
         Func<IReadOnlyList<DeviceBatteryInfo>> getDevices,
         Action onExit,
-        Action? onOptions = null)
+        Action? onOptions = null,
+        Action? onStartupDiagnostics = null)
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add(items.LaptopMenuItem);
@@ -82,6 +83,12 @@ internal sealed class TrayMenuBuilder
                 BTChargeTrayWatcher.Tray.OptionsFormManager.ShowOptionsForm();
         };
         menu.Items.Add(optionsMenuItem);
+        if (onStartupDiagnostics is not null)
+        {
+            var startupDiagnosticsItem = new ToolStripMenuItem("Startup diagnostics…");
+            startupDiagnosticsItem.Click += (_, _) => onStartupDiagnostics();
+            menu.Items.Add(startupDiagnosticsItem);
+        }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => onExit());
         return menu;

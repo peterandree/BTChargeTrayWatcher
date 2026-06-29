@@ -61,7 +61,8 @@ public sealed class TrayApp : IDisposable
             new TrayMenuItems(_laptopMenuItem, _scanMenuItem, _lowMenu, _highMenu),
             () => monitor.LastKnownDevices,
             onExit:    () => _ = ExitAsync(),
-            onOptions: _showOptions);
+            onOptions: _showOptions,
+            onStartupDiagnostics: ShowStartupDiagnostics);
 
         _contextMenuOpeningHandler = (s, e) => { if (!_disposed) UpdateTooltip(); };
         contextMenu.Opening += _contextMenuOpeningHandler;
@@ -189,6 +190,33 @@ public sealed class TrayApp : IDisposable
 
     private static void OnScanFaulted(string operationName, Exception ex) =>
         Trace.TraceError($"[TrayApp] Background operation '{operationName}' faulted: {ex}");
+
+    private void ShowStartupDiagnostics()
+    {
+        var d = StartupRegistration.GetDiagnostics();
+        string runValue = string.IsNullOrWhiteSpace(d.RunKeyValue) ? "(missing)" : d.RunKeyValue;
+        string taskState = d.ScheduledTaskExists
+            ? (d.ScheduledTaskEnabled ? "present and enabled" : "present but disabled")
+            : "not present";
+        string policyHint = d.StartupApprovedDisabled
+            ? "StartupApproved marks this app as disabled. Re-enable it from Windows Startup Apps settings or your company policy portal."
+            : "No StartupApproved disable flag detected.";
+        string taskError = string.IsNullOrWhiteSpace(d.ScheduledTaskLastError)
+            ? "(none)"
+            : d.ScheduledTaskLastError!;
+
+        string message =
+            "Startup diagnostics\n\n"
+            + $"Auto-start effective: {(d.EffectiveEnabled ? "Enabled" : "Disabled")}\n"
+            + $"Run key path match: {(d.RunKeyPathMatchesExecutable ? "Yes" : "No")}\n"
+            + $"StartupApproved disabled: {(d.StartupApprovedDisabled ? "Yes" : "No")}\n"
+            + $"Scheduled task fallback: {taskState}\n\n"
+            + $"Run key value:\n{runValue}\n\n"
+            + $"Policy hint:\n{policyHint}\n\n"
+            + $"Scheduled task query note:\n{taskError}";
+
+        MessageBox.Show(message, "Startup diagnostics", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
 
     private async Task ExitAsync()
     {

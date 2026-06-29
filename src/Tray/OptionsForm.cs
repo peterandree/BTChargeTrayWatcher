@@ -28,6 +28,7 @@ public sealed class OptionsForm : Form
     private readonly NumericUpDown laptopHighNumeric;
     private readonly CheckBox      excludeLaptopOverlayCheck;
     private readonly CheckBox      autoStartCheck;
+    private readonly CheckBox      autoStartTaskFallbackCheck;
 
     // devices controls
     private readonly DataGridView devicesGrid;
@@ -40,6 +41,7 @@ public sealed class OptionsForm : Form
     // for legacy reflection access in tests and external callers.
     private readonly List<DevicesViewModel.DeviceRow> _deviceRows = [];
     private readonly List<DevicesViewModel.DeviceRow> deviceRows;
+    private bool _isSyncingAutoStartCheck;
 
     public OptionsForm(MessageBoxHandler? messageBoxHandler = null)
     {
@@ -258,14 +260,17 @@ public sealed class OptionsForm : Form
             { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
         autoStartCheck = new CheckBox
             { Text = "Start automatically with Windows", Anchor = AnchorStyles.Left, AutoSize = true };
+        autoStartTaskFallbackCheck = new CheckBox
+            { Text = "Use Scheduled Task fallback for startup", Anchor = AnchorStyles.Left, AutoSize = true };
         var generalCheckPanel = new FlowLayoutPanel
         {
-            FlowDirection = FlowDirection.LeftToRight,
+            FlowDirection = FlowDirection.TopDown,
             AutoSize = true,
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 8, 0, 0)
         };
         generalCheckPanel.Controls.Add(autoStartCheck);
+        generalCheckPanel.Controls.Add(autoStartTaskFallbackCheck);
         generalCheckPanel.Controls.Add(excludeLaptopOverlayCheck);
         generalPanel.Controls.Add(generalCheckPanel, 0, 4);
         generalPanel.SetColumnSpan(generalCheckPanel, 2);
@@ -310,6 +315,7 @@ public sealed class OptionsForm : Form
         laptopHighNumeric.Value   = vm.LaptopHigh;
         excludeLaptopOverlayCheck.Checked = vm.ExcludeLaptopFromTrayIconOverlay;
         autoStartCheck.Checked = vm.AutoStartEnabled;
+        autoStartTaskFallbackCheck.Checked = vm.AutoStartUseScheduledTaskFallback;
 
         lowNumeric.ValueChanged += (_, _) =>
         {
@@ -349,8 +355,33 @@ public sealed class OptionsForm : Form
         };
         excludeLaptopOverlayCheck.CheckedChanged += (_, _) =>
             vm.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+        autoStartTaskFallbackCheck.CheckedChanged += (_, _) =>
+            vm.AutoStartUseScheduledTaskFallback = autoStartTaskFallbackCheck.Checked;
         autoStartCheck.CheckedChanged += (_, _) =>
-            vm.AutoStartEnabled = autoStartCheck.Checked;
+        {
+            if (_isSyncingAutoStartCheck)
+            {
+                return;
+            }
+
+            try
+            {
+                vm.AutoStartEnabled = autoStartCheck.Checked;
+            }
+            catch (InvalidOperationException ex)
+            {
+                _isSyncingAutoStartCheck = true;
+                try
+                {
+                    autoStartCheck.Checked = vm.AutoStartEnabled;
+                }
+                finally
+                {
+                    _isSyncingAutoStartCheck = false;
+                }
+                ShowError(ex.Message, "Startup registration");
+            }
+        };
     }
 
     // ── Notifications tab binding ───────────────────────────────────────────────
