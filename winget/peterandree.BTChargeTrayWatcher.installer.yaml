@@ -1,5 +1,5 @@
 PackageIdentifier: peterandree.BTChargeTrayWatcher
-PackageVersion: 3.1.0
+PackageVersion: 3.2.0
 InstallerLocale: en-US
 Platform:
   - Windows.Desktop
@@ -10,7 +10,7 @@ InstallerSwitches:
   SilentWithProgress: /SILENT /SUPPRESSMSGBOXES /NORESTART
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v3.1.0/BTChargeTrayWatcher_3.1.0_Setup.exe
-    InstallerSha256: F95356FA535993A5E1BA26E4EDD89BF8269F348B1AFD951E48D13E656E56B3DF
+    InstallerUrl: https://github.com/peterandree/BTChargeTrayWatcher/releases/download/v3.2.0/BTChargeTrayWatcher_3.2.0_Setup.exe
+    InstallerSha256: 4D30A2604EDC72458C8F10F2E99A99BDAEB9C1E174ECE91D8D22A117DE24ECA1
 ManifestType: installer
 ManifestVersion: 1.6.0
