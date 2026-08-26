@@ -22,9 +22,24 @@ internal sealed class GattConnectionManager : IDisposable
     private readonly SemaphoreSlim _gate;
     private readonly Lock _lock = new();
 
+    /// <summary>
+    /// Test seam: replaces the entire WinRT read path so the concurrency gate,
+    /// cancellation plumbing, and result contract can be unit-tested without
+    /// hardware (same pattern the legacy reader implementation used).
+    /// </summary>
+    private readonly Func<string, string, CancellationToken, Task<DeviceBatteryInfo?>>? _testOverride;
+
     internal GattConnectionManager(int maxConcurrency)
     {
         _gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+    }
+
+    internal GattConnectionManager(
+        Func<string, string, CancellationToken, Task<DeviceBatteryInfo?>> testOverride,
+        int maxConcurrency)
+        : this(maxConcurrency)
+    {
+        _testOverride = testOverride;
     }
 
     internal GattConnectionManager()
@@ -41,6 +56,9 @@ internal sealed class GattConnectionManager : IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            if (_testOverride is not null)
+                return await _testOverride(deviceId, fallbackName, ct).ConfigureAwait(false);
+
             return await ReadBatteryCorAsync(deviceId, fallbackName, ct).ConfigureAwait(false);
         }
         finally

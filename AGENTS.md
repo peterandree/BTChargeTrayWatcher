@@ -51,14 +51,15 @@ src/
   Monitoring/
     BluetoothBatteryMonitor.cs  – public facade for BT polling
     Scanner.cs                  – full device scan coordinator
-    DeviceAggregationPipeline.cs– merges GATT + Classic results
+    BatteryReaderOrchestrator.cs– production merge point: GATT + Classic, alias/category logic
+    DeviceWatcherService.cs     – passive BLE/Classic AEP watcher (channel-based)
     PollingOrchestrator.cs      – background poll loop, threshold alert logic
     PollingDefaults.cs          – all timing and hysteresis constants
     TaskTracker.cs              – fire-and-forget task lifecycle management
     DeviceBatteryInfo.cs        – value type: device id, name, battery %
-    IBatteryReader.cs           – reader abstraction (ReadAllAsync)
+    IBatteryReader.cs           – legacy reader abstraction (ReadAllAsync)
     Classic/                    – Bluetooth Classic reader (SetupAPI + WMI P/Invoke)
-    Gatt/                       – BLE GATT Battery Service (0x180F) reader
+    Gatt/GattConnectionManager.cs – BLE GATT Battery Service (0x180F) per-device reader
     LaptopBattery/              – laptop battery via System.Windows.Forms.PowerStatus / WMI
   Notifications/
     NotificationService.cs      – Windows Toast via WinRT ToastNotificationManager
@@ -100,8 +101,8 @@ winget/                         – WinGet submission artefacts
 ## Adding a new battery reader
 
 1. Implement `IBatteryReader` (`ReadAllAsync(CancellationToken)`  →  `Task<List<DeviceBatteryInfo>>`).
-2. Add it to `DeviceAggregationPipeline` (both parallel tasks in `ReadMergedAsync`).
-3. Pass the new instance through `BluetoothBatteryMonitor`'s constructor chain into `ScannerOptions`.
+2. Wire it into `BatteryReaderOrchestrator` (the production merge point) so its results participate in the GATT + Classic merge, alias resolution, and category filtering.
+3. Pass the new instance through `BluetoothBatteryMonitor`'s constructor chain into `ScannerOptions` (or the infrastructure record in `Program.cs`).
 4. Dispose it in `BluetoothBatteryMonitor.DisposeAsync` if it implements `IDisposable`.
 
 ## Adding a new settings property
@@ -128,7 +129,7 @@ The project targets `win-x64` and will not build on non-Windows hosts without th
 
 ## Tests
 
-There are no automated tests at this time. Unit tests for `PollingOrchestrator` (threshold/hysteresis logic) and `DeviceAggregationPipeline` (merge/dedup logic) are the highest-value additions.
+Automated tests live in `tests/BTChargeTrayWatcher.Tests/` (xUnit v3, Microsoft.Testing.Platform runner per `global.json`). See `TESTING.md` for the tiered strategy: pure-logic classes are unit-tested, WinRT/hardware-bound paths are integration-only. Highest-value gaps: `DeviceWatcherService` event handling (see #150) and the `GattConnectionManager` real WinRT read path (a unit-test seam for the read contract exists).
 
 ---
 

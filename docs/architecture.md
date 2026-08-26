@@ -29,10 +29,10 @@
 └───────────────────────┘                   │          │
             │                               │          │
             ▼                               ▼          ▼
-┌──────────────────────┐     ┌──────────────────┐  ┌──────────────────────┐
-│  NotificationService │     │  GattBatteryReader│  │ ClassicBatteryReader │
-│  (WinRT Toast)       │     │  (BLE 0x180F svc) │  │ (SetupAPI + WMI)     │
-└──────────────────────┘     └──────────────────┘  └──────────────────────┘
+┌──────────────────────┐     ┌──────────────────────┐  ┌──────────────────────┐
+│  NotificationService │     │  GattConnectionManager│ │ ClassicBatteryReader │
+│  (WinRT Toast)       │     │  (BLE 0x180F per-dev) │  │ (SetupAPI + WMI)     │
+└──────────────────────┘     └──────────────────────┘  └──────────────────────┘
             ▲                        │                       │
             │               ┌────────┴───────────────────────┘
             │               ▼
@@ -85,11 +85,11 @@ The production entry point is a constructor that accepts a single infrastructure
 
 ### Scanner
 
-Executes full device scans (used at startup and on user request). On the cooperation-stack path, the injected GATT reader is `OrchestratorBatteryReaderAdapter` (which delegates to `BatteryReaderOrchestrator`) and the Classic reader is `NullBatteryReader`. Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
+Executes full device scans (used at startup and on user request). On the cooperation-stack path, the injected GATT reader is a delegate over `BatteryReaderOrchestrator.ReadAllAsync` (fed by `DeviceWatcherService.CurrentDevices`) and the Classic reader is a no-op — Classic reads already happen inside the orchestrator. Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
 
 ### BatteryReaderOrchestrator
 
-**Cooperation-stack (production) path only.** Issues `GattBatteryReader.ReadAllAsync` (per-device via `GattConnectionManager`) and `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication (GATT wins on name/ID collision, Classic tagged with `BatterySource.Classic`). Updates `DeviceCapabilityCache` after each GATT attempt. Faults in either reader are logged and treated as empty results.
+**Cooperation-stack (production) path only.** Reads each connected BLE device via `GattConnectionManager.TryReadBatteryAsync` and runs `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication (GATT wins on name/ID collision, Classic tagged with `BatterySource.Classic`). Updates `DeviceCapabilityCache` after each GATT attempt. Faults in either reader are logged and treated as empty results.
 
 All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (discovery logging) implementations that affect aggregation live here.
 
@@ -103,9 +103,9 @@ Retained only to keep `ScannerTests` and `DeviceAggregationPipelineTests` green.
 
 Holds the `BatteryAlertState` finite state machine per device (`Normal`, `Low`, `High`). On each poll it re-reads devices via the injected `ReadDevices` delegate (backed by `BatteryReaderOrchestrator`), updates `_lastKnown`, evaluates threshold transitions with hysteresis, and calls `NotificationService.NotifyLow` / `NotifyHigh` on state changes. Tracks consecutive miss-count per device and evicts absent devices after `PollingDefaults.MissCountThreshold` (3) misses. Fires `AlertStateChanged` (bool) as the authoritative tray-overlay signal.
 
-### GattBatteryReader
+### GattConnectionManager
 
-Uses `Windows.Devices.Bluetooth.GenericAttributeProfile` to enumerate all devices advertising the standard Battery Service (UUID `0x180F`). Reads the Battery Level characteristic. Limits concurrency to `PollingDefaults.GattMaxConcurrentReads` (2) via a `SemaphoreSlim`. Per-device timeout is 4 seconds. Caches open GATT connections in `GattConnectionCache` and prunes stale entries.
+Long-lived per-device reader for BLE devices enumerated by `DeviceWatcherService`. Opens `BluetoothLEDevice.FromIdAsync`, reads the Battery Level characteristic (UUID `0x2A19` of the standard Battery Service `0x180F`) with `BluetoothCacheMode.Uncached`, and applies a hard 2-second timeout to every WinRT call via `WaitAsync`. Caches only *knowledge* (which device IDs expose the service), never WinRT objects — all device references are dropped after each read so peripherals can sleep (#78). Limits concurrency to `PollingDefaults.GattMaxConcurrentReads` (2) via a `SemaphoreSlim`. The read contract, concurrency gate, and cancellation are unit-tested through an injectable override; the real WinRT read path is integration-only (see `TESTING.md`).
 
 ### ClassicBatteryReader
 
@@ -137,7 +137,7 @@ All configuration in one class. Persists to `%LOCALAPPDATA%\BTChargeTrayWatcher\
 Timer tick (every 60 s)
   └─► PollingOrchestrator.OnTimerTick
         └─► TaskTracker.Start(SafePollAsync)
-              └─► BatteryReaderOrchestrator.ReadAllAsync (quiet, via OrchestratorBatteryReaderAdapter)
+              └─► BatteryReaderOrchestrator.ReadAllAsync (quiet)
                     ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
                     └─► ClassicBatteryReader.ReadAllAsync
               └─► for each device:
@@ -153,9 +153,7 @@ Timer tick (every 60 s)
 ```
 User clicks tray → ScanCoordinator.OpenScanWindowAndTriggerScan
   └─► ScanWindow shown
-  └─► BluetoothBatteryMonitor.StartTrackedScanAsync
-        └─► Scanner.ScanNowAsync
-              └─► OrchestratorBatteryReaderAdapter.ReadAllAsync
+  └─► BluetoothBatteryMonitor.StartTrackedScanAsync              └─► Scanner.ScanNowAsync
                     └─► BatteryReaderOrchestrator.ReadAllAsync (raises DeviceFound events)
                           ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
                           └─► ClassicBatteryReader.ReadAllAsync

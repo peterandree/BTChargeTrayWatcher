@@ -15,11 +15,36 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
       - name: Restore
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      # Issue #149: guard the production wiring so orphaned reader types cannot
+      # silently return (they are referenced nowhere in src/ by design) and the
+      # documented live graph stays wired in Program.cs.
+      - name: Verify production wiring (no orphaned readers)
+        shell: pwsh
+        run: |
+          $orphaned = @('GattBatteryReader','GattBatteryProcessor','GattConnectionCache','CachedGattEndpoint','PhysicalDeviceIdentityResolver')
+          $hits = Get-ChildItem src -Recurse -Filter *.cs | Select-String -SimpleMatch -Pattern $orphaned
+          if ($hits) {
+            $hits | ForEach-Object { Write-Error "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+            exit 1
+          }
+          $program = Get-Content src/Program.cs -Raw
+          if ($program -match 'DeviceAggregationPipeline') {
+            Write-Error 'Program.cs must not reference the legacy DeviceAggregationPipeline.'
+            exit 1
+          }
+          $required = @('GattConnectionManager','BatteryReaderOrchestrator','DeviceWatcherService','ClassicBatteryReader','DeviceCapabilityCache','AliasSuggestionService')
+          foreach ($name in $required) {
+            if (-not $program.Contains($name)) {
+              Write-Error "Program.cs no longer wires $name."
+              exit 1
+            }
+          }
+          Write-Host 'Wiring guard passed.'
       - name: Run tests (no coverage)
         run: dotnet test tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release
       - name: Install Coverlet and ReportGenerator

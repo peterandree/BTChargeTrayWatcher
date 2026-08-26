@@ -33,7 +33,6 @@ Classes with testable logic that is currently entangled with an untestable conce
 | Class | Blocker | Tracking |
 |---|---|---|
 | `LaptopBatteryMonitor` (single constructor) | Nullable-field test constructor; `_settings is not null` guards | [#41](https://github.com/peterandree/BTChargeTrayWatcher/issues/41) |
-| `GattBatteryProcessor` (reconnect path) | Stale `BluetoothLEDevice` returns `null`; no seam to inject a factory | [#42](https://github.com/peterandree/BTChargeTrayWatcher/issues/42) |
 | `TaskTracker` (add-before-schedule) | Race condition between `HashSet.Add` and `Task.Run`; fixed in current code, concurrency stress test pending | [#43](https://github.com/peterandree/BTChargeTrayWatcher/issues/43) |
 | `NtfyNotificationChannel` (alert body extraction) | `Fire` is private; `BuildAlertBody` not yet extracted as `internal static` | No issue yet — follow-up to `BuildStatusBody` extraction |
 
@@ -49,10 +48,8 @@ The correct approach for each class is an **integration test** that runs on a re
 
 | Class | Blocking API | Notes |
 |---|---|---|
-| `GattBatteryReader` | `Windows.Devices.Bluetooth.GenericAttributeProfile.*` | Requires a paired GATT device. Full read path including service/characteristic enumeration. |
+| `GattConnectionManager` (real WinRT read path) | `BluetoothLEDevice.FromIdAsync`, `GetGattServicesForUuidAsync`, `ReadValueAsync` | Requires a paired GATT device. The read contract, concurrency gate, and cancellation are covered by unit tests via the injectable override in `GattConnectionManagerTests`; the actual WinRT service/characteristic round-trip is hardware-only. |
 | `ClassicBatteryReader` | `Windows.Devices.Bluetooth.BluetoothDevice.FromIdAsync` | Requires a paired Classic BT device with an exposed battery service. |
-| `GattBatteryProcessor` | `BluetoothLEDevice.FromIdAsync`, `GetGattServicesAsync` | Requires a live GATT device. Cache-invalidation-on-reconnect path (tracked in #42) should be covered here once the seam exists. |
-| `GattConnectionCache` | `BluetoothLEDevice` handle lifecycle | Device handle eviction and re-creation are only observable with real hardware. |
 
 ### WinForms / Win32
 
@@ -77,7 +74,7 @@ When integration tests are introduced, create a separate project:
 ```
 tests.integration/
     BTChargeTrayWatcher.Integration.Tests.csproj
-    GattBatteryReaderTests.cs
+    GattConnectionManagerReadPathTests.cs
     ClassicBatteryReaderTests.cs
     WindowsLaptopBatteryReaderTests.cs
     WindowsToastNotificationChannelTests.cs
