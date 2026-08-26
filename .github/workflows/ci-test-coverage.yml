@@ -2,7 +2,7 @@ name: CI - Test & Coverage
 
 on:
   push:
-    branches: [ main, master ]
+    branches: ['**']
   pull_request:
     branches: [ main, master ]
 
@@ -47,20 +47,16 @@ jobs:
           Write-Host 'Wiring guard passed.'
       - name: Run tests (no coverage)
         run: dotnet test tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release
-      - name: Install Coverlet and ReportGenerator
-        run: |
-          dotnet tool install --global coverlet.console
-          dotnet tool install --global dotnet-reportgenerator-globaltool
-      - name: Run coverage with Coverlet
-        run: |
-          coverlet ./tests/BTChargeTrayWatcher.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64/BTChargeTrayWatcher.Tests.dll \
-            --target "dotnet" \
-            --targetargs "test ./tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release" \
-            --format cobertura \
-            --output coverage.cobertura.xml
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+      # MTP-native coverage: coverlet.collector/msbuild/console are incompatible with the
+      # Microsoft Testing Platform runner (this repo uses xUnit v3 MTP). The
+      # Microsoft.Testing.Extensions.CodeCoverage package is referenced by the test project
+      # and auto-registered; `dotnet test --coverage` produces cobertura directly.
+      - name: Run tests with coverage (MTP)
+        run: dotnet test tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml
       - name: Generate coverage HTML
-        run: |
-          reportgenerator -reports:coverage.cobertura.xml -targetdir:CoverageReport -reporttypes:Html
+        run: reportgenerator -reports:coverage.cobertura.xml -targetdir:CoverageReport -reporttypes:Html
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
