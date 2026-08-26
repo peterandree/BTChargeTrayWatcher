@@ -37,6 +37,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot   = Resolve-Path (Join-Path $PSScriptRoot "..")
 $CsprojPath = Join-Path $RepoRoot "BTChargeTrayWatcher.csproj"
 $IssPath    = Join-Path $RepoRoot "installer\BTChargeTrayWatcher.iss"
+$AssemblyInfoPath = Join-Path $RepoRoot "src\Properties\AssemblyInfo.cs"
 $PublishDir = Join-Path $RepoRoot "bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 
 # Locate ISCC.exe
@@ -81,13 +82,27 @@ if (-not (Test-Path $ExePath)) {
 Write-Host "  EXE: $([math]::Round((Get-Item $ExePath).Length/1MB,2)) MB"
 
 # ---------------------------------------------------------------------------
-# Step 3: Patch version in .iss
+# Step 3: Patch the version in .iss and AssemblyInfo.cs
 # ---------------------------------------------------------------------------
+# Both files must carry the same version as the csproj so the installer and the
+# WinGet-reports-invisible file version of the produced EXE stay in sync.
 Write-Step "Patching .iss version to $Version"
 $iss = Get-Content $IssPath -Raw
 $iss = $iss -creplace '#define AppVersion\s+"[^"]*"', "#define AppVersion   ""$Version"""
 [System.IO.File]::WriteAllText($IssPath, $iss, [System.Text.UTF8Encoding]::new($false))
 Write-Host "  Updated AppVersion in $(Split-Path $IssPath -Leaf)"
+
+if (Test-Path $AssemblyInfoPath) {
+    Write-Step "Patching AssemblyInfo version to $Version"
+    $ai = Get-Content $AssemblyInfoPath -Raw
+    $ai = $ai -creplace '(\[assembly:\s*AssemblyVersion\(")[^"]+("\)\])', ('${1}' + $Version + '${2}')
+    $ai = $ai -creplace '(\[assembly:\s*AssemblyFileVersion\(")[^"]+("\)\])', ('${1}' + $Version + '${2}')
+    $ai = $ai -creplace '(\[assembly:\s*AssemblyInformationalVersion\(")[^"]+("\)\])', ('${1}' + $Version + '${2}')
+    [System.IO.File]::WriteAllText($AssemblyInfoPath, $ai, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "  Updated version attributes in $(Split-Path $AssemblyInfoPath -Leaf)"
+} else {
+    Write-Warning "AssemblyInfo.cs not found at $AssemblyInfoPath; skipping version patch."
+}
 
 # ---------------------------------------------------------------------------
 # Step 4: Compile installer

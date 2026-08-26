@@ -17,12 +17,12 @@ This guide explains how to create a new BTChargeTrayWatcher release and submit t
 
 - `build-installer.ps1`
   - Publishes and builds installer.
-  - Patches `installer/BTChargeTrayWatcher.iss` to the provided version (or csproj version).
+  - Patches `installer/BTChargeTrayWatcher.iss` **and** `src/Properties/AssemblyInfo.cs` to the provided version (or csproj version), so the Win32 file version of the produced EXE matches the package version (required for WinGet update detection).
   - Prints SHA256 and expected InstallerUrl/InstallerSha256 values.
 
 - `release-all.ps1`
   - Bumps version (minor by default, major with `-Major`, or explicit with `-Version`).
-  - Builds installer.
+  - Builds installer (which patches the `.iss` and `src/Properties/AssemblyInfo.cs` versions).
   - Updates all `winget/*.yaml` manifests.
   - Validates manifests using `winget validate`.
   - Commits + tags + pushes main repo.

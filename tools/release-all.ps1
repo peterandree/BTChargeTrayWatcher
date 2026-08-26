@@ -47,6 +47,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Csproj   = Join-Path $RepoRoot "BTChargeTrayWatcher.csproj"
 $IssPath  = Join-Path $RepoRoot "installer\BTChargeTrayWatcher.iss"
+$AssemblyInfoPath = Join-Path $RepoRoot "src\Properties\AssemblyInfo.cs"
 $InstallerScript = Join-Path $RepoRoot "tools\build-installer.ps1"
 $WingetDir      = Join-Path $RepoRoot "winget"
 $ManifestInstaller = Join-Path $WingetDir "peterandree.BTChargeTrayWatcher.installer.yaml"
@@ -166,12 +167,19 @@ $yamlLocale = Get-Content $ManifestLocale -Raw
 $yamlLocale = $yamlLocale -creplace 'PackageVersion: [^\r\n]+', "PackageVersion: $newVer"
 [System.IO.File]::WriteAllText($ManifestLocale, $yamlLocale, [System.Text.UTF8Encoding]::new($false))
 
-# 5b. Verify manifests contain the expected version before proceeding
+# 5b. Verify manifests and version metadata contain the expected version before proceeding
 $verifyFiles = @($ManifestInstaller, $ManifestVersion, $ManifestLocale)
 foreach ($vf in $verifyFiles) {
     $content = Get-Content $vf -Raw
     if ($content -notmatch "PackageVersion:\s*$([regex]::Escape($newVer))") {
         Write-Error "Manifest verification failed: $vf does not contain PackageVersion $newVer. Aborting before any commits."
+        exit 1
+    }
+}
+if (Test-Path $AssemblyInfoPath) {
+    $aiContent = Get-Content $AssemblyInfoPath -Raw
+    if ($aiContent -notmatch "AssemblyVersion\(\"$([regex]::Escape($newVer))\"\)") {
+        Write-Error "AssemblyInfo verification failed: $AssemblyInfoPath does not contain AssemblyVersion $newVer. Aborting before any commits."
         exit 1
     }
 }
@@ -193,6 +201,7 @@ Copy-Item $ManifestLocale   (Join-Path $destDir "$manifestFileBase.locale.en-US.
 Write-Host "==> Committing and tagging main repo"
 git -C $RepoRoot add $Csproj $ManifestInstaller $ManifestVersion $ManifestLocale
 git -C $RepoRoot add $IssPath
+if (Test-Path $AssemblyInfoPath) { git -C $RepoRoot add $AssemblyInfoPath }
 $commitMsg = 'Release v' + $newVer + ': build, manifest, installer'
 git -C $RepoRoot commit -m $commitMsg
 $tag = "v$newVer"

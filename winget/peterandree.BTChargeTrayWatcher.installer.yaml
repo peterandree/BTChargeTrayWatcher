@@ -5,6 +5,7 @@ Platform:
   - Windows.Desktop
 MinimumOSVersion: 10.0.19041.0
 InstallerType: exe
+UpgradeBehavior: install
 InstallerSwitches:
   Silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
   SilentWithProgress: /SILENT /SUPPRESSMSGBOXES /NORESTART

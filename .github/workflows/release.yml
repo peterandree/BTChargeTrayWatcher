@@ -28,11 +28,14 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          # Use the evaluated ref name where available (works for push and release events).
           $v = '${{ github.ref_name }}'.TrimStart('v')
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
 
-      - name: Publish
+      # The app is published as a self-contained single-file EXE. That EXE is
+      # then wrapped by the Inno Setup installer (installer/BTChargeTrayWatcher.iss),
+      # which is the artifact WinGet actually installs (it creates the Start Menu
+      # shortcut + optional HKCU Run-key autostart + uninstaller).
+      - name: Publish single-file EXE
         shell: pwsh
         run: |
           dotnet publish BTChargeTrayWatcher.csproj `
@@ -40,28 +43,63 @@ jobs:
             --self-contained true `
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:Version=${{ steps.version.outputs.VERSION }} `
-            -o ./publish
+            -p:EnableCompressionInSingleFile=true `
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Inno Setup 6 is required to compile the .iss installer. PowerShell runs
+      # on the Windows image, so winget is available for the package install.
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements --disable-interactivity
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after installing Inno Setup" }
+          echo "ISCC_PATH=$iscc" >> $env:GITHUB_ENV
+
+      # Patch the installer version and compile the installer. The .iss reads the
+      # published EXE (already produced above) from bin\Release\...\publish and
+      # emits publish\installer\BTChargeTrayWatcher_<version>_Setup.exe.
+      # -SkipPublish avoids publishing a second time.
+      - name: Build installer
+        shell: pwsh
+        run: |
+          .\tools\build-installer.ps1 -Version "${{ steps.version.outputs.VERSION }}" -SkipPublish
+          $installer = Get-ChildItem "$PWD\publish\installer\BTChargeTrayWatcher_*_Setup.exe" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "Installer was not produced" }
+          echo "INSTALLER_PATH=$($installer.FullName)" >> $env:GITHUB_ENV
+          echo "INSTALLER_NAME=$($installer.Name)" >> $env:GITHUB_ENV
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash
+          echo "INSTALLER_SHA256=$hash" >> $env:GITHUB_ENV
+          Write-Host "Installer: $($installer.Name)"
+          Write-Host "SHA256: $hash"
 
       - name: Create GitHub Release (on push tags)
         if: ${{ github.event_name == 'push' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: ./publish/BTChargeTrayWatcher.exe
+          files: ${{ env.INSTALLER_PATH }}
           generate_release_notes: true
 
       - name: Upload release assets (on release event)
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: ./publish/BTChargeTrayWatcher.exe
+          files: ${{ env.INSTALLER_PATH }}
           tag_name: ${{ github.event.release.tag_name }}
           generate_release_notes: false
 
+      # Winget installs the Inno installer (_Setup.exe), not the bare EXE, so
+      # restrict the releaser to only match the installer that this workflow just
+      # uploaded. The manifest InstallerSha256 must match this asset.
       - name: Submit to winget
         if: ${{ env.WINGET_TOKEN != '' }}
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: peterandree.BTChargeTrayWatcher
-          installers-regex: '\.exe$'
+          installers-regex: 'BTChargeTrayWatcher_.*_Setup\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}

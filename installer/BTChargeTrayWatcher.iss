@@ -41,7 +41,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "startuprun";  Description: "Start {#AppName} automatically when Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
+; Default-ON so automated/silent installs (e.g. winget /VERYSILENT) reliably
+; register Windows startup. Interactive users can uncheck it to opt out.
+Name: "startuprun";  Description: "Start {#AppName} automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
