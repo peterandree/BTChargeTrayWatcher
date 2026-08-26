@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "lean-ctx": {
+      "type": "stdio",
+      "command": "C:/Users/h3hqwt/.cargo/bin/lean-ctx.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "LEAN_CTX_DATA_DIR": "C:\\Users\\h3hqwt\\.lean-ctx"
+      }
+    }
+  }
+}
