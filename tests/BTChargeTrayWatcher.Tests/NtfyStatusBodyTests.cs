@@ -91,6 +91,16 @@ public sealed class NtfyStatusBodyTests
     }
 
     [Fact]
+    public void Laptop_unknown_level_reports_unknown_not_percentage()
+    {
+        // #144: BatteryPercent == -1 is the unknown sentinel.
+        var laptop = new LaptopBatteryInfo(HasBattery: true, BatteryPercent: -1,
+            IsCharging: false, IsOnAcPower: true);
+        var body = NtfyNotificationChannel.BuildStatusBody([], laptop);
+        Assert.Equal("Laptop battery level unknown (plugged in)", body);
+    }
+
+    [Fact]
     public void Laptop_HasBattery_false_is_omitted()
     {
         var laptop = new LaptopBatteryInfo(HasBattery: false, BatteryPercent: 0,

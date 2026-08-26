@@ -63,9 +63,13 @@ internal sealed class TrayViewModel
         if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
         {
             if (sb.Length > 0) sb.Append('\n');
-            bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
-                            || laptop.BatteryPercent >= _settings.LaptopHigh;
-            if (laptopAlert) sb.Append("! ");
+            // #144: an unknown level is the -1 sentinel — never alert on it.
+            if (laptop.BatteryPercent >= 0)
+            {
+                bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
+                                || laptop.BatteryPercent >= _settings.LaptopHigh;
+                if (laptopAlert) sb.Append("! ");
+            }
             sb.Append("Laptop ")
               .Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
             if (laptop.IsCharging) sb.Append(" (charging)");

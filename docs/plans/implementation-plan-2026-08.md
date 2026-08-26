@@ -84,11 +84,20 @@ Not wired (dead code): `GattBatteryReader`, `GattBatteryProcessor`, `GattConnect
 ### 3.1 #144 — Laptop battery 100 % when unknown
 
 - File: `src/Monitoring/LaptopBattery/WindowsLaptopBatteryReader.cs`.
-- Windows reports an unknown level as `BatteryLifePercent == 255/255` (i.e. `1.0f`).
-  The current guard `rawPercent >= 0` accepts it and clamps to 100.
-- Fix: treat `rawPercent >= 1.0f` as unknown → `BatteryPercent = -1` (keep the existing
-  `-1` sentinel contract used by `LaptopBatteryInfo` and `BatteryDisplay`).
-- Test: parameterised unit test over 0.0/0.25/0.5/1.0 (`BatteryDisplay` already formats -1).
+- Windows reports an unknown level as a byte `255`. The framework divides by 100 and clamps
+  (`BatteryLifePercent / 100f` capped at 1.0, verified in the .NET reference source), so both
+  a genuinely full battery (byte 100) and an unknown level (byte 255) surface as exactly `1.0f`.
+  The current guard `rawPercent >= 0` accepts `1.0f` and clamps to 100 → phantom 100 %.
+- Fix: treat `rawPercent >= 1.0f` (and out-of-range values) as unknown → `BatteryPercent = -1`
+  (keeps the existing `-1` sentinel contract used by `LaptopBatteryInfo` and `BatteryDisplay`).
+- **Known trade-off (documented in code):** a genuinely full battery also reads `1.0f` and will
+  show as "unknown" — the float cannot distinguish the two. This is the safe direction for a
+  threshold-alerting app; a precise fix needs WMI `Win32_Battery` (#127/#154).
+- Test: parameterised unit test over 0.0/0.1/0.25/0.5/0.99/1.0/2.55/-0.1 in
+  `WindowsLaptopBatteryReaderTests` (conversion extracted as `internal static` per the
+  `NtfyStatusBodyTests` precedent; the reader itself stays Tier 3).
+- **Status:** implemented on `refactor/149-remove-orphaned-reader-code` (commit pending push),
+  pending local verification of the full-battery case on real hardware.
 
 ### 3.2 #146 — Charging state never reported for BLE
 

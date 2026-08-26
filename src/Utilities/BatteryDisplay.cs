@@ -12,8 +12,12 @@ public static class BatteryDisplay
     /// <summary>
     /// Formats the battery percentage cell text.
     /// Appends " \u26a1" (⚡) only when charging is confirmed true.
-    /// Unknown (null) renders as plain percentage — absence of data is not shown as a state.
+    /// A negative value (the -1 sentinel used by <see cref="LaptopBatteryInfo"/> when the
+    /// level is unknown, see #144) renders as "unknown" instead of a fabricated percentage.
     /// </summary>
-    public static string FormatBattery(int battery, bool? isCharging) =>
-        isCharging == true ? $"{battery}% \u26a1" : $"{battery}%";
+    public static string FormatBattery(int battery, bool? isCharging)
+    {
+        if (battery < 0) return "unknown";
+        return isCharging == true ? $"{battery}% \u26a1" : $"{battery}%";
+    }
 }
