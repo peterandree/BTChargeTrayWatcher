@@ -55,8 +55,10 @@ jobs:
       # and auto-registered; `dotnet test --coverage` produces cobertura directly.
       - name: Run tests with coverage (MTP)
         run: dotnet test tests/BTChargeTrayWatcher.Tests/BTChargeTrayWatcher.Tests.csproj --no-build --configuration Release --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml
+      # MTP resolves relative --coverage-output paths inside TestResults/ (the run
+      # summary lists it under "In process file artifacts produced").
       - name: Generate coverage HTML
-        run: reportgenerator -reports:coverage.cobertura.xml -targetdir:CoverageReport -reporttypes:Html
+        run: reportgenerator -reports:TestResults/coverage.cobertura.xml -targetdir:CoverageReport -reporttypes:Html
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
