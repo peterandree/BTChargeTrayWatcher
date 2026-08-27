@@ -71,47 +71,62 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
         _classicWatcher.Start();
     }
 
-    /// <summary>Performs a full re-enumeration, replacing the tracked device list.</summary>
+    /// <summary>
+    /// Performs a full re-enumeration, replacing the tracked device list.
+    /// The refresh is routed through the channel so all <c>_devices</c> mutations
+    /// and <c>DevicesChanged</c> invocations are serialised on the single
+    /// channel-processing thread, eliminating the race with live watcher events.
+    /// WinRT <c>FindAllAsync</c> calls run on the caller's thread (no lock held).
+    /// </summary>
     internal async Task RefreshAsync(CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // Phase 1: WinRT enumeration on caller's thread (no lock).
         var bleSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
         var classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
 
         var bleDevicesTask = DeviceInformation.FindAllAsync(
-            bleSelector, [IsConnectedProperty], DeviceInformationKind.AssociationEndpoint).AsTask(ct);
+            bleSelector, [IsConnectedProperty, ClassOfDeviceProperty],
+            DeviceInformationKind.AssociationEndpoint).AsTask(ct);
         var classicDevicesTask = DeviceInformation.FindAllAsync(
-            classicSelector, [IsConnectedProperty]).AsTask(ct);
+            classicSelector, [IsConnectedProperty, ClassOfDeviceProperty]).AsTask(ct);
 
         await Task.WhenAll(bleDevicesTask, classicDevicesTask).ConfigureAwait(false);
 
         Debug.WriteLine($"[DeviceWatcherService] Refresh: {bleDevicesTask.Result.Count} BLE, {classicDevicesTask.Result.Count} Classic devices");
 
-        lock (_lock)
+        // Phase 2: Build snapshot on caller's thread.
+        var snapshot = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var d in bleDevicesTask.Result)
         {
-            _devices.Clear();
-
-            foreach (var d in bleDevicesTask.Result)
-            {
-                string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                bool connected = ExtractIsConnected(d.Properties);
-                uint? cod = ExtractClassOfDevice(d.Properties);
-                _devices[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected, cod);
-                Debug.WriteLine($"[DeviceWatcherService]   BLE: '{name}' connected={connected} id={d.Id}");
-            }
-
-            foreach (var d in classicDevicesTask.Result)
-            {
-                string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                bool connected = ExtractIsConnected(d.Properties);
-                uint? cod = ExtractClassOfDevice(d.Properties);
-                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: connected, cod));
-                Debug.WriteLine($"[DeviceWatcherService]   Classic: '{name}' connected={connected} id={d.Id}");
-            }
+            string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
+            bool connected = ExtractIsConnected(d.Properties);
+            uint? cod = ExtractClassOfDevice(d.Properties);
+            snapshot[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected, cod);
+            Debug.WriteLine($"[DeviceWatcherService]   BLE: '{name}' connected={connected} id={d.Id}");
         }
 
-        DevicesChanged?.Invoke();
+        foreach (var d in classicDevicesTask.Result)
+        {
+            string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
+            bool connected = ExtractIsConnected(d.Properties);
+            uint? cod = ExtractClassOfDevice(d.Properties);
+            snapshot.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: connected, cod));
+            Debug.WriteLine($"[DeviceWatcherService]   Classic: '{name}' connected={connected} id={d.Id}");
+        }
+
+        // Phase 3: Post through channel — the channel thread will replace _devices
+        // and raise DevicesChanged, serialising with live watcher events.
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_channel.Writer.TryWrite(new DeviceWatcherEvent.RefreshRequest(snapshot, tcs)))
+        {
+            tcs.SetCanceled();
+            return;
+        }
+
+        await tcs.Task.ConfigureAwait(false);
     }
 
     private void WireWatcher(DeviceWatcher watcher, bool isBle)
@@ -176,6 +191,18 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                             }
                             if (changed) DevicesChanged?.Invoke();
                             break;
+
+                        case DeviceWatcherEvent.RefreshRequest refresh:
+                            lock (_lock)
+                            {
+                                _devices.Clear();
+                                foreach (var kv in refresh.Snapshot)
+                                    _devices[kv.Key] = kv.Value;
+                            }
+                            DevicesChanged?.Invoke();
+                            refresh.Tcs.TrySetResult();
+                            Debug.WriteLine($"[DeviceWatcherService] Refresh applied: {_devices.Count} devices");
+                            break;
                     }
                 }
                 catch (Exception ex)
@@ -239,5 +266,8 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
         internal sealed record Added(string DeviceId, string Name, bool IsBle, bool IsConnected, uint? ClassOfDevice = null) : DeviceWatcherEvent;
         internal sealed record Removed(string DeviceId) : DeviceWatcherEvent;
         internal sealed record Updated(string DeviceId, bool IsBle, bool? IsConnected) : DeviceWatcherEvent;
+        internal sealed record RefreshRequest(
+            Dictionary<string, WatchedDevice> Snapshot,
+            TaskCompletionSource Tcs) : DeviceWatcherEvent;
     }
 }
