@@ -15,6 +15,7 @@ namespace BTChargeTrayWatcher;
 internal sealed class DeviceWatcherService : IAsyncDisposable
 {
     private const string IsConnectedProperty = "System.Devices.Aep.IsConnected";
+    private const string ClassOfDeviceProperty = "System.Devices.Aep.Bluetooth.Cod.Major";
 
     private readonly Channel<DeviceWatcherEvent> _channel =
         Channel.CreateUnbounded<DeviceWatcherEvent>(new UnboundedChannelOptions
@@ -58,64 +59,81 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
         string bleSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
         _bleWatcher = DeviceInformation.CreateWatcher(
             bleSelector,
-            [IsConnectedProperty],
+            [IsConnectedProperty, ClassOfDeviceProperty],
             DeviceInformationKind.AssociationEndpoint);
         WireWatcher(_bleWatcher, isBle: true);
         _bleWatcher.Start();
 
         // Watcher 2: Classic Bluetooth paired devices — also request IsConnected.
         string classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
-        _classicWatcher = DeviceInformation.CreateWatcher(classicSelector, [IsConnectedProperty]);
+        _classicWatcher = DeviceInformation.CreateWatcher(classicSelector, [IsConnectedProperty, ClassOfDeviceProperty]);
         WireWatcher(_classicWatcher, isBle: false);
         _classicWatcher.Start();
     }
 
-    /// <summary>Performs a full re-enumeration, replacing the tracked device list.</summary>
+    /// <summary>
+    /// Performs a full re-enumeration, replacing the tracked device list.
+    /// The refresh is routed through the channel so all <c>_devices</c> mutations
+    /// and <c>DevicesChanged</c> invocations are serialised on the single
+    /// channel-processing thread, eliminating the race with live watcher events.
+    /// WinRT <c>FindAllAsync</c> calls run on the caller's thread (no lock held).
+    /// </summary>
     internal async Task RefreshAsync(CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // Phase 1: WinRT enumeration on caller's thread (no lock).
         var bleSelector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
         var classicSelector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
 
         var bleDevicesTask = DeviceInformation.FindAllAsync(
-            bleSelector, [IsConnectedProperty], DeviceInformationKind.AssociationEndpoint).AsTask(ct);
+            bleSelector, [IsConnectedProperty, ClassOfDeviceProperty],
+            DeviceInformationKind.AssociationEndpoint).AsTask(ct);
         var classicDevicesTask = DeviceInformation.FindAllAsync(
-            classicSelector, [IsConnectedProperty]).AsTask(ct);
+            classicSelector, [IsConnectedProperty, ClassOfDeviceProperty]).AsTask(ct);
 
         await Task.WhenAll(bleDevicesTask, classicDevicesTask).ConfigureAwait(false);
 
         Debug.WriteLine($"[DeviceWatcherService] Refresh: {bleDevicesTask.Result.Count} BLE, {classicDevicesTask.Result.Count} Classic devices");
 
-        lock (_lock)
+        // Phase 2: Build snapshot on caller's thread.
+        var snapshot = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var d in bleDevicesTask.Result)
         {
-            _devices.Clear();
-
-            foreach (var d in bleDevicesTask.Result)
-            {
-                string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                bool connected = ExtractIsConnected(d.Properties);
-                _devices[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected);
-                Debug.WriteLine($"[DeviceWatcherService]   BLE: '{name}' connected={connected} id={d.Id}");
-            }
-
-            foreach (var d in classicDevicesTask.Result)
-            {
-                string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
-                bool connected = ExtractIsConnected(d.Properties);
-                _devices.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: connected));
-                Debug.WriteLine($"[DeviceWatcherService]   Classic: '{name}' connected={connected} id={d.Id}");
-            }
+            string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
+            bool connected = ExtractIsConnected(d.Properties);
+            uint? cod = ExtractClassOfDevice(d.Properties);
+            snapshot[d.Id] = new WatchedDevice(d.Id, name, IsBle: true, IsConnected: connected, cod);
+            Debug.WriteLine($"[DeviceWatcherService]   BLE: '{name}' connected={connected} id={d.Id}");
         }
 
-        DevicesChanged?.Invoke();
+        foreach (var d in classicDevicesTask.Result)
+        {
+            string name = !string.IsNullOrWhiteSpace(d.Name) ? d.Name : d.Id;
+            bool connected = ExtractIsConnected(d.Properties);
+            uint? cod = ExtractClassOfDevice(d.Properties);
+            snapshot.TryAdd(d.Id, new WatchedDevice(d.Id, name, IsBle: false, IsConnected: connected, cod));
+            Debug.WriteLine($"[DeviceWatcherService]   Classic: '{name}' connected={connected} id={d.Id}");
+        }
+
+        // Phase 3: Post through channel — the channel thread will replace _devices
+        // and raise DevicesChanged, serialising with live watcher events.
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_channel.Writer.TryWrite(new DeviceWatcherEvent.RefreshRequest(snapshot, tcs)))
+        {
+            tcs.SetCanceled();
+            return;
+        }
+
+        await tcs.Task.ConfigureAwait(false);
     }
 
     private void WireWatcher(DeviceWatcher watcher, bool isBle)
     {
         watcher.Added += (_, d) =>
             _channel.Writer.TryWrite(new DeviceWatcherEvent.Added(
-                d.Id, d.Name, isBle, ExtractIsConnected(d.Properties)));
+                d.Id, d.Name, isBle, ExtractIsConnected(d.Properties), ExtractClassOfDevice(d.Properties)));
         watcher.Removed += (_, u) =>
             _channel.Writer.TryWrite(new DeviceWatcherEvent.Removed(u.Id));
         watcher.Updated += (_, u) =>
@@ -144,7 +162,7 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                             lock (_lock)
                             {
                                 _devices[a.DeviceId] = new WatchedDevice(
-                                    a.DeviceId, name, a.IsBle, a.IsConnected);
+                                    a.DeviceId, name, a.IsBle, a.IsConnected, a.ClassOfDevice);
                             }
                             DevicesChanged?.Invoke();
                             break;
@@ -173,6 +191,18 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
                             }
                             if (changed) DevicesChanged?.Invoke();
                             break;
+
+                        case DeviceWatcherEvent.RefreshRequest refresh:
+                            lock (_lock)
+                            {
+                                _devices.Clear();
+                                foreach (var kv in refresh.Snapshot)
+                                    _devices[kv.Key] = kv.Value;
+                            }
+                            DevicesChanged?.Invoke();
+                            refresh.Tcs.TrySetResult();
+                            Debug.WriteLine($"[DeviceWatcherService] Refresh applied: {_devices.Count} devices");
+                            break;
                     }
                 }
                 catch (Exception ex)
@@ -193,6 +223,24 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
     /// </summary>
     private static bool ExtractIsConnected(IReadOnlyDictionary<string, object> properties) =>
         properties.TryGetValue(IsConnectedProperty, out var value) && value is true;
+
+    /// <summary>
+    /// Extracts the Bluetooth Class of Device from <c>System.Devices.Aep.Bluetooth.Cod.Major</c>.
+    /// Returns <c>null</c> if the property is absent or not a numeric type.
+    /// Handles both <c>uint</c> and <c>ushort</c> boxing (WinRT may return either).
+    /// </summary>
+    private static uint? ExtractClassOfDevice(IReadOnlyDictionary<string, object> properties)
+    {
+        if (!properties.TryGetValue(ClassOfDeviceProperty, out var value)) return null;
+        return value switch
+        {
+            uint u  => u,
+            int i   => i >= 0 ? (uint)i : null,
+            ushort us => us,
+            short s  => s >= 0 ? (uint)s : null,
+            _ => null
+        };
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -215,8 +263,11 @@ internal sealed class DeviceWatcherService : IAsyncDisposable
 
     private abstract record DeviceWatcherEvent
     {
-        internal sealed record Added(string DeviceId, string Name, bool IsBle, bool IsConnected) : DeviceWatcherEvent;
+        internal sealed record Added(string DeviceId, string Name, bool IsBle, bool IsConnected, uint? ClassOfDevice = null) : DeviceWatcherEvent;
         internal sealed record Removed(string DeviceId) : DeviceWatcherEvent;
         internal sealed record Updated(string DeviceId, bool IsBle, bool? IsConnected) : DeviceWatcherEvent;
+        internal sealed record RefreshRequest(
+            Dictionary<string, WatchedDevice> Snapshot,
+            TaskCompletionSource Tcs) : DeviceWatcherEvent;
     }
 }

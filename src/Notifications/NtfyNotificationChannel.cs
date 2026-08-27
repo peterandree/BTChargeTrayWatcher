@@ -89,9 +89,18 @@ public sealed class NtfyNotificationChannel : INotificationChannel
         if (laptop is { HasBattery: true })
         {
             if (sb.Length > 0) sb.Append('\n');
-            sb.Append("Laptop ").Append(laptop.BatteryPercent).Append('%');
+            // #144: an unknown level is the -1 sentinel — never report a fabricated percentage.
+            if (laptop.BatteryPercent >= 0)
+                sb.Append("Laptop ").Append(laptop.BatteryPercent).Append('%');
+            else
+                sb.Append("Laptop battery level unknown");
             if (laptop.IsCharging)        sb.Append(" (charging)");
             else if (laptop.IsOnAcPower)  sb.Append(" (plugged in)");
+            // #154: append discharge rate and estimated time when available.
+            if (laptop.DischargeRateWatts is not null)
+                sb.Append(' ').Append(BatteryDisplay.FormatPowerRate(laptop.DischargeRateWatts));
+            if (laptop.EstimatedRunTimeMinutes is not null)
+                sb.Append(" ~").Append(BatteryDisplay.FormatDuration(laptop.EstimatedRunTimeMinutes));
         }
 
         if (sb.Length == 0)
@@ -144,6 +153,11 @@ public sealed class NtfyNotificationChannel : INotificationChannel
             };
             request.Headers.TryAddWithoutValidation("Title",    AppTitle);
             request.Headers.TryAddWithoutValidation("Priority", priority);
+
+            // ntfy access token: when set, authenticate with Bearer token.
+            // This enables private topics ($-prefixed) and ACL-protected access (#152).
+            if (!string.IsNullOrWhiteSpace(_ntfySettings.AccessToken))
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_ntfySettings.AccessToken}");
 
             using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

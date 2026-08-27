@@ -99,8 +99,8 @@ The application can register itself to start with Windows via the tray menu.
 ```
 Program.cs
 └── BluetoothBatteryMonitor          (src/Monitoring/)
-    ├── GattBatteryReader            (src/Monitoring/Gatt/)
-    │   └── Reads battery via BLE GATT Battery Service (0x180F)
+    ├── GattConnectionManager       (src/Monitoring/Gatt/)
+    │   └── Reads battery via BLE GATT Battery Service (0x180F), no object caching
     ├── ClassicBatteryReader         (src/Monitoring/Classic/)
     │   └── Reads battery via Windows.Devices.Enumeration / SetupAPI
     ├── PollingOrchestrator          timer-driven 60 s poll cycle

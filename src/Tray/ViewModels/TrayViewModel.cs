@@ -63,12 +63,21 @@ internal sealed class TrayViewModel
         if (_laptopMonitor.LastKnownBattery is { HasBattery: true } laptop)
         {
             if (sb.Length > 0) sb.Append('\n');
-            bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
-                            || laptop.BatteryPercent >= _settings.LaptopHigh;
-            if (laptopAlert) sb.Append("! ");
+            // #144: an unknown level is the -1 sentinel — never alert on it.
+            if (laptop.BatteryPercent >= 0)
+            {
+                bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
+                                || laptop.BatteryPercent >= _settings.LaptopHigh;
+                if (laptopAlert) sb.Append("! ");
+            }
             sb.Append("Laptop ")
               .Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
             if (laptop.IsCharging) sb.Append(" (charging)");
+            // #154: show discharge rate and estimated time when available.
+            if (laptop.DischargeRateWatts is not null)
+                sb.Append(" \u00b7 ").Append(BatteryDisplay.FormatPowerRate(laptop.DischargeRateWatts));
+            if (laptop.EstimatedRunTimeMinutes is not null)
+                sb.Append(" \u00b7 ~").Append(BatteryDisplay.FormatDuration(laptop.EstimatedRunTimeMinutes));
         }
 
         if (sb.Length == 0)
@@ -89,7 +98,11 @@ internal sealed class TrayViewModel
             : !info.IsOnAcPower ? " On battery"
             : string.Empty;
 
-        return $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
+        string healthExtra = info.HealthPercent is not null
+            ? $" (health {BatteryDisplay.FormatHealth(info.HealthPercent)})"
+            : string.Empty;
+
+        return $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}{healthExtra}";
     }
 
     private void NotifyIfChanged(bool before)

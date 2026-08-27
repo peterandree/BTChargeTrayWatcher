@@ -24,15 +24,16 @@ internal sealed class BatteryReaderOrchestrator
         ];
 
     private readonly GattConnectionManager _gattManager;
-    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
+    private readonly Func<bool, CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
     private readonly DeviceCapabilityCache _capabilityCache;
     private readonly ThresholdSettings? _settings;
+    private readonly DeviceProfileClassifier _classifier = new();
 
     internal event Action<AliasSuggestion>? AliasSuggested;
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic,
+        Func<bool, CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic,
         DeviceCapabilityCache capabilityCache,
         ThresholdSettings? settings = null)
     {
@@ -42,8 +43,15 @@ internal sealed class BatteryReaderOrchestrator
         _settings       = settings;
     }
 
+    /// <param name="skipConnectionCheck">
+    /// When <c>true</c> (background poll), skips active per-device connection
+    /// checks in the Classic reader to avoid N parallel radio queries every
+    /// poll cycle (ADR-017). When <c>false</c> (manual deep scan), each
+    /// candidate is actively verified (ADR-019).
+    /// </param>
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(
         IReadOnlyList<WatchedDevice> watchedDevices,
+        bool skipConnectionCheck,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -68,7 +76,7 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
-        var classicTask = SafeClassicReadAsync(ct);
+        var classicTask = SafeClassicReadAsync(skipConnectionCheck, ct);
 
         await Task.WhenAll(
             Task.WhenAll(gattTasks),
@@ -89,6 +97,10 @@ internal sealed class BatteryReaderOrchestrator
                 _capabilityCache.RecordFailure(outcome.DeviceId);
             }
         }
+
+        // ADR-016: stamp DeviceCategory from CoD before filtering.
+        StampCategories(gattResults, watchedDevices, isGatt: true);
+        StampCategories(classicTask.Result, watchedDevices, isGatt: false);
 
         return MergeResults(gattResults, classicTask.Result);
     }
@@ -150,6 +162,49 @@ internal sealed class BatteryReaderOrchestrator
         if (_settings.IsCategoryFilterOverridden(device.DeviceId)) return true;
         if (device.Category == DeviceCategory.Unknown) return true;
         return AllowedCategories.Contains(device.Category);
+    }
+
+    /// <summary>
+    /// Classifies each battery result using the watched device's CoD and stamps
+    /// <see cref="DeviceBatteryInfo.Category"/> so that <see cref="IsAllowedByFilter"/>
+    /// can make informed decisions. Devices not found in the watched list keep
+    /// <c>DeviceCategory.Unknown</c> (safe default — always allowed by filter).
+    /// </summary>
+    private void StampCategories(
+        List<DeviceBatteryInfo> results,
+        IReadOnlyList<WatchedDevice> watchedDevices,
+        bool isGatt)
+    {
+        if (results.Count == 0) return;
+
+        // Build lookup: DeviceId → WatchedDevice (primary key)
+        var byId = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in watchedDevices)
+            byId.TryAdd(w.DeviceId, w);
+
+        // Secondary lookup: Name → WatchedDevice (for classic results whose
+        // DeviceId may differ from the watcher's id, e.g. MAC vs SetupAPI path)
+        var byName = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in watchedDevices)
+            byName.TryAdd(w.Name, w);
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            var device = results[i];
+            WatchedDevice? watched = null;
+            if (!byId.TryGetValue(device.DeviceId, out watched))
+                byName.TryGetValue(device.Name, out watched);
+
+            if (watched is null) continue;
+
+            var profile = _classifier.Classify(
+                isBle: isGatt,
+                isClassic: !isGatt,
+                classOfDevice: watched.ClassOfDevice);
+
+            if (profile.Category != DeviceCategory.Unknown)
+                results[i] = device with { Category = profile.Category };
+        }
     }
 
     private List<DeviceBatteryInfo> MergeResults(
@@ -220,12 +275,12 @@ internal sealed class BatteryReaderOrchestrator
         }
     }
 
-    private async Task<List<DeviceBatteryInfo>> SafeClassicReadAsync(CancellationToken ct)
+    private async Task<List<DeviceBatteryInfo>> SafeClassicReadAsync(bool skipConnectionCheck, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await _readClassic(ct).ConfigureAwait(false);
+            return await _readClassic(skipConnectionCheck, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)

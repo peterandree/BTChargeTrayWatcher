@@ -60,11 +60,14 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (infrastructure.AliasSuggestionService is { } svc)
             infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
 
+        // Background poll: skipConnectionCheck=true — DeviceWatcherService provides
+        // passive IsConnected data, so active radio queries are unnecessary (ADR-017).
         Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readGatt = ct =>
         {
             infrastructure.AliasSuggestionService?.BeginCycle();
             return infrastructure.Orchestrator.ReadAllAsync(
-                infrastructure.DeviceWatcher.CurrentDevices, ct);
+                infrastructure.DeviceWatcher.CurrentDevices,
+                true, ct);
         };
 
         // Classic read is already wired into the orchestrator's delegate in Program.cs.

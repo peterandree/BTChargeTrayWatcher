@@ -59,6 +59,49 @@ public sealed class ClassicBatteryReaderTests
         Assert.Equal(50, result[0].Battery);
     }
 
+    [Fact]
+    public async Task SkipConnectionCheck_true_skips_connection_checker()
+    {
+        // #147: when skipConnectionCheck=true (background poll),
+        // the connection checker should NOT be called.
+        var candidates = new List<ClassicBluetoothCandidate>
+        {
+            CreateCandidate("A", "id1", 1UL),
+            CreateCandidate("B", "id2", 2UL)
+        };
+        var connected = new HashSet<string>(); // empty — none would pass active check
+        var batteryMap = new Dictionary<string, (int, bool?)>
+        {
+            ["id1"] = (55, null),
+            ["id2"] = (60, null)
+        };
+        var reader = CreateReader(candidates, connected, batteryMap);
+        var result = await reader.ReadAllAsync(skipConnectionCheck: true, TestContext.Current.CancellationToken);
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public async Task SkipConnectionCheck_false_uses_connection_checker()
+    {
+        // #147: when skipConnectionCheck=false (manual deep scan),
+        // only connected devices should be returned.
+        var candidates = new List<ClassicBluetoothCandidate>
+        {
+            CreateCandidate("A", "id1", 1UL),
+            CreateCandidate("B", "id2", 2UL)
+        };
+        var connected = new HashSet<string> { "1" }; // only device A is connected
+        var batteryMap = new Dictionary<string, (int, bool?)>
+        {
+            ["id1"] = (55, null),
+            ["id2"] = (60, null)
+        };
+        var reader = CreateReader(candidates, connected, batteryMap);
+        var result = await reader.ReadAllAsync(skipConnectionCheck: false, TestContext.Current.CancellationToken);
+        Assert.Single(result);
+        Assert.Equal("A", result[0].Name);
+    }
+
 
 
 

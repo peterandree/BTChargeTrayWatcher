@@ -11,4 +11,15 @@ namespace BTChargeTrayWatcher;
 /// will have <c>false</c>. Classic devices default to <c>true</c> since
 /// the Classic watcher only reports connected/paired devices.
 /// </param>
-internal sealed record WatchedDevice(string DeviceId, string Name, bool IsBle, bool IsConnected = true);
+/// <param name="ClassOfDevice">
+/// Raw Bluetooth Class of Device value extracted from
+/// <c>System.Devices.Aep.Bluetooth.Cod.Major</c>, or <c>null</c> if unavailable.
+/// Used by <see cref="DeviceProfileClassifier"/> to populate
+/// <see cref="DeviceBatteryInfo.Category"/> for ADR-016 filtering.
+/// </param>
+internal sealed record WatchedDevice(
+    string DeviceId,
+    string Name,
+    bool IsBle,
+    bool IsConnected = true,
+    uint? ClassOfDevice = null);

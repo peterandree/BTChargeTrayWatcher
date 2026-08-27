@@ -31,9 +31,20 @@ internal static class BluetoothDeviceExtensions
             ? mac
             : null;
 
-    /// <summary>Extracts the raw Class of Device value, or <c>null</c>.</summary>
-    internal static uint? GetClassOfDevice(this DeviceInformation device) =>
-        device.Properties.TryGetValue(ClassOfDeviceProperty, out var value) && value is uint cod
-            ? cod
-            : null;
+    /// <summary>
+    /// Extracts the raw Class of Device value, or <c>null</c>.
+    /// Handles both <c>uint</c> and <c>ushort</c> boxing (WinRT may return either).
+    /// </summary>
+    internal static uint? GetClassOfDevice(this DeviceInformation device)
+    {
+        if (!device.Properties.TryGetValue(ClassOfDeviceProperty, out var value)) return null;
+        return value switch
+        {
+            uint u   => u,
+            int i    => i >= 0 ? (uint)i : null,
+            ushort us => us,
+            short s  => s >= 0 ? (uint)s : null,
+            _ => null
+        };
+    }
 }

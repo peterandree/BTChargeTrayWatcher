@@ -21,10 +21,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="xunit.v3.mtp-v2" Version="4.0.0-pre.108" />
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <!-- MTP-native code coverage. coverlet.collector/msbuild do not work with the
+         Microsoft Testing Platform runner (per the coverlet repo), which is why the
+         previous coverlet-based CI coverage step always failed. This extension is
+         auto-registered by the xUnit v3 MTP runner; invoke via the coverage flag. -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />
   </ItemGroup>
 
   <ItemGroup>
