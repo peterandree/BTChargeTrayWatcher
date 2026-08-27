@@ -109,5 +109,37 @@ public sealed class GattConnectionManagerTests
         mgr.InvalidateAll(); // must not throw
         Assert.False(mgr.IsKnownGattDevice("dev-1"));
     }
+
+    // ── Charging state propagation (issue #146) ────────────────────────────────────────────
+
+    [Fact]
+    public async Task Charging_state_true_is_propagated_from_read()
+    {
+        var mgr = new GattConnectionManager(
+            (id, name, ct) => Task.FromResult<DeviceBatteryInfo?>(
+                new DeviceBatteryInfo(id, name, 85, IsCharging: true, Source: BatterySource.Gatt)),
+            maxConcurrency: 1);
+
+        var result = await mgr.TryReadBatteryAsync(
+            "dev-1", "Headphones", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.NotNull(result);
+        Assert.True(result!.IsCharging);
+    }
+
+    [Fact]
+    public async Task Charging_state_null_is_propagated_when_not_available()
+    {
+        var mgr = new GattConnectionManager(
+            (id, name, ct) => Task.FromResult<DeviceBatteryInfo?>(
+                new DeviceBatteryInfo(id, name, 50, IsCharging: null, Source: BatterySource.Gatt)),
+            maxConcurrency: 1);
+
+        var result = await mgr.TryReadBatteryAsync(
+            "dev-1", "Mouse", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.NotNull(result);
+        Assert.Null(result!.IsCharging);
+    }
 }
 

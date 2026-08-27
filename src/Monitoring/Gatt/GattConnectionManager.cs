@@ -14,8 +14,10 @@ namespace BTChargeTrayWatcher;
 /// </summary>
 internal sealed class GattConnectionManager : IDisposable
 {
-    private static readonly Guid BatterySvcUuid = new("0000180f-0000-1000-8000-00805f9b34fb");
-    private static readonly Guid BatteryLevelUuid = new("00002a19-0000-1000-8000-00805f9b34fb");
+    private static readonly Guid BatterySvcUuid         = new("0000180f-0000-1000-8000-00805f9b34fb");
+    private static readonly Guid BatteryLevelUuid       = new("00002a19-0000-1000-8000-00805f9b34fb");
+    private static readonly Guid BatteryStatusUuid      = new("00002bea-0000-1000-8000-00805f9b34fb");
+    private static readonly Guid BatteryPowerStateUuid  = new("00002a1b-0000-1000-8000-00805f9b34fb");
     private static readonly TimeSpan WinRtTimeout = TimeSpan.FromSeconds(2);
 
     private readonly HashSet<string> _knownGattDevices = new(StringComparer.OrdinalIgnoreCase);
@@ -120,10 +122,13 @@ internal sealed class GattConnectionManager : IDisposable
             byte value = reader.ReadByte();
             if (value > 100) return null;
 
+            // Best-effort charging state read — failure must never fail the battery read.
+            bool? isCharging = await TryReadChargingStateAsync(bleDevice, ct).ConfigureAwait(false);
+
             // Cache knowledge — this device supports GATT battery.
             lock (_lock) { _knownGattDevices.Add(deviceId); }
 
-            return new DeviceBatteryInfo(deviceId, name, value, IsCharging: null, Source: BatterySource.Gatt);
+            return new DeviceBatteryInfo(deviceId, name, value, isCharging, Source: BatterySource.Gatt);
         }
         catch (OperationCanceledException)
         {
@@ -140,6 +145,143 @@ internal sealed class GattConnectionManager : IDisposable
             Debug.WriteLine($"[GattConnectionManager] Device unavailable '{deviceId}': {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Best-effort read of charging state via BT spec Battery Status (0x2BEA) or
+    /// Battery Power State (0x2A1B). Returns null when neither characteristic is present
+    /// or the read fails — failure must never surface to the caller.
+    /// </summary>
+    private async Task<bool?> TryReadChargingStateAsync(
+        BluetoothLEDevice device, CancellationToken ct)
+    {
+        try
+        {
+            // Try Battery Status 0x2BEA first (BT spec Battery Service 2.0).
+            bool? result = await TryReadBatteryStatusAsync(device, ct).ConfigureAwait(false);
+            if (result is not null)
+                return result;
+
+            // Fall back to Battery Power State 0x2A1B.
+            return await TryReadBatteryPowerStateAsync(device, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GattConnectionManager] TryReadChargingStateAsync fault: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads Battery Status characteristic (0x2BEA) from any service.
+    /// Lower nibble: 0x01 = Charging, 0x02 = Discharging, 0x05 = Not charging, 0x0F = Full.
+    /// </summary>
+    private async Task<bool?> TryReadBatteryStatusAsync(BluetoothLEDevice device, CancellationToken ct)
+    {
+        try
+        {
+            var allServices = await device.GetGattServicesAsync(BluetoothCacheMode.Cached)
+                .AsTask(ct)
+                .WaitAsync(WinRtTimeout, ct)
+                .ConfigureAwait(false);
+
+            if (allServices.Status != GattCommunicationStatus.Success)
+                return null;
+
+            foreach (var svc in allServices.Services)
+            {
+                var chars = await svc.GetCharacteristicsForUuidAsync(BatteryStatusUuid, BluetoothCacheMode.Cached)
+                    .AsTask(ct)
+                    .WaitAsync(WinRtTimeout, ct)
+                    .ConfigureAwait(false);
+
+                if (chars.Status != GattCommunicationStatus.Success || chars.Characteristics.Count == 0)
+                    continue;
+
+                var readResult = await chars.Characteristics[0]
+                    .ReadValueAsync(BluetoothCacheMode.Uncached)
+                    .AsTask(ct)
+                    .WaitAsync(WinRtTimeout, ct)
+                    .ConfigureAwait(false);
+
+                if (readResult.Status != GattCommunicationStatus.Success || readResult.Value.Length == 0)
+                    return null;
+
+                using var reader = DataReader.FromBuffer(readResult.Value);
+                byte b0 = reader.ReadByte();
+
+                return (b0 & 0x0F) == 0x01;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (
+            ex is COMException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+        {
+            Debug.WriteLine($"[GattConnectionManager] BatteryStatus read fault: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads Battery Power State characteristic (0x2A1B) from any service.
+    /// Bits 6-7: 0b11 (0xC0) = Charging, 0b10 (0x80) = Discharging.
+    /// </summary>
+    private async Task<bool?> TryReadBatteryPowerStateAsync(BluetoothLEDevice device, CancellationToken ct)
+    {
+        try
+        {
+            var allServices = await device.GetGattServicesAsync(BluetoothCacheMode.Cached)
+                .AsTask(ct)
+                .WaitAsync(WinRtTimeout, ct)
+                .ConfigureAwait(false);
+
+            if (allServices.Status != GattCommunicationStatus.Success)
+                return null;
+
+            foreach (var svc in allServices.Services)
+            {
+                var chars = await svc.GetCharacteristicsForUuidAsync(BatteryPowerStateUuid, BluetoothCacheMode.Cached)
+                    .AsTask(ct)
+                    .WaitAsync(WinRtTimeout, ct)
+                    .ConfigureAwait(false);
+
+                if (chars.Status != GattCommunicationStatus.Success || chars.Characteristics.Count == 0)
+                    continue;
+
+                var readResult = await chars.Characteristics[0]
+                    .ReadValueAsync(BluetoothCacheMode.Uncached)
+                    .AsTask(ct)
+                    .WaitAsync(WinRtTimeout, ct)
+                    .ConfigureAwait(false);
+
+                if (readResult.Status != GattCommunicationStatus.Success || readResult.Value.Length == 0)
+                    return null;
+
+                using var reader = DataReader.FromBuffer(readResult.Value);
+                byte b0 = reader.ReadByte();
+
+                return (b0 & 0xC0) == 0xC0;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (
+            ex is COMException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+        {
+            Debug.WriteLine($"[GattConnectionManager] BatteryPowerState read fault: {ex.Message}");
+        }
+
+        return null;
     }
 
     /// <summary>Returns <c>true</c> if <paramref name="deviceId"/> was previously read successfully.</summary>
