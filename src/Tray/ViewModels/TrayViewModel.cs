@@ -73,6 +73,11 @@ internal sealed class TrayViewModel
             sb.Append("Laptop ")
               .Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
             if (laptop.IsCharging) sb.Append(" (charging)");
+            // #154: show discharge rate and estimated time when available.
+            if (laptop.DischargeRateWatts is not null)
+                sb.Append(" \u00b7 ").Append(BatteryDisplay.FormatPowerRate(laptop.DischargeRateWatts));
+            if (laptop.EstimatedRunTimeMinutes is not null)
+                sb.Append(" \u00b7 ~").Append(BatteryDisplay.FormatDuration(laptop.EstimatedRunTimeMinutes));
         }
 
         if (sb.Length == 0)
@@ -93,7 +98,11 @@ internal sealed class TrayViewModel
             : !info.IsOnAcPower ? " On battery"
             : string.Empty;
 
-        return $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}";
+        string healthExtra = info.HealthPercent is not null
+            ? $" (health {BatteryDisplay.FormatHealth(info.HealthPercent)})"
+            : string.Empty;
+
+        return $"\U0001f4bb Laptop: {BatteryDisplay.FormatBattery(info.BatteryPercent, info.IsCharging)}{chargeExtra}{healthExtra}";
     }
 
     private void NotifyIfChanged(bool before)

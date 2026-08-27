@@ -1,4 +1,7 @@
-﻿namespace BTChargeTrayWatcher;
+﻿using System.Diagnostics;
+using System.Management;
+
+namespace BTChargeTrayWatcher;
 
 public sealed class WindowsLaptopBatteryReader : ILaptopBatteryReader
 {
@@ -20,11 +23,56 @@ public sealed class WindowsLaptopBatteryReader : ILaptopBatteryReader
         bool isCharging = hasBattery && chargeStatus.HasFlag(BatteryChargeStatus.Charging);
         bool isOnAcPower = status.PowerLineStatus == PowerLineStatus.Online;
 
+        // Best-effort WMI enrichment for discharge rate, time remaining, and wear.
+        // Fails silently on VMs, desktops, or when WMI is unavailable (#154).
+        float? dischargeRate = null;
+        float? runTimeMinutes = null;
+        int? designCapacity = null;
+        int? fullChargeCapacity = null;
+
+        if (hasBattery)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    "root\\CIMV2",
+                    "SELECT DischargeRate, EstimatedRunTime, DesignCapacity, FullChargeCapacity FROM Win32_Battery");
+
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    // DischargeRate: milliwatts (signed; negative = discharging on some OEMs)
+                    if (obj["DischargeRate"] is uint dr && dr != 0xFFFFFFFF)
+                        dischargeRate = dr / 1000f; // mW → W
+
+                    // EstimatedRunTime: minutes (0xFFFFFFFF = unknown)
+                    if (obj["EstimatedRunTime"] is uint rt && rt != 0xFFFFFFFF && rt > 0)
+                        runTimeMinutes = rt;
+
+                    // DesignCapacity / FullChargeCapacity: milliwatt-hours
+                    if (obj["DesignCapacity"] is uint dc && dc > 0)
+                        designCapacity = (int)dc;
+
+                    if (obj["FullChargeCapacity"] is uint fc && fc > 0)
+                        fullChargeCapacity = (int)fc;
+
+                    break; // only first battery
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[WindowsLaptopBatteryReader] WMI query failed: {ex.Message}");
+            }
+        }
+
         var info = new LaptopBatteryInfo(
             HasBattery: hasBattery,
             BatteryPercent: batteryPercent,
             IsCharging: isCharging,
-            IsOnAcPower: isOnAcPower);
+            IsOnAcPower: isOnAcPower,
+            DischargeRateWatts: dischargeRate,
+            EstimatedRunTimeMinutes: runTimeMinutes,
+            DesignCapacityMWh: designCapacity,
+            FullChargeCapacityMWh: fullChargeCapacity);
 
         return Task.FromResult(info);
     }

@@ -96,6 +96,11 @@ public sealed class NtfyNotificationChannel : INotificationChannel
                 sb.Append("Laptop battery level unknown");
             if (laptop.IsCharging)        sb.Append(" (charging)");
             else if (laptop.IsOnAcPower)  sb.Append(" (plugged in)");
+            // #154: append discharge rate and estimated time when available.
+            if (laptop.DischargeRateWatts is not null)
+                sb.Append(' ').Append(BatteryDisplay.FormatPowerRate(laptop.DischargeRateWatts));
+            if (laptop.EstimatedRunTimeMinutes is not null)
+                sb.Append(" ~").Append(BatteryDisplay.FormatDuration(laptop.EstimatedRunTimeMinutes));
         }
 
         if (sb.Length == 0)

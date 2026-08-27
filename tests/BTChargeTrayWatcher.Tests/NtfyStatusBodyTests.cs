@@ -109,6 +109,37 @@ public sealed class NtfyStatusBodyTests
         Assert.Equal("No devices currently known.", body);
     }
 
+    // ── #154: WMI-enriched laptop fields ──────────────────────────────────────────────────
+
+    [Fact]
+    public void Laptop_with_discharge_rate_appends_power_and_time()
+    {
+        var laptop = new LaptopBatteryInfo(HasBattery: true, BatteryPercent: 55,
+            IsCharging: false, IsOnAcPower: false,
+            DischargeRateWatts: 8.4f, EstimatedRunTimeMinutes: 130f);
+        var body = NtfyNotificationChannel.BuildStatusBody([], laptop);
+        Assert.Equal("Laptop 55% 8.4 W ~2 h 10 m", body);
+    }
+
+    [Fact]
+    public void Laptop_with_only_discharge_rate_appends_power_only()
+    {
+        var laptop = new LaptopBatteryInfo(HasBattery: true, BatteryPercent: 55,
+            IsCharging: false, IsOnAcPower: false,
+            DischargeRateWatts: 12.0f, EstimatedRunTimeMinutes: null);
+        var body = NtfyNotificationChannel.BuildStatusBody([], laptop);
+        Assert.Equal("Laptop 55% 12.0 W", body);
+    }
+
+    [Fact]
+    public void Laptop_without_wmi_fields_has_no_power_suffix()
+    {
+        var laptop = new LaptopBatteryInfo(HasBattery: true, BatteryPercent: 55,
+            IsCharging: false, IsOnAcPower: false);
+        var body = NtfyNotificationChannel.BuildStatusBody([], laptop);
+        Assert.Equal("Laptop 55%", body);
+    }
+
     // ── Mixed ────────────────────────────────────────────────────────────────────────────
 
     [Fact]

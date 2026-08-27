@@ -15,4 +15,34 @@ public sealed class BatteryDisplayTests
     {
         Assert.Equal(expected, BatteryDisplay.FormatBattery(pct, charging));
     }
+
+    [Theory]
+    [InlineData(null,       "unknown")]
+    [InlineData(0f,         "unknown")]
+    [InlineData(45f,        "45 m")]
+    [InlineData(130f,       "2 h 10 m")]
+    [InlineData(59.5f,      "60 m")]
+    [InlineData(1f,         "1 m")]
+    public void FormatDuration_formats_correctly(float? minutes, string expected)
+    {
+        Assert.Equal(expected, BatteryDisplay.FormatDuration(minutes));
+    }
+
+    [Theory]
+    [InlineData(null,   "unknown")]
+    [InlineData(8.4f,   "8.4 W")]
+    [InlineData(0f,     "0.0 W")]
+    public void FormatPowerRate_formats_correctly(float? watts, string expected)
+    {
+        Assert.Equal(expected, BatteryDisplay.FormatPowerRate(watts));
+    }
+
+    [Theory]
+    [InlineData(null,   "unknown")]
+    [InlineData(90.5f,  "91%")]
+    [InlineData(100f,   "100%")]
+    public void FormatHealth_formats_correctly(float? health, string expected)
+    {
+        Assert.Equal(expected, BatteryDisplay.FormatHealth(health));
+    }
 }
