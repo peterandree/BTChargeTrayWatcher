@@ -53,7 +53,7 @@ internal static class Program
 
             var orchestrator = new BatteryReaderOrchestrator(
                 gattConnectionManager,
-                ct => classicReader.ReadAllAsync(ct),
+                (skip, ct) => classicReader.ReadAllAsync(skipConnectionCheck: skip, ct),
                 capabilityCache,
                 settings);
 

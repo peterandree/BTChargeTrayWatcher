@@ -24,7 +24,7 @@ internal sealed class BatteryReaderOrchestrator
         ];
 
     private readonly GattConnectionManager _gattManager;
-    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
+    private readonly Func<bool, CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
     private readonly DeviceCapabilityCache _capabilityCache;
     private readonly ThresholdSettings? _settings;
     private readonly DeviceProfileClassifier _classifier = new();
@@ -33,7 +33,7 @@ internal sealed class BatteryReaderOrchestrator
 
     internal BatteryReaderOrchestrator(
         GattConnectionManager gattManager,
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic,
+        Func<bool, CancellationToken, Task<List<DeviceBatteryInfo>>> readClassic,
         DeviceCapabilityCache capabilityCache,
         ThresholdSettings? settings = null)
     {
@@ -43,8 +43,15 @@ internal sealed class BatteryReaderOrchestrator
         _settings       = settings;
     }
 
+    /// <param name="skipConnectionCheck">
+    /// When <c>true</c> (background poll), skips active per-device connection
+    /// checks in the Classic reader to avoid N parallel radio queries every
+    /// poll cycle (ADR-017). When <c>false</c> (manual deep scan), each
+    /// candidate is actively verified (ADR-019).
+    /// </param>
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(
         IReadOnlyList<WatchedDevice> watchedDevices,
+        bool skipConnectionCheck,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -69,7 +76,7 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
-        var classicTask = SafeClassicReadAsync(ct);
+        var classicTask = SafeClassicReadAsync(skipConnectionCheck, ct);
 
         await Task.WhenAll(
             Task.WhenAll(gattTasks),
@@ -268,12 +275,12 @@ internal sealed class BatteryReaderOrchestrator
         }
     }
 
-    private async Task<List<DeviceBatteryInfo>> SafeClassicReadAsync(CancellationToken ct)
+    private async Task<List<DeviceBatteryInfo>> SafeClassicReadAsync(bool skipConnectionCheck, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            return await _readClassic(ct).ConfigureAwait(false);
+            return await _readClassic(skipConnectionCheck, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)

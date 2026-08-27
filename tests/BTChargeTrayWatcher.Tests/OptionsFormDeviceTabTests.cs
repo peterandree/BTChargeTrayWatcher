@@ -19,7 +19,7 @@ namespace BTChargeTrayWatcher.Tests
                 DeviceWatcher:          new DeviceWatcherService(),
                 Orchestrator:           new BatteryReaderOrchestrator(
                                             new GattConnectionManager(),
-                                            _ => Task.FromResult(new List<DeviceBatteryInfo>()),
+                                            (_, _) => Task.FromResult(new List<DeviceBatteryInfo>()),
                                             new DeviceCapabilityCache()),
                 GattConnectionManager:  new GattConnectionManager(),
                 CapabilityCache:        new DeviceCapabilityCache(),

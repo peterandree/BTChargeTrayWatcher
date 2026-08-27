@@ -28,9 +28,24 @@ public sealed class ClassicBatteryReader
     }
 
     public Task<List<DeviceBatteryInfo>> ReadAllAsync() =>
-        ReadAllAsync(CancellationToken.None);
+        ReadAllAsync(skipConnectionCheck: false, CancellationToken.None);
 
-    public async Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads battery levels from all paired Classic Bluetooth devices.
+    /// </summary>
+    /// <param name="skipConnectionCheck">
+    /// When <c>true</c> (background poll), skips the per-device
+    /// <c>BluetoothDevice.FromBluetoothAddressAsync</c> active connection check and
+    /// accepts all enumerated candidates as connected. This avoids N parallel radio
+    /// queries every 60 s — the passive <c>System.Devices.Aep.IsConnected</c> property
+    /// from <see cref="DeviceWatcherService"/> provides the same information without
+    /// waking peripherals. When <c>false</c> (manual deep scan), each candidate is
+    /// actively checked via the WinRT connection API (ADR-019).
+    /// </param>
+    public Task<List<DeviceBatteryInfo>> ReadAllAsync(CancellationToken cancellationToken) =>
+        ReadAllAsync(skipConnectionCheck: false, cancellationToken);
+
+    public async Task<List<DeviceBatteryInfo>> ReadAllAsync(bool skipConnectionCheck, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -50,14 +65,27 @@ public sealed class ClassicBatteryReader
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        Task<ConnectionCheckResult>[] connectionTasks = [.. candidates.Select(candidate => CheckConnectedAsync(candidate, cancellationToken))];
+        List<ClassicBluetoothCandidate> connected;
 
-        ConnectionCheckResult[] connectionResults =
-            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+        if (skipConnectionCheck)
+        {
+            // ADR-017: background polls use passive enumeration data only.
+            // Accept all enumerated candidates — DeviceWatcherService already
+            // tracks IsConnected via System.Devices.Aep for the same devices.
+            connected = candidates;
+        }
+        else
+        {
+            // Manual deep scan: actively verify each candidate (ADR-019).
+            Task<ConnectionCheckResult>[] connectionTasks = [.. candidates.Select(candidate => CheckConnectedAsync(candidate, cancellationToken))];
 
-        List<ClassicBluetoothCandidate> connected = [.. connectionResults
-            .Where(r => r.Connected)
-            .Select(r => r.Candidate)];
+            ConnectionCheckResult[] connectionResults =
+                await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+
+            connected = [.. connectionResults
+                .Where(r => r.Connected)
+                .Select(r => r.Candidate)];
+        }
 
         if (connected.Count == 0)
             return [];
@@ -70,6 +98,9 @@ public sealed class ClassicBatteryReader
             return _batteryPropertyReader.ReadBatteryProperties(instanceIds);
         }, cancellationToken).ConfigureAwait(false);
 
+        // Keep null-battery devices in results (same contract as the GATT path)
+        // so the scan dialog and _lastKnown can display them.
+        // Only drop out-of-range values (< 0 or > 100).
         return [.. connected
             .Select(c =>
             {
@@ -81,7 +112,7 @@ public sealed class ClassicBatteryReader
                     props.IsCharging,
                     BatterySource.Classic);
             })
-            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && d.Battery is >= 0 and <= 100)];
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && (d.Battery is null or >= 0 and <= 100))];
     }
 
     private async Task<ConnectionCheckResult> CheckConnectedAsync(
