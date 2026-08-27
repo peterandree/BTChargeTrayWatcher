@@ -8,13 +8,16 @@ namespace BTChargeTrayWatcher;
 
 /// <summary>
 /// Long-lived service that reads GATT Battery Level (0x2A19) from BLE devices.
-/// Caches <em>knowledge</em> (which device IDs support the battery service), not
-/// WinRT objects. All WinRT references are dropped immediately after each read
-/// so peripherals can enter low-power sleep states.
+/// Tries the classic Battery Service (0x180F) first, then the Common Battery
+/// Service (0x182B) used by newer devices. Caches <em>knowledge</em> (which
+/// device IDs support the battery service), not WinRT objects. All WinRT
+/// references are dropped immediately after each read so peripherals can enter
+/// low-power sleep states.
 /// </summary>
 internal sealed class GattConnectionManager : IDisposable
 {
     private static readonly Guid BatterySvcUuid         = new("0000180f-0000-1000-8000-00805f9b34fb");
+    private static readonly Guid CommonBatterySvcUuid   = new("0000182b-0000-1000-8000-00805f9b34fb");
     private static readonly Guid BatteryLevelUuid       = new("00002a19-0000-1000-8000-00805f9b34fb");
     private static readonly Guid BatteryStatusUuid      = new("00002bea-0000-1000-8000-00805f9b34fb");
     private static readonly Guid BatteryPowerStateUuid  = new("00002a1b-0000-1000-8000-00805f9b34fb");
@@ -87,28 +90,13 @@ internal sealed class GattConnectionManager : IDisposable
             if (bleDevice.ConnectionStatus != BluetoothConnectionStatus.Connected)
                 return null;
 
-            var servicesResult = await bleDevice
-                .GetGattServicesForUuidAsync(BatterySvcUuid, BluetoothCacheMode.Cached)
-                .AsTask(ct)
-                .WaitAsync(WinRtTimeout, ct)
-                .ConfigureAwait(false);
-
-            if (servicesResult.Status != GattCommunicationStatus.Success ||
-                servicesResult.Services.Count == 0)
+            // Try classic Battery Service (0x180F) first, then Common Battery Service (0x182B).
+            // Both expose Battery Level 0x2A19; 0x182B is used by many newer Windows 11-era devices.
+            var characteristic = await FindBatteryLevelCharacteristicAsync(bleDevice, ct).ConfigureAwait(false);
+            if (characteristic is null)
                 return null;
 
-            var service = servicesResult.Services[0];
-            var charsResult = await service
-                .GetCharacteristicsForUuidAsync(BatteryLevelUuid, BluetoothCacheMode.Cached)
-                .AsTask(ct)
-                .WaitAsync(WinRtTimeout, ct)
-                .ConfigureAwait(false);
-
-            if (charsResult.Status != GattCommunicationStatus.Success ||
-                charsResult.Characteristics.Count == 0)
-                return null;
-
-            var readResult = await charsResult.Characteristics[0]
+            var readResult = await characteristic
                 .ReadValueAsync(BluetoothCacheMode.Uncached)
                 .AsTask(ct)
                 .WaitAsync(WinRtTimeout, ct)
@@ -145,6 +133,42 @@ internal sealed class GattConnectionManager : IDisposable
             Debug.WriteLine($"[GattConnectionManager] Device unavailable '{deviceId}': {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Looks up the Battery Level characteristic (0x2A19) by trying the classic
+    /// Battery Service (0x180F) first, then the Common Battery Service (0x182B).
+    /// Returns the characteristic on success, or null if neither service is present.
+    /// </summary>
+    private async Task<GattCharacteristic?> FindBatteryLevelCharacteristicAsync(
+        BluetoothLEDevice device, CancellationToken ct)
+    {
+        Guid[] serviceUuids = [BatterySvcUuid, CommonBatterySvcUuid];
+
+        foreach (var svcUuid in serviceUuids)
+        {
+            var servicesResult = await device
+                .GetGattServicesForUuidAsync(svcUuid, BluetoothCacheMode.Cached)
+                .AsTask(ct)
+                .WaitAsync(WinRtTimeout, ct)
+                .ConfigureAwait(false);
+
+            if (servicesResult.Status != GattCommunicationStatus.Success ||
+                servicesResult.Services.Count == 0)
+                continue;
+
+            var charsResult = await servicesResult.Services[0]
+                .GetCharacteristicsForUuidAsync(BatteryLevelUuid, BluetoothCacheMode.Cached)
+                .AsTask(ct)
+                .WaitAsync(WinRtTimeout, ct)
+                .ConfigureAwait(false);
+
+            if (charsResult.Status == GattCommunicationStatus.Success &&
+                charsResult.Characteristics.Count > 0)
+                return charsResult.Characteristics[0];
+        }
+
+        return null;
     }
 
     /// <summary>
