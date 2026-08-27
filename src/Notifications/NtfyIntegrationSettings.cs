@@ -7,13 +7,14 @@ namespace BTChargeTrayWatcher;
 /// </summary>
 public sealed class NtfyIntegrationSettings
 {
-    public bool   IsEnabled { get; set; }
-    public string? Topic    { get; set; }
+    public bool    IsEnabled   { get; set; }
+    public string? Topic       { get; set; }
+    public string? AccessToken { get; set; }
 
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(Topic);
 
     /// <summary>Returns a copy so the original is not mutated by callers.</summary>
     public NtfyIntegrationSettings Clone() =>
-        new() { IsEnabled = IsEnabled, Topic = Topic };
+        new() { IsEnabled = IsEnabled, Topic = Topic, AccessToken = AccessToken };
 }

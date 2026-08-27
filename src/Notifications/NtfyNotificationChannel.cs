@@ -149,6 +149,11 @@ public sealed class NtfyNotificationChannel : INotificationChannel
             request.Headers.TryAddWithoutValidation("Title",    AppTitle);
             request.Headers.TryAddWithoutValidation("Priority", priority);
 
+            // ntfy access token: when set, authenticate with Bearer token.
+            // This enables private topics ($-prefixed) and ACL-protected access (#152).
+            if (!string.IsNullOrWhiteSpace(_ntfySettings.AccessToken))
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_ntfySettings.AccessToken}");
+
             using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 Debug.WriteLine($"[NtfyNotificationChannel] Publish failed: HTTP {(int)response.StatusCode}");

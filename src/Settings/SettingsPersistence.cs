@@ -111,8 +111,9 @@ internal sealed class SettingsPersistence : IDisposable
 
             var ntfy = new NtfyIntegrationSettings
             {
-                IsEnabled = dto.NtfyEnabled,
-                Topic     = dto.NtfyTopic
+                IsEnabled   = dto.NtfyEnabled,
+                Topic       = dto.NtfyTopic,
+                AccessToken = dto.NtfyAccessToken
             };
 
             var categoryFilterOverrides = dto.CategoryFilterOverrides != null
@@ -190,8 +191,9 @@ internal sealed class SettingsPersistence : IDisposable
             DeviceOverrides = new Dictionary<string, DeviceThresholds>(s.DeviceOverrides, StringComparer.OrdinalIgnoreCase),
             DevicePollIntervals = new Dictionary<string, int>(s.DevicePollIntervals, StringComparer.OrdinalIgnoreCase),
             DeviceDisplayNameAliases = new Dictionary<string, string>(s.DeviceDisplayNameAliases, StringComparer.OrdinalIgnoreCase),
-            NtfyEnabled = s.Ntfy.IsEnabled,
-            NtfyTopic   = s.Ntfy.Topic,
+            NtfyEnabled     = s.Ntfy.IsEnabled,
+            NtfyTopic       = s.Ntfy.Topic,
+            NtfyAccessToken = s.Ntfy.AccessToken,
             CategoryFilterEnabled = s.CategoryFilterEnabled,
             CategoryFilterOverrides = [.. s.CategoryFilterOverrides],
             AliasMap = new Dictionary<string, string>(s.AliasMap, StringComparer.OrdinalIgnoreCase),
@@ -228,8 +230,9 @@ internal sealed class SettingsPersistence : IDisposable
         public Dictionary<string, DeviceThresholds>? DeviceOverrides { get; set; }
         public Dictionary<string, int>? DevicePollIntervals { get; set; }
         public Dictionary<string, string>? DeviceDisplayNameAliases { get; set; }
-        public bool    NtfyEnabled { get; set; }
-        public string? NtfyTopic   { get; set; }
+        public bool    NtfyEnabled     { get; set; }
+        public string? NtfyTopic       { get; set; }
+        public string? NtfyAccessToken { get; set; }
         // ADR-016
         public bool CategoryFilterEnabled { get; set; } = true;
         public List<string>? CategoryFilterOverrides { get; set; }
