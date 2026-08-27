@@ -41,6 +41,10 @@ internal static class Program
                 ntfyChannel
             ]);
 
+            // Bridge toast click activation: when the user clicks a Windows toast,
+            // forward it to the dispatcher so subscribers (TrayApp) can react (#145).
+            toastService.OnNotificationClicked += dispatcher.RaiseNotificationClicked;
+
             // Cooperation stack: device watcher + GATT connection manager + capability cache.
             var capabilityCache        = new DeviceCapabilityCache();
             var gattConnectionManager  = new GattConnectionManager();
