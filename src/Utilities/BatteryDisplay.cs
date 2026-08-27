@@ -35,13 +35,14 @@ public static class BatteryDisplay
     public static string FormatPowerRate(float? watts)
     {
         if (watts is null) return "unknown";
-        return $"{watts.Value:F1} W";
+        return $"{watts.Value.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} W";
     }
 
     /// <summary>Formats battery health percentage (#154).</summary>
     public static string FormatHealth(float? healthPercent)
     {
         if (healthPercent is null) return "unknown";
-        return $"{healthPercent.Value:F0}%";
+        int rounded = (int)Math.Round(healthPercent.Value, 0, MidpointRounding.AwayFromZero);
+        return $"{rounded}%";
     }
 }

@@ -21,7 +21,7 @@ public sealed class BatteryDisplayTests
     [InlineData(0f,         "unknown")]
     [InlineData(45f,        "45 m")]
     [InlineData(130f,       "2 h 10 m")]
-    [InlineData(59.5f,      "60 m")]
+    [InlineData(59.5f,      "1 h 0 m")]
     [InlineData(1f,         "1 m")]
     public void FormatDuration_formats_correctly(float? minutes, string expected)
     {

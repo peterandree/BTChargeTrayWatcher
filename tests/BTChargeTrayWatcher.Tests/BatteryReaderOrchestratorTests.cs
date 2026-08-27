@@ -390,9 +390,11 @@ public sealed class BatteryReaderOrchestratorTests
     }
 
     [Fact]
-    public async Task GATT_result_with_non_allowed_CoD_is_filtered_out()
+    public async Task GATT_result_with_unmapped_CoD_passes_filter_as_Unknown()
     {
-        // Computer major class (0x01) is NOT in AllowedCategories
+        // Computer major class (0x01) is not mapped by DeviceProfileClassifier,
+        // so it stays DeviceCategory.Unknown, which always passes the filter.
+        // This is by design: unknown devices are never silently dropped.
         const uint computerCod = 0x0100;
 
         var gattOverride = new GattConnectionManager(
@@ -410,6 +412,7 @@ public sealed class BatteryReaderOrchestratorTests
             [BleDevice("ble-1", "Laptop BT", computerCod)],
             TestContext.Current.CancellationToken);
 
-        Assert.Empty(results);
+        Assert.Single(results);
+        Assert.Equal(DeviceCategory.Unknown, results[0].Category);
     }
 }
