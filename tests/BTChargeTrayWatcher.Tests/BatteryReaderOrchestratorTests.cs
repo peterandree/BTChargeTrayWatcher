@@ -25,11 +25,11 @@ public sealed class BatteryReaderOrchestratorTests
         ClassicThrows() =>
             _ => throw new InvalidOperationException("Classic fault");
 
-    private static WatchedDevice BleDevice(string id, string name) =>
-        new(id, name, IsBle: true);
+    private static WatchedDevice BleDevice(string id, string name, uint? cod = null) =>
+        new(id, name, IsBle: true, ClassOfDevice: cod);
 
-    private static WatchedDevice ClassicDevice(string id, string name) =>
-        new(id, name, IsBle: false);
+    private static WatchedDevice ClassicDevice(string id, string name, uint? cod = null) =>
+        new(id, name, IsBle: false, ClassOfDevice: cod);
 
     private static DeviceBatteryInfo Device(
         string id,
@@ -313,5 +313,103 @@ public sealed class BatteryReaderOrchestratorTests
             [], TestContext.Current.CancellationToken);
 
         Assert.Equal(2, results.Count);
+    }
+
+    // ── ADR-016: CoD-based classification on GATT results ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GATT_result_gets_category_from_watched_device_CoD()
+    {
+        // Audio major class: 0x04 in bits 12-8 → CoD 0x0400
+        const uint audioCod = 0x0400;
+
+        // GATT override that returns result without Category set
+        var gattOverride = new GattConnectionManager(
+            (id, name, ct) => Task.FromResult<DeviceBatteryInfo?>(
+                new DeviceBatteryInfo(id, name, 75)),
+            maxConcurrency: 1);
+
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattOverride,
+            ClassicStub([]),
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync(
+            [BleDevice("ble-1", "Headphones", audioCod)],
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(results);
+        Assert.Equal(DeviceCategory.Audio, results[0].Category);
+        Assert.Equal("Headphones", results[0].Name);
+    }
+
+    [Fact]
+    public async Task GATT_result_with_unknown_CoD_stays_Unknown_category()
+    {
+        // No CoD → category stays Unknown → filter allows it through
+        var gattOverride = new GattConnectionManager(
+            (id, name, ct) => Task.FromResult<DeviceBatteryInfo?>(
+                new DeviceBatteryInfo(id, name, 40)),
+            maxConcurrency: 1);
+
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattOverride,
+            ClassicStub([]),
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync(
+            [BleDevice("ble-1", "Mystery Device")],
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(results);
+        Assert.Equal(DeviceCategory.Unknown, results[0].Category);
+    }
+
+    [Fact]
+    public async Task Classic_result_gets_category_from_watched_device_CoD()
+    {
+        // HID major class: 0x05 in bits 12-8 → CoD 0x0500
+        const uint hidCod = 0x0500;
+
+        var readClassic = ClassicStub([
+            new DeviceBatteryInfo("classic-1", "Keyboard", 80)
+        ]);
+
+        using var gattManager = new GattConnectionManager(1);
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattManager, readClassic, new DeviceCapabilityCache(), FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync(
+            [ClassicDevice("classic-1", "Keyboard", hidCod)],
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(results);
+        Assert.Equal(DeviceCategory.Hid, results[0].Category);
+    }
+
+    [Fact]
+    public async Task GATT_result_with_non_allowed_CoD_is_filtered_out()
+    {
+        // Computer major class (0x01) is NOT in AllowedCategories
+        const uint computerCod = 0x0100;
+
+        var gattOverride = new GattConnectionManager(
+            (id, name, ct) => Task.FromResult<DeviceBatteryInfo?>(
+                new DeviceBatteryInfo(id, name, 60)),
+            maxConcurrency: 1);
+
+        var orchestrator = new BatteryReaderOrchestrator(
+            gattOverride,
+            ClassicStub([]),
+            new DeviceCapabilityCache(),
+            FilterEnabled());
+
+        var results = await orchestrator.ReadAllAsync(
+            [BleDevice("ble-1", "Laptop BT", computerCod)],
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(results);
     }
 }

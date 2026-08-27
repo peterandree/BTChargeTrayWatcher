@@ -2,104 +2,87 @@ using Xunit;
 
 namespace BTChargeTrayWatcher.Tests;
 
+/// <summary>
+/// Tests for DeviceProfileClassifier.Classify.
+/// Uses documented Bluetooth major class codes from Assigned Numbers §2.8.2.
+/// </summary>
 public sealed class DeviceProfileClassifierTests
 {
     private readonly DeviceProfileClassifier _classifier = new();
 
-    // ── Transport classification ────────────────────────────────────────────────
+    // ── Transport classification ──────────────────────────────────────────────────────
 
     [Fact]
-    public void BLE_only_returns_Ble_transport()
+    public void Ble_only_classifies_as_Ble_transport()
     {
-        var (transport, _) = _classifier.Classify(isBle: true, isClassic: false, classOfDevice: null);
-        Assert.Equal(DeviceTransport.Ble, transport);
+        var profile = _classifier.Classify(isBle: true, isClassic: false, classOfDevice: null);
+        Assert.Equal(DeviceTransport.Ble, profile.Transport);
     }
 
     [Fact]
-    public void Classic_only_returns_Classic_transport()
+    public void Classic_only_classifies_as_Classic_transport()
     {
-        var (transport, _) = _classifier.Classify(isBle: false, isClassic: true, classOfDevice: null);
-        Assert.Equal(DeviceTransport.Classic, transport);
+        var profile = _classifier.Classify(isBle: false, isClassic: true, classOfDevice: null);
+        Assert.Equal(DeviceTransport.Classic, profile.Transport);
     }
 
     [Fact]
-    public void Both_BLE_and_Classic_returns_DualMode_transport()
+    public void Both_ble_and_classic_classifies_as_DualMode()
     {
-        var (transport, _) = _classifier.Classify(isBle: true, isClassic: true, classOfDevice: null);
-        Assert.Equal(DeviceTransport.DualMode, transport);
+        var profile = _classifier.Classify(isBle: true, isClassic: true, classOfDevice: null);
+        Assert.Equal(DeviceTransport.DualMode, profile.Transport);
     }
 
     [Fact]
-    public void Neither_BLE_nor_Classic_returns_Unknown_transport()
+    public void Neither_ble_nor_classic_classifies_as_Unknown_transport()
     {
-        var (transport, _) = _classifier.Classify(isBle: false, isClassic: false, classOfDevice: null);
-        Assert.Equal(DeviceTransport.Unknown, transport);
+        var profile = _classifier.Classify(isBle: false, isClassic: false, classOfDevice: null);
+        Assert.Equal(DeviceTransport.Unknown, profile.Transport);
     }
 
-    // ── Category classification from Class of Device ────────────────────────────
+    // ── Category classification from CoD major class ──────────────────────────────────
 
     [Fact]
-    public void Null_classOfDevice_returns_Unknown_category()
+    public void Major_class_0x04_classifies_as_Audio()
     {
-        var (_, category) = _classifier.Classify(isBle: true, isClassic: false, classOfDevice: null);
-        Assert.Equal(DeviceCategory.Unknown, category);
-    }
-
-    [Fact]
-    public void Major_class_0x04_returns_Audio_category()
-    {
-        // Audio/Video: Major Device Class = 0x04, bits 12-8 = 0b00100
-        // CoD with major class 4: 0x04 << 8 = 0x0400
-        uint cod = 0x04 << 8;
-        var (_, category) = _classifier.Classify(isBle: false, isClassic: true, classOfDevice: cod);
-        Assert.Equal(DeviceCategory.Audio, category);
+        // CoD: bits 12-8 = 0x04 (Audio/Video), rest can be anything
+        uint cod = 0x0400 | 0x0020; // major=0x04, minor=0x10 (headphones)
+        var profile = _classifier.Classify(isBle: true, isClassic: false, cod);
+        Assert.Equal(DeviceCategory.Audio, profile.Category);
     }
 
     [Fact]
-    public void Major_class_0x05_returns_Hid_category()
+    public void Major_class_0x05_classifies_as_Hid()
     {
-        // Peripheral: Major Device Class = 0x05
-        uint cod = 0x05 << 8;
-        var (_, category) = _classifier.Classify(isBle: true, isClassic: false, classOfDevice: cod);
-        Assert.Equal(DeviceCategory.Hid, category);
+        // CoD: bits 12-8 = 0x05 (Peripheral), minor=0x04 (keyboard)
+        uint cod = 0x0500 | 0x0040;
+        var profile = _classifier.Classify(isBle: true, isClassic: false, cod);
+        Assert.Equal(DeviceCategory.Hid, profile.Category);
     }
 
     [Fact]
-    public void Major_class_0x01_returns_Unknown_category()
+    public void Major_class_0x01_classifies_as_Unknown_category()
     {
-        // Computer: Major Device Class = 0x01 — not a category we track
-        uint cod = 0x01 << 8;
-        var (_, category) = _classifier.Classify(isBle: false, isClassic: true, classOfDevice: cod);
-        Assert.Equal(DeviceCategory.Unknown, category);
+        // CoD: bits 12-8 = 0x01 (Computer) — not in AllowedCategories
+        uint cod = 0x0100;
+        var profile = _classifier.Classify(isBle: false, isClassic: true, cod);
+        Assert.Equal(DeviceCategory.Unknown, profile.Category);
     }
 
     [Fact]
-    public void CoD_with_minor_and_service_class_bits_still_extracts_major_correctly()
+    public void Null_CoD_classifies_as_Unknown_category()
     {
-        // Full CoD: service class (bits 23-13) + major 0x04 (bits 12-8) + minor (bits 7-2)
-        // 0x200408 = service bits set | major 0x04 | minor bits
-        uint cod = 0x200408;
-        var (_, category) = _classifier.Classify(isBle: false, isClassic: true, classOfDevice: cod);
-        Assert.Equal(DeviceCategory.Audio, category);
-    }
-
-    // ── Combined transport + category ───────────────────────────────────────────
-
-    [Fact]
-    public void BLE_audio_device_classified_correctly()
-    {
-        uint audioCod = 0x04 << 8;
-        var (transport, category) = _classifier.Classify(isBle: true, isClassic: false, classOfDevice: audioCod);
-        Assert.Equal(DeviceTransport.Ble, transport);
-        Assert.Equal(DeviceCategory.Audio, category);
+        var profile = _classifier.Classify(isBle: true, isClassic: false, null);
+        Assert.Equal(DeviceCategory.Unknown, profile.Category);
     }
 
     [Fact]
-    public void DualMode_HID_device_classified_correctly()
+    public void CoD_major_extraction_ignores_minor_and_format_bits()
     {
-        uint hidCod = 0x05 << 8;
-        var (transport, category) = _classifier.Classify(isBle: true, isClassic: true, classOfDevice: hidCod);
-        Assert.Equal(DeviceTransport.DualMode, transport);
-        Assert.Equal(DeviceCategory.Hid, category);
+        // CoD = 0x240420: major=0x04 (bits 12-8), minor and service bits vary
+        uint cod = 0x240420;
+        // Major class = (0x240420 >> 8) & 0x1F = 0x0404 & 0x1F = 0x04
+        var profile = _classifier.Classify(isBle: false, isClassic: true, cod);
+        Assert.Equal(DeviceCategory.Audio, profile.Category);
     }
 }

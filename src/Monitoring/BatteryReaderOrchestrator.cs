@@ -27,6 +27,7 @@ internal sealed class BatteryReaderOrchestrator
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
     private readonly DeviceCapabilityCache _capabilityCache;
     private readonly ThresholdSettings? _settings;
+    private readonly DeviceProfileClassifier _classifier = new();
 
     internal event Action<AliasSuggestion>? AliasSuggested;
 
@@ -90,6 +91,10 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
+        // ADR-016: stamp DeviceCategory from CoD before filtering.
+        StampCategories(gattResults, watchedDevices, isGatt: true);
+        StampCategories(classicTask.Result, watchedDevices, isGatt: false);
+
         return MergeResults(gattResults, classicTask.Result);
     }
 
@@ -150,6 +155,49 @@ internal sealed class BatteryReaderOrchestrator
         if (_settings.IsCategoryFilterOverridden(device.DeviceId)) return true;
         if (device.Category == DeviceCategory.Unknown) return true;
         return AllowedCategories.Contains(device.Category);
+    }
+
+    /// <summary>
+    /// Classifies each battery result using the watched device's CoD and stamps
+    /// <see cref="DeviceBatteryInfo.Category"/> so that <see cref="IsAllowedByFilter"/>
+    /// can make informed decisions. Devices not found in the watched list keep
+    /// <c>DeviceCategory.Unknown</c> (safe default — always allowed by filter).
+    /// </summary>
+    private void StampCategories(
+        List<DeviceBatteryInfo> results,
+        IReadOnlyList<WatchedDevice> watchedDevices,
+        bool isGatt)
+    {
+        if (results.Count == 0) return;
+
+        // Build lookup: DeviceId → WatchedDevice (primary key)
+        var byId = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in watchedDevices)
+            byId.TryAdd(w.DeviceId, w);
+
+        // Secondary lookup: Name → WatchedDevice (for classic results whose
+        // DeviceId may differ from the watcher's id, e.g. MAC vs SetupAPI path)
+        var byName = new Dictionary<string, WatchedDevice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in watchedDevices)
+            byName.TryAdd(w.Name, w);
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            var device = results[i];
+            WatchedDevice? watched = null;
+            if (!byId.TryGetValue(device.DeviceId, out watched))
+                byName.TryGetValue(device.Name, out watched);
+
+            if (watched is null) continue;
+
+            var profile = _classifier.Classify(
+                isBle: isGatt,
+                isClassic: !isGatt,
+                classOfDevice: watched.ClassOfDevice);
+
+            if (profile.Category != DeviceCategory.Unknown)
+                results[i] = device with { Category = profile.Category };
+        }
     }
 
     private List<DeviceBatteryInfo> MergeResults(
