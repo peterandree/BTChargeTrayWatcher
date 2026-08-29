@@ -1,140 +1,72 @@
 # AGENTS.md
 
-Guidance for AI coding agents (Copilot, Claude, Cursor, etc.) working in this repository.
+BTChargeTrayWatcher is a Windows-only system-tray application that monitors
+Bluetooth-device and laptop battery levels and raises Windows notifications
+when configured threshold states change.
 
-## Repository overview
+## Required validation
 
-`BTChargeTrayWatcher` is a single-project, Windows-only .NET 10 WinForms system-tray application that monitors the battery levels of connected Bluetooth devices and the host laptop, then fires Windows Toast notifications when configurable low / high thresholds are crossed.
+- Run before completing a code change:
 
+  dotnet test
 
-See [`docs/architecture.md`](docs/architecture.md) for the full structural picture.
+- Also run `dotnet publish -c Release` when changing project properties,
+  packaging, deployment, application startup, WinRT integration, native
+  interop, or the publish/runtime configuration.
+- Do not report validation as passed if a required command failed or was not run.
 
----
+## Runtime and ownership
 
-## Recent ADRs and agent boundaries
+- Preserve the Windows-only, `win-x64`, self-contained application model.
+  Do not introduce cross-platform runtime paths or change target/runtime
+  configuration without explicit approval.
+- Keep composition manual in `Program.cs`; do not introduce a DI container.
+- `BatteryMonitorService` owns long-running monitoring. Do not create a second
+  polling, scanning, reader, alert, or notification execution path.
+- All WinForms control and `NotifyIcon` mutations must be posted through the
+  established UI `SynchronizationContext`; never mutate UI from a worker,
+  callback, or continuation thread.
+- Every long-running or I/O-bound operation must accept and propagate a
+  `CancellationToken`. Do not block the UI thread.
 
-### New ADRs (015–019)
-- **ADR-015:** Device alias migration & heuristics — agents must not bypass alias resolution or propose settings changes that ignore the alias pipeline or UI confirmation requirements.
-- **ADR-016:** Device class/type filtering — agents must respect the default filtering policy and only propose code/UI changes that allow user override as described.
-- **ADR-017:** Passive enumeration reader — if present, agents must treat it as a lower-precedence source and not introduce active device wakeups.
-- **ADR-018:** Centralized discovery logging — all new device discovery or aggregation code must use `DiscoveryLogger` for structured, local-only logs.
-- **ADR-019:** Manual deep scan — agents must not increase background scan frequency or bypass user confirmation for deep scans; deep scan logic must remain user-initiated and timeboxed.
+## Discovery and device data
 
-### Agent boundaries for new features
-- Do not bypass or remove alias, filtering, or logging logic.
-- Do not introduce new background polling or device wakeups outside the documented scan intervals and deep scan UX.
-- When adding new readers or device sources, follow the IBatteryReader pattern and update the aggregation pipeline and UI as per ADR-002, ADR-015, ADR-016, and ADR-017.
-- All changes to device recognition, filtering, or logging must be justified with a new ADR or explicit documentation.
+- Preserve the established source precedence, aggregation, alias resolution,
+  and device-category filtering pipeline. Do not bypass it from a reader,
+  tray action, settings change, or notification path.
+- Passive enumeration is lower precedence than established active readers.
+  Do not make it wake, connect to, or otherwise actively probe devices.
+- Background scans must remain within the established polling policy.
+  Deep scans must be user-initiated, time-bounded, and confirmation-gated.
+- All device discovery and aggregation diagnostics must use `DiscoveryLogger`
+  and remain local-only.
+- Do not use a display name as a device identifier or treat device metadata as
+  complete, current, or unique.
+- Treat Bluetooth, WinRT, WMI, SetupAPI, and native interop operations as
+  fallible. Preserve distinct states for unsupported, unavailable, incomplete,
+  stale, and failed reads; do not convert them into fabricated battery values.
 
----
+## State, settings, and alerts
 
-## Technology constraints
+- Store polling timing and alert hysteresis only in `PollingDefaults`; never
+  inline changed timing or threshold-transition constants in execution logic.
+- Preserve atomic settings persistence: write a temporary file and atomically
+  replace the target. Do not overwrite settings directly.
+- Preserve the existing settings-change notification flow after persisted
+  values change.
+- Do not emit duplicate alerts or reset hysteresis state merely because a scan,
+  reader, or UI operation repeats.
 
-| Constraint | Value |
-|---|---|
-| Target framework | `net10.0-windows10.0.19041.0` |
-| Runtime | `win-x64` (self-contained) |
-| UI framework | Windows Forms (`UseWindowsForms`) |
-| Language | C# 13, nullable enabled, implicit usings enabled |
-| Key packages | `Svg` 3.4.7 (tray icon rendering), `System.Management` 9.0 (WMI for Classic BT) |
+## Boundaries
 
-Do **not** introduce cross-platform abstractions, Linux or macOS code paths, or any runtime that is not `win-x64`.
-
----
-
-
-## Source layout (see also new folders for ADR-017/ADR-018)
-
-```
-src/
-  Program.cs                    – entry point, single-instance mutex, object graph wiring
-  Monitoring/
-    BluetoothBatteryMonitor.cs  – public facade for BT polling
-    Scanner.cs                  – full device scan coordinator
-    BatteryReaderOrchestrator.cs– production merge point: GATT + Classic, alias/category logic
-    DeviceWatcherService.cs     – passive BLE/Classic AEP watcher (channel-based)
-    PollingOrchestrator.cs      – background poll loop, threshold alert logic
-    PollingDefaults.cs          – all timing and hysteresis constants
-    TaskTracker.cs              – fire-and-forget task lifecycle management
-    DeviceBatteryInfo.cs        – value type: device id, name, battery %
-    IBatteryReader.cs           – legacy reader abstraction (ReadAllAsync)
-    Classic/                    – Bluetooth Classic reader (SetupAPI + WMI P/Invoke)
-    Gatt/GattConnectionManager.cs – BLE GATT Battery Service (0x180F) per-device reader
-    LaptopBattery/              – laptop battery via System.Windows.Forms.PowerStatus / WMI
-  Notifications/
-    NotificationService.cs      – Windows Toast via WinRT ToastNotificationManager
-  Settings/
-    ThresholdSettings.cs        – JSON persistence in %LOCALAPPDATA%\BTChargeTrayWatcher\
-    StartupRegistration.cs      – HKCU run-key for autostart
-  Tray/
-    TrayApp.cs                  – NotifyIcon host, event wiring
-    ScanCoordinator.cs          – UI-thread scan orchestration, alert evaluation
-    ScanWindow.cs               – scan results WinForms dialog
-    TrayMenuBuilder.cs          – context-menu construction
-    TrayIconRenderer.cs         – SVG → icon rasterization (normal / alert states)
-    TrayIcons.cs                – embedded SVG string constants
-  Utilities/
-    BatteryDisplay.cs           – percentage → display string helper
-    NativeMethods.cs            – P/Invoke declarations
-tools/                          – excluded from build; maintenance / code-gen helpers
-manifests/                      – WinGet package manifests
-winget/                         – WinGet submission artefacts
-```
-
----
-
-## Coding conventions
-
-- **No dependency injection container.** All dependencies are wired manually in `Program.cs`.
-- **Interfaces are narrow.** `IBatteryReader` is the only public abstraction for battery readers; keep it that way unless there is a clear reason to add another.
-- **Thread safety via `SynchronizationContext`.** UI mutations must be posted via `_uiContext.Post(...)`. Never call WinForms controls from a thread-pool thread.
-- **Async / await throughout.** Use `ConfigureAwait(false)` on all non-UI awaits. UI continuations use `ConfigureAwait(true)` or post explicitly.
-- **`CancellationToken` everywhere.** Every async method must accept a `CancellationToken` and forward it.
-- **Settings persistence is atomic.** `ThresholdSettings` writes to a `.tmp` file and renames it over the target; do not change this pattern.
-- **Hysteresis and polling timing** are centralised in `PollingDefaults`. Change constants there, not inline in logic.
-- **`sealed` by default.** Mark classes `sealed` unless inheritance is explicitly required.
-- **Records for options.** Pass constructor parameter groups as `sealed record` option types (see `ScannerOptions`, `PollingOrchestratorOptions`).
-- **Avoid tuples for API surface.** Avoid using tuples for public-facing APIs, method return types, parameters, or collection element types that cross component boundaries. Prefer small, named types (for example `sealed record` or `record struct` for compact value-like data) with explicit property names — this improves readability, discoverability, and future extensibility. Tuples may be used for very short-lived local groupings inside a single method or narrow test helpers only.
-
----
-
-## Adding a new battery reader
-
-1. Implement `IBatteryReader` (`ReadAllAsync(CancellationToken)`  →  `Task<List<DeviceBatteryInfo>>`).
-2. Wire it into `BatteryReaderOrchestrator` (the production merge point) so its results participate in the GATT + Classic merge, alias resolution, and category filtering.
-3. Pass the new instance through `BluetoothBatteryMonitor`'s constructor chain into `ScannerOptions` (or the infrastructure record in `Program.cs`).
-4. Dispose it in `BluetoothBatteryMonitor.DisposeAsync` if it implements `IDisposable`.
-
-## Adding a new settings property
-
-1. Add the backing field and thread-safe property to `ThresholdSettings`.
-2. Add the corresponding property to the private `SettingsDto` record.
-3. Populate the field in `Load()` and include it in `Save()`.
-4. Raise `Changed` (and `LaptopSettingsChanged` if laptop-specific) after writing.
-
-## Modifying the tray menu
-
-All menu construction lives in `TrayMenuBuilder`. Add new items there and wire click handlers in `TrayApp`.
-
----
-
-## Build
-
-```powershell
-dotnet build
-dotnet publish -c Release
-```
-
-The project targets `win-x64` and will not build on non-Windows hosts without the Windows SDK.
-
-## Tests
-
-Automated tests live in `tests/BTChargeTrayWatcher.Tests/` (xUnit v3, Microsoft.Testing.Platform runner per `global.json`). See `TESTING.md` for the tiered strategy: pure-logic classes are unit-tested, WinRT/hardware-bound paths are integration-only. Highest-value gaps: `DeviceWatcherService` event handling (see #150) and the `GattConnectionManager` real WinRT read path (a unit-test seam for the read contract exists).
-
----
-
-## Out of scope for agents
-
-- Do not modify `manifests/` or `winget/` — these are controlled by the WinGet submission pipeline.
-- Do not add NuGet packages without explicit instruction.
-- Do not change the `RuntimeIdentifier` or `TargetFramework`.
+- Never commit credentials, API keys, tokens, device identifiers, local logs,
+  or personally identifying Bluetooth data.
+- Never swallow exceptions or use empty catch blocks.
+- Do not modify `manifests/` or `winget/`.
+- Get explicit approval before adding a NuGet package, changing target/runtime
+  configuration, changing polling or scan strategy, adding a reader source,
+  changing device recognition/filtering policy, changing logging retention or
+  destination, or modifying startup registration.
+- Add an ADR before adding a package, introducing a layer, changing device
+  recognition/filtering, changing reader precedence, changing polling/deep-scan
+  strategy, changing local logging policy, or changing persistence format.
