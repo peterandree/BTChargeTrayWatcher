@@ -36,6 +36,7 @@ public sealed class ThresholdSettings
     private HashSet<string> _ignoredDevices = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _trayIconOverlayExcludedDevices = new(StringComparer.OrdinalIgnoreCase);
     private bool _excludeLaptopFromTrayIconOverlay;
+    private bool _excludeLaptopFromMonitoring;
     private bool _autoStartUseScheduledTaskFallback;
     private Dictionary<string, DeviceThresholds> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
     private NtfyIntegrationSettings _ntfy = new();
@@ -156,6 +157,28 @@ public sealed class ThresholdSettings
         }
     }
 
+    /// <summary>
+    /// When true the laptop battery is excluded from monitoring entirely:
+    /// no threshold evaluation, no notifications. Independent of
+    /// <see cref="ExcludeLaptopFromTrayIconOverlay"/> (which only hides the
+    /// tray icon overlay and alert marker). Closes #156.
+    /// </summary>
+    public bool ExcludeLaptopFromMonitoring
+    {
+        get { lock (_lock) return _excludeLaptopFromMonitoring; }
+        set
+        {
+            bool changed;
+            lock (_lock)
+            {
+                if (_excludeLaptopFromMonitoring == value) return;
+                _excludeLaptopFromMonitoring = value;
+                changed = true;
+            }
+            if (changed) RaiseChanged();
+        }
+    }
+
     public bool AutoStartUseScheduledTaskFallback
     {
         get { lock (_lock) return _autoStartUseScheduledTaskFallback; }
@@ -183,6 +206,30 @@ public sealed class ThresholdSettings
     {
         lock (_lock)
             _trayIconOverlayExcludedDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
+
+    /// <summary>
+    /// Device-id-aware overlay exclusion toggle. Adds the <paramref name="deviceId"/> and drops any
+    /// legacy name-keyed entry for the same device, so the persisted set can never disagree with
+    /// <see cref="IsTrayIconOverlayExcluded"/> (which matches on both id and name). Used by the
+    /// tray menu and the Options dialog (#156).
+    /// </summary>
+    public void SetTrayIconOverlayExcluded(string deviceId, string displayName, bool excluded)
+    {
+        lock (_lock)
+        {
+            if (excluded)
+            {
+                _trayIconOverlayExcludedDevices.Add(deviceId);
+                _trayIconOverlayExcludedDevices.Remove(displayName);
+            }
+            else
+            {
+                _trayIconOverlayExcludedDevices.Remove(deviceId);
+                _trayIconOverlayExcludedDevices.Remove(displayName);
+            }
+        }
         RaiseChanged();
     }
 
@@ -215,6 +262,29 @@ public sealed class ThresholdSettings
     {
         lock (_lock)
             _ignoredDevices = new HashSet<string>(devices, StringComparer.OrdinalIgnoreCase);
+        RaiseChanged();
+    }
+
+    /// <summary>
+    /// Device-id-aware ignore toggle. Adds the <paramref name="deviceId"/> and drops any legacy
+    /// name-keyed entry for the same device (see <see cref="IsIgnored"/>). Used by the tray menu
+    /// and the Options dialog (#156).
+    /// </summary>
+    public void SetIgnored(string deviceId, string displayName, bool ignored)
+    {
+        lock (_lock)
+        {
+            if (ignored)
+            {
+                _ignoredDevices.Add(deviceId);
+                _ignoredDevices.Remove(displayName);
+            }
+            else
+            {
+                _ignoredDevices.Remove(deviceId);
+                _ignoredDevices.Remove(displayName);
+            }
+        }
         RaiseChanged();
     }
 
@@ -505,6 +575,7 @@ public sealed class ThresholdSettings
                 new HashSet<string>(_ignoredDevices, StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(_trayIconOverlayExcludedDevices, StringComparer.OrdinalIgnoreCase),
                 _excludeLaptopFromTrayIconOverlay,
+                _excludeLaptopFromMonitoring,
                 _autoStartUseScheduledTaskFallback,
                 overridesCopy,
                 new Dictionary<string, int>(_devicePollIntervals, StringComparer.OrdinalIgnoreCase),
@@ -531,6 +602,7 @@ public sealed class ThresholdSettings
             _ignoredDevices                   = s.IgnoredDevices;
             _trayIconOverlayExcludedDevices   = s.TrayIconOverlayExcludedDevices;
             _excludeLaptopFromTrayIconOverlay = s.ExcludeLaptopFromTrayIconOverlay;
+            _excludeLaptopFromMonitoring    = s.ExcludeLaptopFromMonitoring;
             _autoStartUseScheduledTaskFallback = s.AutoStartUseScheduledTaskFallback;
             _deviceOverrides                  = s.DeviceOverrides;
             _devicePollIntervals              = s.DevicePollIntervals;
@@ -561,6 +633,7 @@ internal sealed record SettingsSnapshot(
     HashSet<string> IgnoredDevices,
     HashSet<string> TrayIconOverlayExcludedDevices,
     bool ExcludeLaptopFromTrayIconOverlay,
+    bool ExcludeLaptopFromMonitoring,
     bool AutoStartUseScheduledTaskFallback,
     Dictionary<string, DeviceThresholds> DeviceOverrides,
     Dictionary<string, int> DevicePollIntervals,

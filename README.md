@@ -88,6 +88,33 @@ laptop battery is in an alert state. Individual devices and the laptop battery
 can be excluded from this overlay so their alert state does not affect the tray
 icon — useful for devices that are always near a threshold boundary.
 
+### Tray context menu
+
+The tray menu mirrors the Options dialog, so most settings can be changed
+without opening it:
+
+| Entry | What it does |
+| :-- | :-- |
+| `<device>  55 %` | One submenu per detected device |
+| ↳ Low / High threshold | Per-device threshold override (falls back to the global value) |
+| ↳ Exclude from tray icon alert | Same as the Options dialog's *Excluded* column for the overlay |
+| ↳ Ignore device (no notifications) | Tracked but never alerts |
+| Laptop battery | Laptop thresholds and exclusions (see below) |
+| Low / High threshold | Global thresholds for every device without an override |
+
+> The device list and the tick marks are re-read every time the menu opens, so
+they stay in sync with the Options dialog.
+
+### Excluding the laptop battery
+
+| Setting | Effect |
+| :-- | :-- |
+| Exclude laptop from tray icon overlay | The laptop's alert state no longer influences the tray icon or the tooltip's `!` marker; notifications still fire |
+| Exclude laptop from monitoring and alerts | The laptop battery is not evaluated at all: no notifications, no alert state, no overlay. The tooltip still shows the current charge, marked `(not monitored)` |
+
+Both are available in the tray menu (right-click the icon → **Laptop battery**)
+and in **Options → General**.
+
 ### Startup registration
 
 The application can register itself to start with Windows via the tray menu.
@@ -130,11 +157,21 @@ tasks, then releases all managed resources in order.
 
 ## Known Limitations
 
-- GATT battery reads require the device to support the standard Battery Service
-characteristic (UUID `0x180F`). Devices that expose battery level only via
-proprietary means fall back to the Classic reader.
-- The Classic reader relies on Windows device enumeration properties; some
-devices report battery level only when actively connected.
+- GATT battery reads require the device to support a standard Battery Service —
+Battery Service `0x180F` or Common Battery Service `0x182B`, both exposing Battery
+Level `0x2A19`. Devices that expose battery level only via proprietary
+characteristics fall back to the Classic reader.
+- The Classic reader reads the Windows device property store, so it can only show a
+battery the Windows Bluetooth stack (or a vendor driver) has published for that
+device. Classic-only headsets that report battery solely through HFP AT commands
+cannot be read from a background tray app without taking over the audio session.
+Details, an oracle for triaging (Windows *Settings → Bluetooth & devices*) and the
+follow-ups we consider worth doing are in
+[`docs/bluetooth/classic-battery-coverage.md`](docs/bluetooth/classic-battery-coverage.md).
+- Devices that support Battery Level *notifications* are still polled every
+60 s. Moving them to push updates is a documented proposal that needs an ADR
+amendment and hardware measurements first — see
+[`docs/plans/gatt-notification-subscriptions.md`](docs/plans/gatt-notification-subscriptions.md).
 - Multiple simultaneous Bluetooth adapters are not explicitly tested.
 - Runs on Windows only; no cross-platform support is planned.
 

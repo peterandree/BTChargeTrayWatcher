@@ -65,6 +65,33 @@ Click **Next** when the topic field is filled.
 
 ---
 
+## Topic security (read this)
+
+ntfy.sh topics are **unauthenticated shared secrets**: anyone who knows the topic can read every
+notification and can also publish junk into it. That matters here because the alerts reveal when you
+are at your desk and which devices you own.
+
+- Treat the generated topic like a password. Do not paste it into chats, screenshots, or bug reports.
+- It is stored in plain text in `settings.json` (`%LOCALAPPDATA%\BTChargeTrayWatcher\settings.json`).
+  If the topic leaks, regenerate it (tray menu → **📱 Mobile notifications (ntfy.sh)…**) and resubscribe
+  on every phone.
+- The Options dialog warns about this above the topic field.
+
+### Optional: private topics with an access token
+
+ntfy supports authenticated topics (the names start with `$`). Those require an access token and can be
+revoked without changing the topic:
+
+1. Create an access token in the ntfy web app (ntfy.sh → *Account* → *Access tokens*) or in the Android app.
+2. Open **Options → Notifications** and paste it into the **Token** field (masked).
+3. Either keep the generated topic or rename it to a `$`-prefixed private topic, then run
+   **Send ntfy test**.
+
+The token is sent as `Authorization: Bearer <token>` on every publish. It is stored in `settings.json`
+next to the topic and is never written to logs.
+
+---
+
 ## What happens after setup
 
 - Every time a Bluetooth device or your laptop battery crosses the configured low or high threshold, a push notification is sent to `https://ntfy.sh/{your-topic}`.

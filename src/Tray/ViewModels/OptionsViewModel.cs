@@ -40,6 +40,16 @@ internal sealed class OptionsViewModel
         set => _settings.ExcludeLaptopFromTrayIconOverlay = value;
     }
 
+    /// <summary>
+    /// Full laptop exclusion (#156): no threshold evaluation and no notifications.
+    /// Implies the tray-icon-overlay exclusion as well.
+    /// </summary>
+    public bool ExcludeLaptopFromMonitoring
+    {
+        get => _settings.ExcludeLaptopFromMonitoring;
+        set => _settings.ExcludeLaptopFromMonitoring = value;
+    }
+
     // ── Auto-start (Windows startup) ─────────────────────────────────────
     public bool AutoStartEnabled
     {
@@ -78,6 +88,18 @@ internal sealed class OptionsViewModel
     }
 
     public string NtfyTopic => _settings.GetNtfySettings().Topic ?? string.Empty;
+
+    /// <summary>
+    /// Optional ntfy access token (#152). When set, publishes are authenticated with
+    /// <c>Authorization: Bearer &lt;token&gt;</c>, which is what private (<c>$</c>-prefixed)
+    /// and ACL-protected topics require. Never logged.
+    /// </summary>
+    public string NtfyAccessToken
+    {
+        get => _settings.GetNtfySettings().AccessToken ?? string.Empty;
+        set => _settings.UpdateNtfySettings(s =>
+            s.AccessToken = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+    }
 
     /// <summary>
     /// Generates a new random ntfy topic, disables the integration until the

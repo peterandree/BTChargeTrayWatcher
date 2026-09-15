@@ -21,6 +21,18 @@ namespace BTChargeTrayWatcher.Tests
         }
 
         [StaFact]
+        public void GeneralTab_laptop_monitoring_exclusion_reflects_existing_setting()
+        {
+            var settings = new ThresholdSettings();
+            settings.ExcludeLaptopFromMonitoring = true;
+            var monitor = CreateMonitor(settings);
+            var form = new OptionsForm((owner, text, caption, buttons, icon) => DialogResult.OK);
+            form.Initialize(settings, monitor);
+
+            Assert.True(GetCheckBox(form, "excludeLaptopMonitoringCheck").Checked);
+        }
+
+        [StaFact]
         public void GeneralTab_controls_reflect_and_update_settings()
         {
             var settings = new ThresholdSettings();
@@ -34,6 +46,7 @@ namespace BTChargeTrayWatcher.Tests
             var laptopLowField = GetNumeric(form, "laptopLowNumeric");
             var laptopHighField = GetNumeric(form, "laptopHighNumeric");
             var excludeCheck = GetCheckBox(form, "excludeLaptopOverlayCheck");
+            var excludeMonitoringCheck = GetCheckBox(form, "excludeLaptopMonitoringCheck");
             var fallbackCheck = GetCheckBox(form, "autoStartTaskFallbackCheck");
 
             lowField.Value = 15;
@@ -41,6 +54,7 @@ namespace BTChargeTrayWatcher.Tests
             laptopLowField.Value = 10;
             laptopHighField.Value = 90;
             excludeCheck.Checked = true;
+            excludeMonitoringCheck.Checked = true;
             fallbackCheck.Checked = true;
 
             Assert.Equal(15, settings.Low);
@@ -48,6 +62,7 @@ namespace BTChargeTrayWatcher.Tests
             Assert.Equal(10, settings.LaptopLow);
             Assert.Equal(90, settings.LaptopHigh);
             Assert.True(settings.ExcludeLaptopFromTrayIconOverlay);
+            Assert.True(settings.ExcludeLaptopFromMonitoring);
             Assert.True(settings.AutoStartUseScheduledTaskFallback);
         }
 

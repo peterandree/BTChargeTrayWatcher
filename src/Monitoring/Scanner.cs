@@ -4,8 +4,7 @@ namespace BTChargeTrayWatcher;
 
 internal sealed class Scanner
 {
-    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readGatt;
-    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readClassic;
+    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readDevices;
     private readonly ScannerCallbacks _callbacks;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
@@ -20,8 +19,7 @@ internal sealed class Scanner
 
     public Scanner(ScannerOptions options)
     {
-        _readGatt      = options.ReadGatt;
-        _readClassic   = options.ReadClassic;
+        _readDevices   = options.ReadDevices;
         _callbacks     = options.Callbacks;
         _lastKnown     = options.LastKnown;
         _poller        = options.Poller;
@@ -29,32 +27,19 @@ internal sealed class Scanner
         _shutdownToken = options.ShutdownToken;
     }
 
-    // ── Core merge ────────────────────────────────────────────────────────────────────────────
+    // ── Read path ────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Runs both readers concurrently and merges results, deduplicating by
-    /// <see cref="DeviceBatteryInfo.DeviceId"/> (case-insensitive).
-    /// GATT results take precedence on collision — same rule as the former
-    /// <c>DeviceAggregationPipeline.ReadMergedAsync</c>.
+    /// Reads the current device list through <see cref="ScannerOptions.ReadDevices"/>, which is
+    /// already the fully merged GATT + Classic result produced by
+    /// <c>BatteryReaderOrchestrator</c> (ADR-002). The Scanner deliberately performs no merge of
+    /// its own — there is exactly one merge point in the app, and it is the orchestrator's.
     /// </summary>
-    private async Task<List<DeviceBatteryInfo>> ReadMergedAsync(
+    private async Task<List<DeviceBatteryInfo>> ReadDevicesAsync(
         bool raiseDeviceFound,
         CancellationToken ct)
     {
-        var gattTask    = _readGatt(ct);
-        var classicTask = _readClassic(ct);
-        await Task.WhenAll(gattTask, classicTask).ConfigureAwait(false);
-
-        var merged = new Dictionary<string, DeviceBatteryInfo>(
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (var d in classicTask.Result)
-            merged[d.DeviceId] = d;
-
-        foreach (var d in gattTask.Result)
-            merged[d.DeviceId] = d;  // GATT wins on collision
-
-        var results = new List<DeviceBatteryInfo>(merged.Values);
+        var results = await _readDevices(ct).ConfigureAwait(false);
 
         if (raiseDeviceFound)
             foreach (var d in results)
@@ -81,7 +66,7 @@ internal sealed class Scanner
             _isScanning = true;
             _callbacks.OnScanStarted();
 
-            results = await ReadMergedAsync(raiseDeviceFound: true, ct)
+            results = await ReadDevicesAsync(raiseDeviceFound: true, ct)
                 .ConfigureAwait(false);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -145,7 +130,7 @@ internal sealed class Scanner
     }
 
     internal Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct) =>
-        ReadMergedAsync(raiseDeviceFound: false, ct);
+        ReadDevicesAsync(raiseDeviceFound: false, ct);
 
     public void Dispose()
     {
@@ -166,9 +151,10 @@ internal sealed record ScannerCallbacks(
     Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted);
 
 /// ADR-009: options record keeps infrastructure separate from callbacks.
+/// <paramref name="ReadDevices"/> returns the already-merged GATT + Classic list owned by
+/// <c>BatteryReaderOrchestrator</c> (ADR-002) — it is not a GATT-only delegate (#157).
 internal sealed record ScannerOptions(
-    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadGatt,
-    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadClassic,
+    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,
