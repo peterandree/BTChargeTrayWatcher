@@ -145,6 +145,10 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
 
         if (!subscribed)
         {
+            // The slot reserved above must not stay occupied by a device that refused to
+            // subscribe, or the cap would leak until the settling window expired.
+            ReleaseReservation(deviceId);
+
             DiscoveryLogger.Log(
                 reader:     ReaderName,
                 operation:  "Subscribe",

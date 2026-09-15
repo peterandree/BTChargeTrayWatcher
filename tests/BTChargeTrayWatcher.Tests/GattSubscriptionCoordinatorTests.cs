@@ -129,19 +129,22 @@ public sealed class GattSubscriptionCoordinatorTests
     }
 
     [Fact]
-    public async Task Seam_refusal_is_reported_as_not_subscribed()
+    public async Task Seam_refusal_is_reported_as_not_subscribed_and_releases_the_slot()
     {
         var (coordinator, fake, _) = Create();
         using var _c = coordinator;
+        var ct = TestContext.Current.CancellationToken;
         fake.SubscribeResult = false;
 
-        bool subscribed = await coordinator.TrySubscribeAsync(
-            "dev-1", "Headset", supportsNotify: true, isConnected: true,
-            TestContext.Current.CancellationToken);
+        Assert.False(await coordinator.TrySubscribeAsync("dev-1", "A", true, true, ct));
+        Assert.False(coordinator.IsSubscribed("dev-1"));
 
-        Assert.False(subscribed);
-        Assert.Equal(0, coordinator.ActiveCount);
-        Assert.Equal(new[] { "dev-1" }, fake.SubscribeAttempts);
+        // A refusal must not hold a cap slot: two more devices still fit.
+        fake.SubscribeResult = true;
+        Assert.True(await coordinator.TrySubscribeAsync("dev-2", "B", true, true, ct));
+        Assert.True(await coordinator.TrySubscribeAsync("dev-3", "C", true, true, ct));
+        Assert.Equal(2, coordinator.ActiveCount);
+        Assert.Equal(new[] { "dev-1", "dev-2", "dev-3" }, fake.SubscribeAttempts);
     }
 
     [Fact]
