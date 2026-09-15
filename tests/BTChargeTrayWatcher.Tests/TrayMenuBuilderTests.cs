@@ -86,9 +86,10 @@ public sealed class TrayMenuBuilderTests
     public void Global_low_menu_writes_the_global_low_threshold()
     {
         var settings = new ThresholdSettings();
-        var builder = new TrayMenuBuilder(settings);
 
-        ClickThreshold(builder.BuildLowMenu(), "Low threshold", 10);
+        // The global picker IS the threshold submenu ("Low threshold" with candidate children),
+        // so the candidate is clicked directly on it.
+        ClickCandidate(new TrayMenuBuilder(settings).BuildLowMenu(), 10);
 
         Assert.Equal(10, settings.Low);
     }
@@ -97,11 +98,21 @@ public sealed class TrayMenuBuilderTests
     public void Global_high_menu_writes_the_global_high_threshold()
     {
         var settings = new ThresholdSettings();
-        var builder = new TrayMenuBuilder(settings);
 
-        ClickThreshold(builder.BuildHighMenu(), "High threshold", 85);
+        ClickCandidate(new TrayMenuBuilder(settings).BuildHighMenu(), 85);
 
         Assert.Equal(85, settings.High);
+    }
+
+    [StaFact]
+    public void Global_low_menu_checks_the_current_value()
+    {
+        var settings = new ThresholdSettings { Low = 25 };
+
+        var menu = new TrayMenuBuilder(settings).BuildLowMenu();
+
+        Assert.True(Candidate(menu, 25).Checked);
+        Assert.False(Candidate(menu, 10).Checked);
     }
 
     // ── Per-device submenu ──────────────────────────────────────────────────
@@ -186,11 +197,13 @@ public sealed class TrayMenuBuilderTests
     private static ToolStripMenuItem FindItem(ToolStripMenuItem parent, string text) =>
         parent.DropDownItems.OfType<ToolStripMenuItem>().Single(i => i.Text == text);
 
-    private static void ClickThreshold(ToolStripMenuItem parent, string submenuText, int candidate)
-    {
-        var submenu = FindItem(parent, submenuText);
-        var entry = submenu.DropDownItems.OfType<ToolStripMenuItem>()
+    private static ToolStripMenuItem Candidate(ToolStripMenuItem thresholdMenu, int candidate) =>
+        thresholdMenu.DropDownItems.OfType<ToolStripMenuItem>()
             .Single(i => i.Text == $"{candidate} %");
-        entry.PerformClick();
-    }
+
+    private static void ClickCandidate(ToolStripMenuItem thresholdMenu, int candidate) =>
+        Candidate(thresholdMenu, candidate).PerformClick();
+
+    private static void ClickThreshold(ToolStripMenuItem parent, string submenuText, int candidate) =>
+        ClickCandidate(FindItem(parent, submenuText), candidate);
 }

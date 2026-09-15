@@ -272,10 +272,15 @@ internal sealed class TrayMenuBuilder
         bool radioCheck = false)
     {
         var menu = new ToolStripMenuItem(text);
+        int initial = get();
 
         foreach (int candidate in candidates)
         {
-            var entry = new ToolStripMenuItem($"{candidate} %") { Tag = candidate };
+            var entry = new ToolStripMenuItem($"{candidate} %")
+            {
+                Tag = candidate,
+                Checked = candidate == initial
+            };
             entry.Click += (_, _) =>
             {
                 try { set(candidate); }
