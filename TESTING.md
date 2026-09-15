@@ -26,6 +26,9 @@ All dependencies are injectable via constructor parameters or delegate options. 
 | `GattSubscriptionPolicy` | `GattSubscriptionPolicyTests` |
 | `GattSubscriptionCoordinator` | `GattSubscriptionCoordinatorTests`, `GattSubscriptionLoggingTests` |
 | `GattConnectionManager` (subscription teardown wiring) | `GattSubscriptionPollCycleTests` |
+| `DeepScanPolicy` (outcome classification + summary wording) | `DeepScanPolicyTests` |
+| `DeepScanRunner` (single run, time budget, cancel, counts) | `DeepScanRunnerTests` |
+| `ScanViewModel` (window state, warning text, summary stickiness) | `ScanViewModelDeepScanTests` |
 
 ---
 
@@ -62,6 +65,8 @@ The correct approach for each class is an **integration test** that runs on a re
 | `WindowsLaptopBatteryReader` | `System.Windows.Forms.SystemInformation.PowerStatus` | Requires a WinForms message pump. Returns meaningful data only on a physical laptop with a battery. |
 | `BluetoothBatteryMonitor` (timer/power-mode) | `Microsoft.Win32.SystemEvents.PowerModeChanged` | `PowerModeChanged` requires a Win32 message loop. Sleep/resume transitions cannot be simulated in-process. |
 | `LaptopBatteryMonitor` (timer/power-mode) | Same as above | Timer tick and resume-wake paths require a real power-mode event. |
+| `ScanCoordinator` | `SynchronizationContext`, `ScanWindow`, `Control.BeginInvoke` | Needs a WinForms message pump and a real `ScanWindow`. Its deep-scan rules live in `DeepScanRunner`/`DeepScanPolicy` (Tier 1) so they are testable without it; what remains untested here is the wiring (confirm dialog → request → window state) and the tray-triggered passive scan. |
+| `ScanWindow` | WinForms controls + `MessageBox` | The confirm dialog, the enabled/disabled state of **Deep scan (diagnostic)** and **Cancel deep scan**, and the status line are verified manually on Windows; the wording and state rules they bind to are covered by `ScanViewModelDeepScanTests`. |
 
 ### WinRT Notifications
 

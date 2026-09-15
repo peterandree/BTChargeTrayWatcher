@@ -8,6 +8,7 @@ internal sealed class ScanCoordinator : IDisposable
     private readonly BluetoothBatteryMonitor _monitor;
     private readonly ThresholdSettings _settings;
     private readonly SynchronizationContext _uiContext;
+    private readonly DeepScanRunner _deepScanRunner;
 
     private ScanWindow? _scanWindow;
     private bool _disposed;
@@ -28,6 +29,11 @@ internal sealed class ScanCoordinator : IDisposable
         _settings = settings;
         _uiContext = uiContext;
 
+        // ADR-019: a deep scan is budgeted and cancellable, and only a user request may start one.
+        _deepScanRunner = new DeepScanRunner(
+            monitor.StartTrackedDeepScanAsync,
+            PollingDefaults.DeepScanTimeBudget);
+
         _monitor.ScanStarted += Monitor_ScanStarted;
         _monitor.ManualScanCompleted += Monitor_ManualScanCompleted;
 
@@ -42,6 +48,15 @@ internal sealed class ScanCoordinator : IDisposable
     public void RequestOpenScanWindow() =>
         PostToUi(OpenScanWindowAndTriggerScan);
 
+    /// <summary>
+    /// Starts the confirmed diagnostic deep scan. Called only from <see cref="ScanWindow"/> after the
+    /// user acknowledged the warning — nothing automatic may reach this path (ADR-019 §1).
+    /// </summary>
+    public void RequestDeepScan() => PostToUi(StartDeepScan);
+
+    /// <summary>Stops a running deep scan early because the user pressed Cancel.</summary>
+    public void RequestDeepScanCancel() => PostToUi(() => _deepScanRunner.TryCancel());
+
     public void OpenScanWindowAndTriggerScan()
     {
         if (_disposed) return;
@@ -54,7 +69,7 @@ internal sealed class ScanCoordinator : IDisposable
             return;
         }
 
-        FireAndForget(RunManualScanAsync(), "Manual scan");
+        FireAndForget(RunWindowScanAsync(), "Scan");
     }
 
     private async Task RunStartupScanAsync()
@@ -67,15 +82,69 @@ internal sealed class ScanCoordinator : IDisposable
         Debug.WriteLine("[ScanCoordinator] Startup scan completed.");
     }
 
-    private async Task RunManualScanAsync()
+    /// <summary>
+    /// The scan behind the tray's <i>Scan devices…</i> action, the window opening and the window's
+    /// auto-refresh. Passive on purpose: opening a window is not confirmation, and the auto-refresh
+    /// loop would otherwise run an active scan every 30 s. Active probing belongs to the confirmed
+    /// deep scan (ADR-019 §1, issue #165).
+    /// </summary>
+    private async Task RunWindowScanAsync()
     {
-        Debug.WriteLine("[ScanCoordinator] Manual scan started.");
+        Debug.WriteLine("[ScanCoordinator] Window scan started.");
         await _monitor.RefreshTrackedDevicesAsync().ConfigureAwait(false);
+        await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+        Debug.WriteLine("[ScanCoordinator] Window scan completed.");
+    }
 
-        // User-initiated diagnostic scan: actively verifies candidates and reads uncached
-        // without subscribing (ADR-019, issue #164).
-        await _monitor.StartTrackedDeepScanAsync().ConfigureAwait(false);
-        Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
+    /// <summary>
+    /// Starts a confirmed deep scan (ADR-019). Runs on the UI thread so the window's controls and the
+    /// runner's single-run reservation cannot interleave with a second click.
+    /// </summary>
+    private void StartDeepScan()
+    {
+        if (_disposed) return;
+        if (_scanWindow is not { IsDisposed: false } window) return;
+
+        FireAndForget(RunDeepScanAsync(window), "Deep scan");
+    }
+
+    private async Task RunDeepScanAsync(ScanWindow window)
+    {
+        // The runner reserves its single-run slot synchronously, and this method is entered on the UI
+        // thread, so nothing can be notified before the reservation exists.
+        Task<DeepScanResult?> run = _deepScanRunner.RunAsync();
+        if (!_deepScanRunner.IsRunning)
+        {
+            // A run was already in flight: one run per invocation (ADR-019 §2).
+            Debug.WriteLine("[ScanCoordinator] Deep scan request refused: a run is already in progress.");
+            return;
+        }
+
+        window.OnDeepScanStarted();
+        Debug.WriteLine("[ScanCoordinator] Deep scan started.");
+
+        DeepScanResult? result = await run.ConfigureAwait(false);
+        if (result is not { } completed)
+        {
+            // Unreachable while the reservation above succeeds; release the window instead of leaving
+            // it stuck in the running state if it ever changes.
+            Debug.WriteLine("[ScanCoordinator] Deep scan produced no result.");
+            MarshalToWindow(window, () =>
+                window.OnDeepScanCompleted(new DeepScanResult(DeepScanOutcome.Failed, 0, 0)));
+            return;
+        }
+
+        if (completed.Outcome == DeepScanOutcome.Failed && completed.Error is { } cause)
+        {
+            Trace.TraceError($"[ScanCoordinator] Deep scan fault: {cause}");
+            ScanFaulted?.Invoke("Deep scan", cause);
+        }
+
+        // Budget expiry and user cancel are normal outcomes, not faults: the window reports them.
+        MarshalToWindow(window, () => window.OnDeepScanCompleted(completed));
+        Debug.WriteLine(
+            $"[ScanCoordinator] Deep scan finished ({completed.Outcome}): " +
+            $"{completed.DevicesFound} found, {completed.DevicesWithBattery} with battery data.");
     }
 
     private void Monitor_ScanStarted() =>
@@ -97,15 +166,6 @@ internal sealed class ScanCoordinator : IDisposable
 
         var window = new ScanWindow(_settings);
 
-        static void MarshalToWindow(ScanWindow w, Action action)
-        {
-            if (w.IsDisposed) return;
-            if (w.InvokeRequired)
-                w.BeginInvoke(new Action(() => { if (!w.IsDisposed) action(); }));
-            else
-                action();
-        }
-
         void OnFound(string deviceId, string name, int? battery) =>
             MarshalToWindow(window, () => window.OnDeviceFound(deviceId, name, battery));
 
@@ -124,9 +184,15 @@ internal sealed class ScanCoordinator : IDisposable
         autoRefreshHandler = (_, _) =>
         {
             if (_monitor.IsScanning) return;
-            FireAndForget(RunManualScanAsync(), "Auto-refresh scan");
+            FireAndForget(RunWindowScanAsync(), "Auto-refresh scan");
         };
         window.AutoRefreshRequested += autoRefreshHandler;
+
+        // ADR-019 §1–§3: the diagnostic scan is requested and cancelled from the window only.
+        EventHandler deepScanHandler        = (_, _) => RequestDeepScan();
+        EventHandler deepScanCancelHandler  = (_, _) => RequestDeepScanCancel();
+        window.DeepScanRequested       += deepScanHandler;
+        window.DeepScanCancelRequested += deepScanCancelHandler;
 
         window.FormClosed += (_, _) =>
         {
@@ -134,14 +200,32 @@ internal sealed class ScanCoordinator : IDisposable
             _monitor.ManualScanCompleted -= OnCompleted;
             _monitor.ScanStarted -= OnStarted;
             window.AutoRefreshRequested -= autoRefreshHandler!;
+            window.DeepScanRequested       -= deepScanHandler;
+            window.DeepScanCancelRequested -= deepScanCancelHandler;
             if (ReferenceEquals(_scanWindow, window))
                 _scanWindow = null;
+
+            // Closing the window is the last control surface the running deep scan has, so closing
+            // it stops the scan instead of leaving it probing devices with nothing on screen
+            // (ADR-019 §2: the run is cancellable).
+            if (_deepScanRunner.TryCancel())
+                Debug.WriteLine("[ScanCoordinator] Deep scan cancelled: scan window closed.");
         };
 
         _scanWindow = window;
         window.Show();
         window.BringToFront();
         window.Activate();
+    }
+
+    /// <summary>Marshals a window call onto the UI thread; a disposed window is simply dropped.</summary>
+    private static void MarshalToWindow(ScanWindow window, Action action)
+    {
+        if (window.IsDisposed) return;
+        if (window.InvokeRequired)
+            window.BeginInvoke(new Action(() => { if (!window.IsDisposed) action(); }));
+        else
+            action();
     }
 
     private static void BringExistingWindowToFront(ScanWindow window)
@@ -198,6 +282,10 @@ internal sealed class ScanCoordinator : IDisposable
         _monitor.ScanStarted -= Monitor_ScanStarted;
         _monitor.ManualScanCompleted -= Monitor_ManualScanCompleted;
         _monitor.AlertStateChanged -= Monitor_AlertStateChanged;
+
+        // Cooperative shutdown (ADR-007): abort a running deep scan; the scan's own task is tracked
+        // by the monitor, which waits for it in its own DisposeAsync.
+        _deepScanRunner.Cancel();
 
         if (_scanWindow is not null && !_scanWindow.IsDisposed)
             _scanWindow.Dispose();

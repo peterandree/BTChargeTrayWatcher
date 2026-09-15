@@ -14,6 +14,30 @@ internal sealed class ScanViewModel : IDisposable
     public bool AutoRefreshOn  { get; set; } = true;
     public int  Countdown      { get; private set; } = AutoRefreshIntervalSeconds;
 
+    // ── Deep scan (ADR-019, issue #165) ──────────────────────────────────────
+
+    /// <summary>
+    /// Label of the diagnostic scan action. The wording is fixed by ADR-019 §1.
+    /// </summary>
+    public const string DeepScanButtonText = "Deep scan (diagnostic)";
+
+    /// <summary>
+    /// The one-line warning the action must present, verbatim from ADR-019 §1. Kept here (rather
+    /// than inline in the form) so a test can assert it has not drifted from the ADR.
+    /// </summary>
+    public const string DeepScanWarningText =
+        "This scan may temporarily increase Bluetooth activity; recommended for troubleshooting only.";
+
+    /// <summary>True while a deep scan is running: the action is disabled and Cancel is available.</summary>
+    public bool DeepScanActive { get; private set; }
+
+    /// <summary>
+    /// True while the status line is showing the last deep-scan result. The 1 s auto-refresh tick
+    /// rewrites the status line, so the result has to outrank the countdown until the next scan
+    /// starts — otherwise the summary is unreadable a second after it appears.
+    /// </summary>
+    internal bool IsDeepScanSummaryPending { get; private set; }
+
     // ── Device list model ─────────────────────────────────────────────────────
 
     public sealed class DeviceItem
@@ -37,6 +61,9 @@ internal sealed class ScanViewModel : IDisposable
     public event Action<string>?                   StatusChanged;
     public event Action?                           AutoRefreshTriggered;
     public event Action?                           ScanRestarted;
+
+    /// <summary>Raised when a deep scan starts or ends, so the shell can toggle its controls.</summary>
+    public event Action<bool>?                     DeepScanActiveChanged;
 
     private readonly Dictionary<string, int> _previousBattery   = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _currentScanValues = new(StringComparer.OrdinalIgnoreCase);
@@ -83,9 +110,44 @@ internal sealed class ScanViewModel : IDisposable
     {
         ScanComplete = false;
         Countdown    = AutoRefreshIntervalSeconds;
+        IsDeepScanSummaryPending = false;
         _currentScanValues.Clear();
         ScanRestarted?.Invoke();
-        StatusChanged?.Invoke("Scanning for Bluetooth devices...");
+
+        // A manual scan raises this event too, so a deep run must keep its own status line: the
+        // generic text would drop the budget and the cancel hint the user just confirmed.
+        StatusChanged?.Invoke(DeepScanActive
+            ? DeepScanRunningText()
+            : "Scanning for Bluetooth devices...");
+    }
+
+    // ── Deep scan lifecycle ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A deep scan started. Called by the shell once the user has confirmed the warning, so the
+    /// status line explains the run and its limit instead of leaving the previous result on screen.
+    /// </summary>
+    public void OnDeepScanStarted()
+    {
+        DeepScanActive           = true;
+        IsDeepScanSummaryPending = false;
+        DeepScanActiveChanged?.Invoke(true);
+        StatusChanged?.Invoke(DeepScanRunningText());
+    }
+
+    private static string DeepScanRunningText() =>
+        $"Deep scan running — up to {PollingDefaults.DeepScanTimeBudget.TotalSeconds:0} s. Press Cancel to stop early.";
+
+    /// <summary>
+    /// A deep scan ended; shows the outcome summary (ADR-019 §3) and releases the single-run slot.
+    /// </summary>
+    public void OnDeepScanCompleted(DeepScanResult result)
+    {
+        DeepScanActive           = false;
+        IsDeepScanSummaryPending = true;
+        DeepScanActiveChanged?.Invoke(false);
+        StatusChanged?.Invoke(
+            DeepScanPolicy.Describe(result.Outcome, result.DevicesFound, result.DevicesWithBattery));
     }
 
     public DeviceItem OnDeviceFound(string deviceId, string name, int? battery, bool? isCharging = null)
@@ -186,6 +248,9 @@ internal sealed class ScanViewModel : IDisposable
     private void EmitStatus()
     {
         if (!ScanComplete) return;
+
+        // A deep-scan summary outranks the countdown: it is the answer to an explicit user action.
+        if (IsDeepScanSummaryPending) return;
         string text = AutoRefreshOn
             ? $"Scan complete. Auto-refresh in {Countdown}s."
             : "Scan complete. Auto-refresh is off.";

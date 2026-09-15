@@ -146,10 +146,12 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     /// GATT uncached without ever subscribing. Deliberately a separate method rather than a mode
     /// argument on <see cref="StartTrackedScanAsync()"/> so an automatic caller cannot end up on
     /// the active path by accident (issue #164).
+    /// <para>
+    /// The token is required rather than optional, because the only legitimate caller is
+    /// <c>DeepScanRunner</c>, which passes its time budget (ADR-019 §2): an overload defaulting to the
+    /// shutdown token would let a caller run an unbudgeted active scan by accident.
+    /// </para>
     /// </summary>
-    public Task<List<DeviceBatteryInfo>> StartTrackedDeepScanAsync() =>
-        _scanner.StartTrackedScanAsync(BatteryReadMode.DeepScan, _shutdownCts.Token);
-
     public Task<List<DeviceBatteryInfo>> StartTrackedDeepScanAsync(CancellationToken ct) =>
         _scanner.StartTrackedScanAsync(BatteryReadMode.DeepScan, ct);
 

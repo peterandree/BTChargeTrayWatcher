@@ -8,10 +8,18 @@ public partial class ScanWindow : Form
     private readonly Label         _status;
     private readonly ProgressBar   _progress;
     private readonly Button        _closeBtn;
+    private readonly Button        _deepScanBtn;
+    private readonly Button        _cancelBtn;
     private readonly CheckBox      _autoRefreshCheckBox;
 
     // ScanCoordinator subscribes to this to trigger a rescan.
     public event EventHandler? AutoRefreshRequested;
+
+    /// <summary>Raised after the user confirmed the deep-scan warning (ADR-019 §1).</summary>
+    public event EventHandler? DeepScanRequested;
+
+    /// <summary>Raised when the user cancels a running deep scan (ADR-019 §2).</summary>
+    public event EventHandler? DeepScanCancelRequested;
 
     public ScanWindow(ThresholdSettings settings)
     {
@@ -61,6 +69,27 @@ public partial class ScanWindow : Form
         };
         _closeBtn.Click += (_, _) => Close();
 
+        // ADR-019 §1–§2: the diagnostic scan is an explicit, confirmed, cancellable action. It is
+        // the only path that actively probes devices, so it must never be one stray click away.
+        _deepScanBtn = new Button
+        {
+            Text = ScanViewModel.DeepScanButtonText,
+            AutoSize = true,
+            Margin = new Padding(0, 8, 8, 0),
+            UseVisualStyleBackColor = true
+        };
+        _deepScanBtn.Click += (_, _) => RequestDeepScan();
+
+        _cancelBtn = new Button
+        {
+            Text = "Cancel deep scan",
+            AutoSize = true,
+            Enabled = false,
+            Margin = new Padding(0, 8, 8, 0),
+            UseVisualStyleBackColor = true
+        };
+        _cancelBtn.Click += (_, _) => DeepScanCancelRequested?.Invoke(this, EventArgs.Empty);
+
         _autoRefreshCheckBox = new CheckBox
         {
             Text = "Auto-refresh", Checked = true, AutoSize = true,
@@ -73,6 +102,8 @@ public partial class ScanWindow : Form
             AutoSize = true, WrapContents = false, Padding = new Padding(0)
         };
         buttonPanel.Controls.Add(_closeBtn);
+        buttonPanel.Controls.Add(_cancelBtn);
+        buttonPanel.Controls.Add(_deepScanBtn);
         buttonPanel.Controls.Add(_autoRefreshCheckBox);
 
         layout.Controls.Add(_status,      0, 0);
@@ -101,6 +132,11 @@ public partial class ScanWindow : Form
         });
         _vm.AutoRefreshTriggered += () =>
             SafeInvoke(() => AutoRefreshRequested?.Invoke(this, EventArgs.Empty));
+        _vm.DeepScanActiveChanged += active => SafeInvoke(() =>
+        {
+            _deepScanBtn.Enabled = !active;
+            _cancelBtn.Enabled   = active;
+        });
 
         // ── UI → VM bindings ──────────────────────────────────────────────────────
 
@@ -126,6 +162,31 @@ public partial class ScanWindow : Form
         _vm.OnDeviceFound(deviceId, name, battery, isCharging);
 
     internal void OnScanStarted() => _vm.OnScanStarted();
+
+    internal void OnDeepScanStarted() => _vm.OnDeepScanStarted();
+
+    internal void OnDeepScanCompleted(DeepScanResult result) => _vm.OnDeepScanCompleted(result);
+
+    /// <summary>
+    /// Asks the user to confirm the diagnostic scan (ADR-019 §1): the warning is shown verbatim and
+    /// the default answer is <c>No</c>, so Enter or Escape cannot start an active scan by accident.
+    /// </summary>
+    private void RequestDeepScan()
+    {
+        if (_vm.DeepScanActive) return;   // one run per invocation (§2)
+
+        DialogResult answer = MessageBox.Show(
+            this,
+            ScanViewModel.DeepScanWarningText,
+            ScanViewModel.DeepScanButtonText,
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+
+        if (answer != DialogResult.Yes) return;
+
+        DeepScanRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     internal void OnScanComplete(IReadOnlyList<WatchedDevice> trackedDevices)
     {

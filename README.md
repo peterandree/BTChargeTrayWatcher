@@ -128,6 +128,22 @@ The policy is tunable in `src/Monitoring/Gatt/GattSubscriptionDefaults.cs`:
 `MaxConcurrentSubscriptions` (set to `0` to disable subscriptions and fall back to plain polling),
 `SettlingWindow`, and the WinRT call timeout.
 
+### Diagnostic deep scan
+
+Open the scan window from the tray menu and press **Deep scan (diagnostic)** to scan every paired
+device actively. This is the only path that probes devices (it verifies each Classic candidate and
+reads GATT uncached instead of using the Windows cache), so it is strictly opt-in:
+
+- the action shows a warning and asks for confirmation first, and the confirmation defaults to *No*;
+- one run per invocation, under a **30 s** time budget (`PollingDefaults.DeepScanTimeBudget`);
+- **Cancel deep scan** stops it early, and closing the scan window stops it too;
+- when it ends, the window reports how many devices were found and how many returned battery data;
+- a deep scan never creates a GATT notification subscription and never changes the polling cadence
+  (ADR-019).
+
+The window's ordinary scan — when it opens and on its auto-refresh — stays passive, so merely opening
+the scan window does not probe any device.
+
 ### Startup registration
 
 The application can register itself to start with Windows via the tray menu.
@@ -155,7 +171,8 @@ ThresholdSettings                    (src/Settings/)
     └── Persists thresholds, ignored-device list, and overlay exclusions; fires
         Changed (all settings) and LaptopSettingsChanged (laptop thresholds only)
 TrayIcon                             (src/Tray/)
-    └── System-tray icon, context menu, manual scan trigger
+    ├── System-tray icon, context menu, scan window
+    └── DeepScanRunner               confirmed, 30 s-budgeted diagnostic scan (ADR-019)
 ```
 
 **Reading pipeline:** On each poll tick both readers run in parallel. Results
