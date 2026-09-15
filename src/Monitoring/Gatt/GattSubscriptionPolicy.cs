@@ -37,6 +37,22 @@ internal static class GattSubscriptionPolicy
     }
 
     /// <summary>
+    /// Whether a GATT read may be served from the Windows GATT cache. Only a subscribed device on
+    /// the background poll path may: a deep scan must return a value read from the device itself
+    /// (ADR-019), and a device without a subscription has no push source to keep a cache fresh.
+    /// </summary>
+    public static bool ShouldReadBatteryFromCache(bool subscribed, BatteryReadMode mode)
+        => subscribed && mode == BatteryReadMode.Background;
+
+    /// <summary>
+    /// Whether a GATT read may create a notification subscription. Subscriptions belong to the
+    /// background poll only: ADR-019 §2 rules them out during a deep scan, and an already-
+    /// subscribed device does not need a second one.
+    /// </summary>
+    public static bool ShouldAttemptSubscribe(bool subscribed, BatteryReadMode mode)
+        => !subscribed && mode == BatteryReadMode.Background;
+
+    /// <summary>
     /// A subscription that has produced no notification within the settling window is dropped and
     /// must not be retried for the rest of the session. A subscription that has produced at least
     /// one notification is never dropped by the settling rule.

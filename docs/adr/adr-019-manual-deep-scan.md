@@ -39,6 +39,34 @@ Constraints:
 - Reuse `TaskTracker` semantics so the deep scan participates in cooperative shutdown (ADR-007) and honours cancellation.
 - Deep scan should call `DeviceAggregationPipeline.ReadMergedAsync` but pass a flag indicating "diagnostic mode" so readers may adjust timeouts safely.
 
+### Status of this ADR (2026-09-15)
+
+**Read-side mode distinction: implemented.** `BatteryReadMode.DeepScan` (`src/Monitoring/BatteryReadMode.cs`)
+replaced the negative `skipConnectionCheck` boolean, and `ScannerOptions` now carries one read delegate
+per mode (`BluetoothBatteryMonitor` wires `ReadDevices` → `Background`, `DeepReadDevices` → `DeepScan`).
+The mode is chosen by the caller of the scan, because only the caller knows whether the scan was
+user-initiated: `ScanCoordinator.RunManualScanAsync` (user clicked *Scan*) uses
+`BluetoothBatteryMonitor.StartTrackedDeepScanAsync()`, while the automatic
+`ScanCoordinator.RunStartupScanAsync` uses the passive `StartTrackedScanAsync()` — a startup scan must
+never probe actively without confirmation, which is the §1 rule below.
+In `DeepScan` mode:
+
+- the Classic reader actively verifies each candidate (`skipConnectionCheck: false`, the #147 intent);
+- GATT reads use `BluetoothCacheMode.Uncached`, even for a device that holds a subscription; and
+- **no subscription is created** — §2's *"never subscribe to GATT characteristic notifications during a
+deep scan"* is enforced by `GattSubscriptionPolicy.ShouldAttemptSubscribe`, which only returns `true`
+for a background read. Existing subscriptions are left untouched: a diagnostic read must not mutate
+background state.
+
+Before #164 the `skipConnectionCheck: false` branch was unreachable in production, so §2 was enforced
+only by accident (the scan ran the same passive path as the poll, which also meant the active
+verification promised above never happened and a scan *could* create subscriptions as a side effect).
+
+**Still unimplemented from §1–§2:** the dedicated *"Deep scan (diagnostic)"* button with its warning and
+explicit confirmation, the global 30 s time budget, and the progress/cancel panel in `ScanWindow`. Until
+those exist, the app's plain user-initiated scan is the diagnostic path and it now behaves per this ADR's
+read-side rules without the confirmation gate. Tracked in #164.
+
 ## Consequences
 
 - Minimal, temporary increase in device radio activity during the scan.

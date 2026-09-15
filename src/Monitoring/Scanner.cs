@@ -5,6 +5,7 @@ namespace BTChargeTrayWatcher;
 internal sealed class Scanner
 {
     private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _readDevices;
+    private readonly Func<CancellationToken, Task<List<DeviceBatteryInfo>>> _deepReadDevices;
     private readonly ScannerCallbacks _callbacks;
     private readonly ConcurrentDictionary<string, DeviceBatteryInfo> _lastKnown;
     private readonly PollingOrchestrator _poller;
@@ -19,27 +20,36 @@ internal sealed class Scanner
 
     public Scanner(ScannerOptions options)
     {
-        _readDevices   = options.ReadDevices;
-        _callbacks     = options.Callbacks;
-        _lastKnown     = options.LastKnown;
-        _poller        = options.Poller;
-        _tracker       = options.Tracker;
-        _shutdownToken = options.ShutdownToken;
+        _readDevices     = options.ReadDevices;
+        _deepReadDevices = options.DeepReadDevices;
+        _callbacks       = options.Callbacks;
+        _lastKnown       = options.LastKnown;
+        _poller          = options.Poller;
+        _tracker         = options.Tracker;
+        _shutdownToken   = options.ShutdownToken;
     }
 
     // ── Read path ────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Reads the current device list through <see cref="ScannerOptions.ReadDevices"/>, which is
+    /// Reads the current device list through the delegate for <paramref name="mode"/>, which is
     /// already the fully merged GATT + Classic result produced by
     /// <c>BatteryReaderOrchestrator</c> (ADR-002). The Scanner deliberately performs no merge of
     /// its own — there is exactly one merge point in the app, and it is the orchestrator's.
     /// </summary>
+    /// <remarks>
+    /// Two delegates, not one, because the two read modes must not be interchangeable: the quiet
+    /// background read is passive (ADR-017) while a user-initiated scan is the diagnostic read
+    /// (ADR-019) that actively verifies candidates and must never subscribe. Sharing one delegate
+    /// with a hardcoded mode is how the scan ended up on the background path (issue #164).
+    /// </remarks>
     private async Task<List<DeviceBatteryInfo>> ReadDevicesAsync(
+        BatteryReadMode mode,
         bool raiseDeviceFound,
         CancellationToken ct)
     {
-        var results = await _readDevices(ct).ConfigureAwait(false);
+        var read = mode == BatteryReadMode.DeepScan ? _deepReadDevices : _readDevices;
+        var results = await read(ct).ConfigureAwait(false);
 
         if (raiseDeviceFound)
             foreach (var d in results)
@@ -50,10 +60,22 @@ internal sealed class Scanner
 
     // ── Public scan surface ────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Runs a scan in the passive <see cref="BatteryReadMode.Background"/> mode. This is the safe
+    /// default: the automatic startup scan uses it, and passive reads must never become active
+    /// probing without an explicit caller decision (ADR-017, issue #164).
+    /// </summary>
     public Task<List<DeviceBatteryInfo>> ScanNowAsync() =>
-        ScanNowAsync(_shutdownToken);
+        ScanNowAsync(BatteryReadMode.Background, _shutdownToken);
 
-    public async Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct)
+    public Task<List<DeviceBatteryInfo>> ScanNowAsync(CancellationToken ct) =>
+        ScanNowAsync(BatteryReadMode.Background, ct);
+
+    /// <summary>
+    /// Runs a scan in an explicit <see cref="BatteryReadMode"/>. Only a user-initiated diagnostic
+    /// scan may pass <see cref="BatteryReadMode.DeepScan"/> (ADR-019).
+    /// </summary>
+    public async Task<List<DeviceBatteryInfo>> ScanNowAsync(BatteryReadMode mode, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ct.ThrowIfCancellationRequested();
@@ -66,7 +88,7 @@ internal sealed class Scanner
             _isScanning = true;
             _callbacks.OnScanStarted();
 
-            results = await ReadDevicesAsync(raiseDeviceFound: true, ct)
+            results = await ReadDevicesAsync(mode, raiseDeviceFound: true, ct)
                 .ConfigureAwait(false);
 
             await _poller.PollLock.WaitAsync(ct).ConfigureAwait(false);
@@ -98,9 +120,17 @@ internal sealed class Scanner
     }
 
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
-        StartTrackedScanAsync(_shutdownToken);
+        StartTrackedScanAsync(BatteryReadMode.Background, _shutdownToken);
 
-    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct)
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) =>
+        StartTrackedScanAsync(BatteryReadMode.Background, ct);
+
+    /// <summary>
+    /// Runs a tracked scan in an explicit <see cref="BatteryReadMode"/>. The caller chooses the
+    /// mode because only it knows whether the scan was user-initiated: the automatic startup scan
+    /// is background, the manual scan is the diagnostic one (ADR-019, issue #164).
+    /// </summary>
+    public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(BatteryReadMode mode, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -112,7 +142,7 @@ internal sealed class Scanner
             var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken, ct);
             CancellationToken token = linkedCts.Token;
 
-            return ScanNowAsync(token).ContinueWith(t =>
+            return ScanNowAsync(mode, token).ContinueWith(t =>
             {
                 linkedCts.Dispose();
 
@@ -130,7 +160,7 @@ internal sealed class Scanner
     }
 
     internal Task<List<DeviceBatteryInfo>> QuietReadAsync(CancellationToken ct) =>
-        ReadDevicesAsync(raiseDeviceFound: false, ct);
+        ReadDevicesAsync(BatteryReadMode.Background, raiseDeviceFound: false, ct);
 
     public void Dispose()
     {
@@ -152,9 +182,12 @@ internal sealed record ScannerCallbacks(
 
 /// ADR-009: options record keeps infrastructure separate from callbacks.
 /// <paramref name="ReadDevices"/> returns the already-merged GATT + Classic list owned by
-/// <c>BatteryReaderOrchestrator</c> (ADR-002) — it is not a GATT-only delegate (#157).
+/// <c>BatteryReaderOrchestrator</c> (ADR-002) for the passive background read — it is not a
+/// GATT-only delegate (#157). <paramref name="DeepReadDevices"/> is the same shape for the
+/// user-initiated diagnostic scan (ADR-019); the two must not be wired to one mode (#164).
 internal sealed record ScannerOptions(
     Func<CancellationToken, Task<List<DeviceBatteryInfo>>> ReadDevices,
+    Func<CancellationToken, Task<List<DeviceBatteryInfo>>> DeepReadDevices,
     ConcurrentDictionary<string, DeviceBatteryInfo> LastKnown,
     PollingOrchestrator Poller,
     TaskTracker Tracker,

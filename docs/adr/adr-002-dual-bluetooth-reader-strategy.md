@@ -49,11 +49,17 @@ list from that single method, which is what guarantees the two paths see identic
 Consequences for contributors:
 
 - **Do not add a second merge.** `Scanner` and `PollingOrchestrator` consume the orchestrator's output
-  as a single already-merged list. `ScannerOptions.ReadDevices` is intentionally one delegate for that
-  reason; the previous two-delegate (`ReadGatt` + `ReadClassic`) shape was vestigial and always received
-  an empty list for its second input (see issue #157).
+  as a single already-merged list; neither of them merges anything, and the previous two-delegate
+  (`ReadGatt` + `ReadClassic`) shape was vestigial because its second input was always empty
+  (see issue #157).
+- `ScannerOptions` carries one delegate **per read mode**: `ReadDevices` for the passive
+  background/quiet read and `DeepReadDevices` for the user-initiated scan. They are deliberately
+  separate rather than one delegate with a mode argument, because sharing one hardcoded mode is
+  exactly how the manual scan silently ended up on the background path (issue #164). Both delegates
+  produce the same shape and are wired to the same orchestrator method with different
+  `BatteryReadMode` values — neither of them merges.
 - A new reader still means a new `IBatteryReader` implementation under `Monitoring/`, and it still has to
   be merged in `BatteryReaderOrchestrator` — not in `Scanner`.
 - Per-device read policy (for example skipping the active Classic connection check on background polls,
-  ADR-017) is expressed by the arguments the orchestrator exposes, not by swapping delegates at the
-  call site.
+  ADR-017) is expressed by the `BatteryReadMode` the orchestrator exposes, not by swapping delegates at
+  the call site.

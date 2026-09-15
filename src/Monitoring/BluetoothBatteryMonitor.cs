@@ -60,16 +60,29 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (infrastructure.AliasSuggestionService is { } svc)
             infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
 
-        // Single read path for the Scanner: the orchestrator already merges GATT and Classic
-        // internally (ADR-002), so the Scanner must not merge a second time. Background polls
-        // pass skipConnectionCheck=true — DeviceWatcherService provides the passive IsConnected
-        // data, so active radio queries are unnecessary (ADR-017).
+        // Read path for the Scanner: the orchestrator already merges GATT and Classic internally
+        // (ADR-002), so the Scanner must not merge a second time. The mode is what differs between
+        // the two callers, and the Scanner gets one delegate per mode so a caller cannot silently
+        // end up on the wrong one (issue #164):
+        //   Background — the 60 s poll and the quiet read. Passive: DeviceWatcherService already
+        //                provides IsConnected data, so active radio queries are unnecessary
+        //                (ADR-017), and a BLE device may hold a notification subscription.
+        //   DeepScan   — the user-initiated scan. Active: each Classic candidate is verified and
+        //                GATT reads are uncached and never subscribe (ADR-019).
         Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices = ct =>
         {
             infrastructure.AliasSuggestionService?.BeginCycle();
             return infrastructure.Orchestrator.ReadAllAsync(
                 infrastructure.DeviceWatcher.CurrentDevices,
-                true, ct);
+                BatteryReadMode.Background, ct);
+        };
+
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> deepReadDevices = ct =>
+        {
+            infrastructure.AliasSuggestionService?.BeginCycle();
+            return infrastructure.Orchestrator.ReadAllAsync(
+                infrastructure.DeviceWatcher.CurrentDevices,
+                BatteryReadMode.DeepScan, ct);
         };
 
         _taskTracker = new TaskTracker();
@@ -91,12 +104,13 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
                     _gattConnectionManager?.DeviceEvictedAsync(deviceId, ct) ?? Task.CompletedTask)));
 
         _scanner = new Scanner(new ScannerOptions(
-            ReadDevices:   readDevices,
-            LastKnown:     _lastKnown,
-            Poller:        _poller,
-            Tracker:       _taskTracker,
-            ShutdownToken: _shutdownCts.Token,
-            Callbacks:     new ScannerCallbacks(
+            ReadDevices:     readDevices,
+            DeepReadDevices: deepReadDevices,
+            LastKnown:       _lastKnown,
+            Poller:          _poller,
+            Tracker:         _taskTracker,
+            ShutdownToken:   _shutdownCts.Token,
+            Callbacks:       new ScannerCallbacks(
                 OnDeviceFound:   (id, name, lvl) => DeviceFound?.Invoke(id, name, lvl),
                 OnBatteryRead:   (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
                 OnScanStarted:   () => ScanStarted?.Invoke(),
@@ -120,10 +134,24 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
     public Task PollAsync() => StartTrackedPollAsync(_shutdownCts.Token);
     public Task PollAsync(CancellationToken ct) => StartTrackedPollAsync(ct);
 
+    /// <summary>Automatic startup scan — passive (<see cref="BatteryReadMode.Background"/>).</summary>
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync() =>
         _scanner.StartTrackedScanAsync(_shutdownCts.Token);
+
     public Task<List<DeviceBatteryInfo>> StartTrackedScanAsync(CancellationToken ct) =>
         _scanner.StartTrackedScanAsync(ct);
+
+    /// <summary>
+    /// User-initiated diagnostic scan (ADR-019): actively verifies each Classic candidate and reads
+    /// GATT uncached without ever subscribing. Deliberately a separate method rather than a mode
+    /// argument on <see cref="StartTrackedScanAsync()"/> so an automatic caller cannot end up on
+    /// the active path by accident (issue #164).
+    /// </summary>
+    public Task<List<DeviceBatteryInfo>> StartTrackedDeepScanAsync() =>
+        _scanner.StartTrackedScanAsync(BatteryReadMode.DeepScan, _shutdownCts.Token);
+
+    public Task<List<DeviceBatteryInfo>> StartTrackedDeepScanAsync(CancellationToken ct) =>
+        _scanner.StartTrackedScanAsync(BatteryReadMode.DeepScan, ct);
 
     private Task StartTrackedPollAsync(CancellationToken ct)
     {

@@ -86,8 +86,17 @@ internal sealed class GattConnectionManager : IDisposable, IAsyncDisposable
     /// Returns <c>null</c> if the device doesn't expose the battery service or the read fails.
     /// All WinRT references are dropped before returning, except for the bounded subscription set.
     /// </summary>
-    internal async Task<DeviceBatteryInfo?> TryReadBatteryAsync(
+    internal Task<DeviceBatteryInfo?> TryReadBatteryAsync(
         string deviceId, string fallbackName, CancellationToken ct)
+        => TryReadBatteryAsync(deviceId, fallbackName, BatteryReadMode.Background, ct);
+
+    /// <summary>
+    /// Reads the battery level of a single BLE device via GATT 0x2A19 in an explicit
+    /// <see cref="BatteryReadMode"/>; see <see cref="GattSubscriptionPolicy"/> for how the mode
+    /// selects the cache and the subscription behaviour.
+    /// </summary>
+    internal async Task<DeviceBatteryInfo?> TryReadBatteryAsync(
+        string deviceId, string fallbackName, BatteryReadMode mode, CancellationToken ct)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -100,8 +109,10 @@ internal sealed class GattConnectionManager : IDisposable, IAsyncDisposable
             return await ReadBatteryCorAsync(
                     deviceId,
                     fallbackName,
-                    batteryCacheMode: subscribed ? BluetoothCacheMode.Cached : BluetoothCacheMode.Uncached,
-                    attemptSubscribe: !subscribed,
+                    batteryCacheMode: GattSubscriptionPolicy.ShouldReadBatteryFromCache(subscribed, mode)
+                        ? BluetoothCacheMode.Cached
+                        : BluetoothCacheMode.Uncached,
+                    attemptSubscribe: GattSubscriptionPolicy.ShouldAttemptSubscribe(subscribed, mode),
                     ct)
                 .ConfigureAwait(false);
         }

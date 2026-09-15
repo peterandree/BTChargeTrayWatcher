@@ -61,6 +61,8 @@ internal sealed class ScanCoordinator : IDisposable
     {
         if (_disposed) return;
         Debug.WriteLine("[ScanCoordinator] Startup scan started.");
+
+        // Automatic, unconfirmed: always the passive background path (ADR-017, issue #164).
         await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
         Debug.WriteLine("[ScanCoordinator] Startup scan completed.");
     }
@@ -69,7 +71,10 @@ internal sealed class ScanCoordinator : IDisposable
     {
         Debug.WriteLine("[ScanCoordinator] Manual scan started.");
         await _monitor.RefreshTrackedDevicesAsync().ConfigureAwait(false);
-        await _monitor.StartTrackedScanAsync().ConfigureAwait(false);
+
+        // User-initiated diagnostic scan: actively verifies candidates and reads uncached
+        // without subscribing (ADR-019, issue #164).
+        await _monitor.StartTrackedDeepScanAsync().ConfigureAwait(false);
         Debug.WriteLine("[ScanCoordinator] Manual scan completed.");
     }
 

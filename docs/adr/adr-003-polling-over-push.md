@@ -73,6 +73,9 @@ The blanket rule "polling only, never push" is narrowed to a bounded exception:
   re-subscribed in the same session.
 - Every subscription is released on disconnect, on `PowerModes.Suspend`, on device eviction, and on
   manager disposal. The teardown paths are listed in ADR-017's amendment.
+- A user-initiated diagnostic scan (`BatteryReadMode.DeepScan`, ADR-019) reads uncached and never
+  creates a subscription, even for a device whose cache the watchdog poll would use. Existing
+  subscriptions are left untouched, because a diagnostic read must not mutate background state.
 
 ### Unchanged
 

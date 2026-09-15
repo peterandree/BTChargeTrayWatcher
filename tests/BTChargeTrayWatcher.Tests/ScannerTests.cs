@@ -17,6 +17,13 @@ public sealed class ScannerTests : IAsyncDisposable
     // ── Factory ───────────────────────────────────────────────────────────────────────
 
     private readonly List<IAsyncDisposable> _teardown = [];
+
+    /// <summary>
+    /// Which read mode each delegate invocation represented, in call order. Asserted by the mode
+    /// routing tests below: #164 was exactly a case of two callers sharing one mode.
+    /// </summary>
+    private readonly List<BatteryReadMode> _readModes = [];
+
     private sealed record BatteryRead(string Name, int? Pct);
 
     private sealed record ScannerBuildResult(
@@ -29,6 +36,7 @@ public sealed class ScannerTests : IAsyncDisposable
 
     private ScannerBuildResult Build()
     {
+        _readModes.Clear();
         var deviceResults = new List<DeviceBatteryInfo>();
         var lastKnown    = new ConcurrentDictionary<string, DeviceBatteryInfo>(
             StringComparer.OrdinalIgnoreCase);
@@ -55,14 +63,25 @@ public sealed class ScannerTests : IAsyncDisposable
 
         var poller = new PollingOrchestrator(pollerOpts);
 
-        // #157: the Scanner consumes one already-merged source (the orchestrator's output).
+        // #157: the Scanner consumes one already-merged source (the orchestrator's output) per read
+        // mode; the two are separate delegates so a scan can never silently run on the quiet path
+        // (issue #164).
         var opts = new ScannerOptions(
-            ReadDevices:   _ => Task.FromResult(deviceResults),
-            LastKnown:     lastKnown,
-            Poller:        poller,
-            Tracker:       tracker,
-            ShutdownToken: shutdownCts.Token,
-            Callbacks:     new ScannerCallbacks(
+            ReadDevices:     _ =>
+            {
+                _readModes.Add(BatteryReadMode.Background);
+                return Task.FromResult(deviceResults);
+            },
+            DeepReadDevices: _ =>
+            {
+                _readModes.Add(BatteryReadMode.DeepScan);
+                return Task.FromResult(deviceResults);
+            },
+            LastKnown:       lastKnown,
+            Poller:          poller,
+            Tracker:         tracker,
+            ShutdownToken:   shutdownCts.Token,
+            Callbacks:       new ScannerCallbacks(
                 OnDeviceFound:   (_, _, _) => { },
                 OnBatteryRead:   (n, p) => batteryReads.Add(new BatteryRead(n, p)),
                 OnScanStarted:   () => scanStarted.Add(true),
@@ -163,6 +182,60 @@ public sealed class ScannerTests : IAsyncDisposable
         Assert.Equal(2, batteryReads.Count);
         Assert.Contains(batteryReads, r => r.Name == "Mouse"   && r.Pct == 60);
         Assert.Contains(batteryReads, r => r.Name == "Headset" && r.Pct == 40);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // Read-mode routing (#164)
+    // ══════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task User_initiated_deep_scan_uses_the_deep_read_delegate()
+    {
+        var (scanner, _, deviceResults, _, _, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 60));
+
+        await scanner.ScanNowAsync(BatteryReadMode.DeepScan, TestContext.Current.CancellationToken);
+
+        Assert.Equal([BatteryReadMode.DeepScan], _readModes);
+    }
+
+    [Fact]
+    public async Task Scan_without_an_explicit_mode_stays_passive()
+    {
+        // The automatic startup scan uses this overload; it must never become active probing
+        // without an explicit caller decision (ADR-017, issue #164).
+        var (scanner, _, deviceResults, _, _, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 60));
+
+        await scanner.ScanNowAsync(TestContext.Current.CancellationToken);
+        await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([BatteryReadMode.Background, BatteryReadMode.Background], _readModes);
+    }
+
+    [Fact]
+    public async Task Quiet_read_uses_the_background_delegate()
+    {
+        var (scanner, _, _, _, _, _) = Build();
+
+        await scanner.QuietReadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal([BatteryReadMode.Background], _readModes);
+    }
+
+    [Fact]
+    public async Task Scan_and_quiet_read_do_not_share_a_delegate()
+    {
+        var (scanner, _, _, _, _, _) = Build();
+        var ct = TestContext.Current.CancellationToken;
+
+        await scanner.QuietReadAsync(ct);
+        await scanner.StartTrackedScanAsync(BatteryReadMode.DeepScan, ct);
+        await scanner.QuietReadAsync(ct);
+
+        Assert.Equal(
+            [BatteryReadMode.Background, BatteryReadMode.DeepScan, BatteryReadMode.Background],
+            _readModes);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════

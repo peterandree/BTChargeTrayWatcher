@@ -105,12 +105,12 @@ public sealed class GattSubscriptionPollCycleTests
             new DeviceCapabilityCache());
 
         // Inside the settling window: the subscription survives the poll.
-        await orchestrator.ReadAllAsync([], skipConnectionCheck: true, ct);
+        await orchestrator.ReadAllAsync([], BatteryReadMode.Background, ct);
         Assert.True(manager.Subscriptions.IsSubscribed("dev-1"));
 
         // Past the settling window: the next poll cycle drops it and never retries.
         now += TimeSpan.FromMinutes(10);
-        await orchestrator.ReadAllAsync([], skipConnectionCheck: true, ct);
+        await orchestrator.ReadAllAsync([], BatteryReadMode.Background, ct);
 
         Assert.False(manager.Subscriptions.IsSubscribed("dev-1"));
         Assert.True(manager.Subscriptions.IsDroppedForSession("dev-1"));
@@ -136,7 +136,7 @@ public sealed class GattSubscriptionPollCycleTests
             new DeviceCapabilityCache());
 
         now += TimeSpan.FromMinutes(30);
-        await orchestrator.ReadAllAsync([], skipConnectionCheck: true, ct);
+        await orchestrator.ReadAllAsync([], BatteryReadMode.Background, ct);
 
         Assert.True(manager.Subscriptions.IsSubscribed("dev-1"));
         Assert.Empty(fake.Unsubscribed);

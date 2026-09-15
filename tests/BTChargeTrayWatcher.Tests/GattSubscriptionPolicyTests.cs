@@ -71,6 +71,30 @@ public sealed class GattSubscriptionPolicyTests
             maxConcurrentSubscriptions: -1));
     }
 
+    // ── Read mode: cache and subscription permission (#164) ───────────────────────────────
+
+    [Fact]
+    public void Only_a_subscribed_background_read_may_use_the_cache()
+    {
+        // A diagnostic scan must return a value read from the device itself (ADR-019).
+        Assert.True(GattSubscriptionPolicy.ShouldReadBatteryFromCache(
+            subscribed: true, mode: BatteryReadMode.Background));
+        Assert.False(GattSubscriptionPolicy.ShouldReadBatteryFromCache(true, BatteryReadMode.DeepScan));
+        Assert.False(GattSubscriptionPolicy.ShouldReadBatteryFromCache(false, BatteryReadMode.Background));
+        Assert.False(GattSubscriptionPolicy.ShouldReadBatteryFromCache(false, BatteryReadMode.DeepScan));
+    }
+
+    [Fact]
+    public void Only_a_background_read_may_create_a_subscription()
+    {
+        // ADR-019 §2: a deep scan never subscribes. An already-subscribed device never re-subscribes.
+        Assert.True(GattSubscriptionPolicy.ShouldAttemptSubscribe(
+            subscribed: false, mode: BatteryReadMode.Background));
+        Assert.False(GattSubscriptionPolicy.ShouldAttemptSubscribe(false, BatteryReadMode.DeepScan));
+        Assert.False(GattSubscriptionPolicy.ShouldAttemptSubscribe(true, BatteryReadMode.Background));
+        Assert.False(GattSubscriptionPolicy.ShouldAttemptSubscribe(true, BatteryReadMode.DeepScan));
+    }
+
     // ── Settling window ────────────────────────────────────────────────────────────────────
 
     [Fact]

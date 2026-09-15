@@ -85,11 +85,17 @@ The production entry point is a constructor that accepts a single infrastructure
 
 ### Scanner
 
-Executes full device scans (used at startup and on user request). On the cooperation-stack path, the injected GATT reader is a delegate over `BatteryReaderOrchestrator.ReadAllAsync` (fed by `DeviceWatcherService.CurrentDevices`) and the Classic reader is a no-op — Classic reads already happen inside the orchestrator. Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
+Executes full device scans (used at startup and on user request). On the cooperation-stack path, both readers are delegates over `BatteryReaderOrchestrator.ReadAllAsync` (fed by `DeviceWatcherService.CurrentDevices`), one per read mode: `ScannerOptions.ReadDevices` → `BatteryReadMode.Background` for the quiet read, `ScannerOptions.DeepReadDevices` → `BatteryReadMode.DeepScan` for the user-initiated scan. They are separate so a scan can never silently run on the passive path (issue #164). Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
 
 ### BatteryReaderOrchestrator
 
 **Cooperation-stack (production) path only.** Reads each connected BLE device via `GattConnectionManager.TryReadBatteryAsync` and runs `ClassicBatteryReader.ReadAllAsync` concurrently via `Task.WhenAll`, then merges results with deduplication (GATT wins on name/ID collision, Classic tagged with `BatterySource.Classic`). Updates `DeviceCapabilityCache` after each GATT attempt. Faults in either reader are logged and treated as empty results.
+
+The read mode is an explicit parameter (`BatteryReadMode.Background` / `DeepScan`, issue #164) rather
+than a boolean, and it drives both readers: `Background` skips the active Classic connection check
+(ADR-017) and lets a BLE device hold a bounded notification subscription; `DeepScan` verifies each
+Classic candidate and reads GATT uncached without ever subscribing (ADR-019). The mode also drives the
+two `ScannerOptions` delegates, so a caller cannot inherit the wrong one by accident.
 
 All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (discovery logging) implementations that affect aggregation live here.
 
@@ -97,8 +103,9 @@ All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (d
 
 The legacy `IBatteryReader`-based merge class no longer exists (removed in #149).
 `BatteryReaderOrchestrator` is now the **single** merge point for GATT + Classic results; `Scanner`
-consumes its output through one delegate (`ScannerOptions.ReadDevices`) and performs no merge of its
-own. There is no legacy parallel path left to describe — see the ADR-002 amendment.
+consumes its output through one delegate per read mode (`ScannerOptions.ReadDevices`,
+`ScannerOptions.DeepReadDevices`) and performs no merge of its own. There is no legacy parallel path
+left to describe — see the ADR-002 amendment.
 
 ### PollingOrchestrator
 
@@ -148,9 +155,10 @@ All configuration in one class. Persists to `%LOCALAPPDATA%\BTChargeTrayWatcher\
 Timer tick (every 60 s)
   └─► PollingOrchestrator.OnTimerTick
         └─► TaskTracker.Start(SafePollAsync)
-              └─► BatteryReaderOrchestrator.ReadAllAsync (quiet)
-                    ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
-                    └─► ClassicBatteryReader.ReadAllAsync
+              └─► BatteryReaderOrchestrator.ReadAllAsync (BatteryReadMode.Background)
+                    ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device;
+                    │     cached read if subscribed, may subscribe, skip classic checks)
+                    └─► ClassicBatteryReader.ReadAllAsync (skipConnectionCheck: true)
               └─► for each device:
                     update _lastKnown
                     classify BatteryAlertState (with hysteresis)
@@ -164,10 +172,13 @@ Timer tick (every 60 s)
 ```
 User clicks tray → ScanCoordinator.OpenScanWindowAndTriggerScan
   └─► ScanWindow shown
-  └─► BluetoothBatteryMonitor.StartTrackedScanAsync              └─► Scanner.ScanNowAsync
-                    └─► BatteryReaderOrchestrator.ReadAllAsync (raises DeviceFound events)
-                          ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device)
-                          └─► ClassicBatteryReader.ReadAllAsync
+  └─► BluetoothBatteryMonitor.StartTrackedDeepScanAsync           └─► Scanner.ScanNowAsync(DeepScan)
+                    └─► BatteryReaderOrchestrator.ReadAllAsync (BatteryReadMode.DeepScan,
+                          raises DeviceFound events)
+                          ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device;
+                          │     uncached, never subscribes)
+                          └─► ClassicBatteryReader.ReadAllAsync (skipConnectionCheck: false,
+                                actively verifies each candidate)
               └─► update _lastKnown
               └─► fire ManualScanCompleted
                     └─► ScanWindow.OnScanComplete

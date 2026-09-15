@@ -43,15 +43,16 @@ internal sealed class BatteryReaderOrchestrator
         _settings       = settings;
     }
 
-    /// <param name="skipConnectionCheck">
-    /// When <c>true</c> (background poll), skips active per-device connection
-    /// checks in the Classic reader to avoid N parallel radio queries every
-    /// poll cycle (ADR-017). When <c>false</c> (manual deep scan), each
-    /// candidate is actively verified (ADR-019).
+    /// <param name="mode">
+    /// <see cref="BatteryReadMode.Background"/> for the passive poll cycle: the Classic reader
+    /// reuses the watcher's <c>IsConnected</c> data instead of issuing N parallel radio queries
+    /// (ADR-017), and a BLE device may hold a bounded notification subscription.
+    /// <see cref="BatteryReadMode.DeepScan"/> for the user-initiated diagnostic scan: each Classic
+    /// candidate is actively verified and GATT reads are uncached and never subscribe (ADR-019).
     /// </param>
     internal async Task<List<DeviceBatteryInfo>> ReadAllAsync(
         IReadOnlyList<WatchedDevice> watchedDevices,
-        bool skipConnectionCheck,
+        BatteryReadMode mode,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -66,7 +67,7 @@ internal sealed class BatteryReaderOrchestrator
         {
             if (dev.IsBle && dev.IsConnected && _capabilityCache.ShouldAttempt(dev.DeviceId))
             {
-                gattTasks.Add(SafeGattReadAsync(dev, ct));
+                gattTasks.Add(SafeGattReadAsync(dev, mode, ct));
             }
             else if (dev.IsBle && !dev.IsConnected)
             {
@@ -81,7 +82,7 @@ internal sealed class BatteryReaderOrchestrator
             }
         }
 
-        var classicTask = SafeClassicReadAsync(skipConnectionCheck, ct);
+        var classicTask = SafeClassicReadAsync(mode == BatteryReadMode.Background, ct);
 
         await Task.WhenAll(
             Task.WhenAll(gattTasks),
@@ -253,13 +254,14 @@ internal sealed class BatteryReaderOrchestrator
         return merged;
     }
 
-    private async Task<GattReadOutcome> SafeGattReadAsync(WatchedDevice device, CancellationToken ct)
+    private async Task<GattReadOutcome> SafeGattReadAsync(
+        WatchedDevice device, BatteryReadMode mode, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var result = await _gattManager
-                .TryReadBatteryAsync(device.DeviceId, device.Name, ct)
+                .TryReadBatteryAsync(device.DeviceId, device.Name, mode, ct)
                 .ConfigureAwait(false);
             return new GattReadOutcome(device.DeviceId, result);
         }
