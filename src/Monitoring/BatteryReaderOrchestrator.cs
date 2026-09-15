@@ -56,6 +56,11 @@ internal sealed class BatteryReaderOrchestrator
     {
         ct.ThrowIfCancellationRequested();
 
+        // Settling-window enforcement for the bounded GATT subscription set (#158/#160). Runs
+        // once per read cycle, before any device is read, so it needs no timer of its own and the
+        // result of this cycle already reflects any drop.
+        await _gattManager.PruneSubscriptionsAsync(ct).ConfigureAwait(false);
+
         var gattTasks = new List<Task<GattReadOutcome>>();
         foreach (var dev in watchedDevices)
         {
