@@ -60,21 +60,17 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (infrastructure.AliasSuggestionService is { } svc)
             infrastructure.Orchestrator.AliasSuggested += svc.OnAliasSuggested;
 
-        // Background poll: skipConnectionCheck=true — DeviceWatcherService provides
-        // passive IsConnected data, so active radio queries are unnecessary (ADR-017).
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readGatt = ct =>
+        // Single read path for the Scanner: the orchestrator already merges GATT and Classic
+        // internally (ADR-002), so the Scanner must not merge a second time. Background polls
+        // pass skipConnectionCheck=true — DeviceWatcherService provides the passive IsConnected
+        // data, so active radio queries are unnecessary (ADR-017).
+        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readDevices = ct =>
         {
             infrastructure.AliasSuggestionService?.BeginCycle();
             return infrastructure.Orchestrator.ReadAllAsync(
                 infrastructure.DeviceWatcher.CurrentDevices,
                 true, ct);
         };
-
-        // Classic read is already wired into the orchestrator's delegate in Program.cs.
-        // For the Scanner's direct classic path we reuse the same orchestrator call;
-        // supply a no-op classic stub here so Scanner uses readGatt exclusively.
-        Func<CancellationToken, Task<List<DeviceBatteryInfo>>> readClassicPassthrough =
-            ct => Task.FromResult(new List<DeviceBatteryInfo>());
 
         _taskTracker = new TaskTracker();
 
@@ -91,8 +87,7 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
                 OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert))));
 
         _scanner = new Scanner(new ScannerOptions(
-            ReadGatt:      readGatt,
-            ReadClassic:   readClassicPassthrough,
+            ReadDevices:   readDevices,
             LastKnown:     _lastKnown,
             Poller:        _poller,
             Tracker:       _taskTracker,

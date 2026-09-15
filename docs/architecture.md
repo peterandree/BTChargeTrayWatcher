@@ -93,11 +93,12 @@ Executes full device scans (used at startup and on user request). On the coopera
 
 All ADR-015 (alias resolution), ADR-016 (device class filtering), and ADR-018 (discovery logging) implementations that affect aggregation live here.
 
-### DeviceAggregationPipeline
+### Removed: DeviceAggregationPipeline
 
-**Legacy IBatteryReader path only — not reached by `Program.cs`.** Previously used by `Scanner` when constructed with explicit `IBatteryReader` instances via now-removed legacy constructors. Performs the same parallel-read-and-merge responsibility as `BatteryReaderOrchestrator` but without the cooperation-stack features (no `GattConnectionManager`, no `DeviceCapabilityCache`, no per-device GATT connection reuse).
-
-Retained only to keep `ScannerTests` and `DeviceAggregationPipelineTests` green. All legacy constructors have now been eliminated (issue #100 follow-up complete).
+The legacy `IBatteryReader`-based merge class no longer exists (removed in #149).
+`BatteryReaderOrchestrator` is now the **single** merge point for GATT + Classic results; `Scanner`
+consumes its output through one delegate (`ScannerOptions.ReadDevices`) and performs no merge of its
+own. There is no legacy parallel path left to describe — see the ADR-002 amendment.
 
 ### PollingOrchestrator
 
@@ -206,12 +207,12 @@ The file is written atomically. Corrupt or missing files reset to defaults (20 /
 ### Device alias migration & heuristics (ADR-015)
 To improve resilience to device re-pairing and renaming, `ThresholdSettings` now includes an alias/history mapping (`AliasMap`) that links historical display-name variants to a canonical name. `BatteryReaderOrchestrator` (production path) applies a multi-stage alias resolution pipeline (exact match, alias lookup, normalized equivalence, and high-confidence fuzzy match). Only high-confidence matches are auto-applied; fuzzy matches are surfaced as suggestions in the UI for user confirmation. The Options UI exposes a surface for managing and confirming alias mappings.
 
-> **Note:** `DeviceAggregationPipeline` is the legacy-path counterpart and is not reached by `Program.cs`. ADR-015 alias resolution applies to `BatteryReaderOrchestrator` only.
+> **Note:** `BatteryReaderOrchestrator` is the only aggregation path in the app; the legacy counterpart (`DeviceAggregationPipeline`) was removed in #149. ADR-015 alias resolution applies there and nowhere else.
 
 ### Device class/type filtering policy (ADR-016)
 `BatteryReaderOrchestrator` (production path) filters out devices that do not expose battery data or are not in a known battery-bearing category (audio, keyboard, mouse, gamepad, wearable). Users can override this in the Options UI to show or include filtered devices. The default category list is conservative and can be extended via an advanced setting.
 
-> **Note:** ADR-016 filtering applies to `BatteryReaderOrchestrator` only, not `DeviceAggregationPipeline`.
+> **Note:** ADR-016 filtering applies inside `BatteryReaderOrchestrator` (there is no other aggregation path since #149).
 
 ### Passive Windows.Devices.Enumeration reader (ADR-017)
 An optional `EnumerationBatteryReader` (if present) passively enumerates Bluetooth devices using `Windows.Devices.Enumeration` without opening connections or waking radios. Its results are merged at lower precedence than GATT or Classic. This increases device coverage without additional battery impact.
@@ -219,7 +220,7 @@ An optional `EnumerationBatteryReader` (if present) passively enumerates Bluetoo
 ### Centralized discovery logging (ADR-018)
 All device discovery and aggregation operations in `BatteryReaderOrchestrator` now log to a structured, centralized `DiscoveryLogger`. Logs are local-only (Debug.WriteLine or optional file sink) and use compact JSON with error codes for easier debugging and support.
 
-> **Note:** ADR-018 logging applies to `BatteryReaderOrchestrator` only, not `DeviceAggregationPipeline`.
+> **Note:** ADR-018 logging applies to `BatteryReaderOrchestrator` (the only aggregation path since #149).
 
 ### Manual "Deep Scan" UX & operational limits (ADR-019)
 The Scan UI now exposes a "Deep Scan" action for diagnostic purposes. Deep scans are user-initiated, timeboxed, and cancellable, and never increase background scan frequency. They allow users to resolve recognition issues, confirm alias suggestions, and include filtered devices, all without increasing long-term battery impact.

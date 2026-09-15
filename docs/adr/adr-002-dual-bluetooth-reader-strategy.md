@@ -29,3 +29,31 @@ Both implement the same `IBatteryReader` interface so they are interchangeable i
 - A device that appears in both readers (rare but possible) is deduplicated. The GATT reading is preferred as it is typically more accurate.
 - Two separate Windows API surface areas must be maintained.
 - `AllowUnsafeBlocks` is required for the SetupAPI P/Invoke in the Classic path.
+
+---
+
+## Update (2026-09) — the merge moved, the two readers did not
+
+**Status:** Accepted, amended.
+
+The decision above still holds: there are two readers because Windows exposes battery data through two
+mechanisms, and their union covers the most devices.
+
+What changed is *where* the two results are merged. `DeviceAggregationPipeline.ReadMergedAsync` — the
+original merge point named above — is no longer wired into production. The merge now happens exactly
+once, inside `BatteryReaderOrchestrator.ReadAllAsync` (`src/Monitoring/BatteryReaderOrchestrator.cs`),
+which runs `GattConnectionManager` and `ClassicBatteryReader` concurrently and applies the same rule
+(GATT wins on `DeviceId` collision). Both the background poll and the manual scan obtain their device
+list from that single method, which is what guarantees the two paths see identical data.
+
+Consequences for contributors:
+
+- **Do not add a second merge.** `Scanner` and `PollingOrchestrator` consume the orchestrator's output
+  as a single already-merged list. `ScannerOptions.ReadDevices` is intentionally one delegate for that
+  reason; the previous two-delegate (`ReadGatt` + `ReadClassic`) shape was vestigial and always received
+  an empty list for its second input (see issue #157).
+- A new reader still means a new `IBatteryReader` implementation under `Monitoring/`, and it still has to
+  be merged in `BatteryReaderOrchestrator` — not in `Scanner`.
+- Per-device read policy (for example skipping the active Classic connection check on background polls,
+  ADR-017) is expressed by the arguments the orchestrator exposes, not by swapping delegates at the
+  call site.

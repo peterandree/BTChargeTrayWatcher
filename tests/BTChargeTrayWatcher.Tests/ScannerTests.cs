@@ -22,14 +22,14 @@ public sealed class ScannerTests : IAsyncDisposable
     private sealed record ScannerBuildResult(
         Scanner scanner,
         ConcurrentDictionary<string, DeviceBatteryInfo> lastKnown,
-        List<DeviceBatteryInfo> gattResults,
+        List<DeviceBatteryInfo> deviceResults,
         List<BatteryRead> batteryReads,
         List<IReadOnlyList<DeviceBatteryInfo>> scanCompletions,
         List<bool> scanStarted);
 
     private ScannerBuildResult Build()
     {
-        var gattResults  = new List<DeviceBatteryInfo>();
+        var deviceResults = new List<DeviceBatteryInfo>();
         var lastKnown    = new ConcurrentDictionary<string, DeviceBatteryInfo>(
             StringComparer.OrdinalIgnoreCase);
         var batteryReads    = new List<BatteryRead>();
@@ -55,9 +55,9 @@ public sealed class ScannerTests : IAsyncDisposable
 
         var poller = new PollingOrchestrator(pollerOpts);
 
+        // #157: the Scanner consumes one already-merged source (the orchestrator's output).
         var opts = new ScannerOptions(
-            ReadGatt:      _ => Task.FromResult(gattResults),
-            ReadClassic:   _ => Task.FromResult(new List<DeviceBatteryInfo>()),
+            ReadDevices:   _ => Task.FromResult(deviceResults),
             LastKnown:     lastKnown,
             Poller:        poller,
             Tracker:       tracker,
@@ -81,7 +81,7 @@ public sealed class ScannerTests : IAsyncDisposable
             poller.Dispose();
         }));
 
-        return new ScannerBuildResult(scanner, lastKnown, gattResults, batteryReads, scanCompletions, scanStarted);
+        return new ScannerBuildResult(scanner, lastKnown, deviceResults, batteryReads, scanCompletions, scanStarted);
     }
 
     private sealed class AsyncDisposableAction(Func<Task> action) : IAsyncDisposable
@@ -102,8 +102,8 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task OnScanStarted_fires_before_results_available()
     {
-        var (scanner, _, gattResults, _, _, scanStarted) = Build();
-        gattResults.Add(Dev("A", "Mouse", 60));
+        var (scanner, _, deviceResults, _, _, scanStarted) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 60));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
@@ -113,9 +113,9 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task OnScanCompleted_fires_after_scan_with_merged_results()
     {
-        var (scanner, _, gattResults, _, scanCompletions, _) = Build();
-        gattResults.Add(Dev("A", "Mouse", 60));
-        gattResults.Add(Dev("B", "Keyboard", 75));
+        var (scanner, _, deviceResults, _, scanCompletions, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 60));
+        deviceResults.Add(Dev("B", "Keyboard", 75));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
@@ -130,8 +130,8 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task Device_with_battery_added_to_lastKnown()
     {
-        var (scanner, lastKnown, gattResults, _, _, _) = Build();
-        gattResults.Add(Dev("A", "Mouse", 55));
+        var (scanner, lastKnown, deviceResults, _, _, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 55));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
@@ -142,8 +142,8 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task Device_with_null_battery_not_added_to_lastKnown()
     {
-        var (scanner, lastKnown, gattResults, _, _, _) = Build();
-        gattResults.Add(Dev("A", "Ghost", null));
+        var (scanner, lastKnown, deviceResults, _, _, _) = Build();
+        deviceResults.Add(Dev("A", "Ghost", null));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
@@ -153,10 +153,10 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task OnBatteryRead_fires_for_each_device_with_battery()
     {
-        var (scanner, _, gattResults, batteryReads, _, _) = Build();
-        gattResults.Add(Dev("A", "Mouse",    60));
-        gattResults.Add(Dev("B", "Keyboard", null));
-        gattResults.Add(Dev("C", "Headset",  40));
+        var (scanner, _, deviceResults, batteryReads, _, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse",    60));
+        deviceResults.Add(Dev("B", "Keyboard", null));
+        deviceResults.Add(Dev("C", "Headset",  40));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
@@ -172,8 +172,8 @@ public sealed class ScannerTests : IAsyncDisposable
     [Fact]
     public async Task IsScanning_false_after_scan_completes()
     {
-        var (scanner, _, gattResults, _, _, _) = Build();
-        gattResults.Add(Dev("A", "Mouse", 50));
+        var (scanner, _, deviceResults, _, _, _) = Build();
+        deviceResults.Add(Dev("A", "Mouse", 50));
 
         await scanner.StartTrackedScanAsync(TestContext.Current.CancellationToken);
 
