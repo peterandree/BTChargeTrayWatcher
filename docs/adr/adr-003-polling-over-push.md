@@ -58,9 +58,12 @@ The blanket rule "polling only, never push" is narrowed to a bounded exception:
   `Connected`. Subscriptions are never created by forcing a connection, so a sleeping peripheral is
   still left asleep.
 - The 60 s poll is **unchanged as the watchdog** for subscribed devices, but reads the value with
-  `BluetoothCacheMode.Cached`; a pushed value is used when the OS cache has nothing. If neither is
-  available, exactly one uncached read is performed so the capability cache and alert state machine
-  see the same result as before this amendment.
+  `BluetoothCacheMode.Cached`; a pushed value is used when the OS cache has nothing. The cache is
+  preferred over the last push on purpose: the Windows GATT client updates that cached attribute on
+  every notification, so it is never older than the pushed value, and it also picks up values the
+  peripheral reports outside our subscription. If neither is available, exactly one uncached read is
+  performed so the capability cache and alert state machine see the same result as before this
+  amendment.
 - At most `GattSubscriptionDefaults.MaxConcurrentSubscriptions` (default **2**, mirroring
   `PollingDefaults.GattMaxConcurrentReads`) devices hold a subscription at once. Setting it to `0`
   restores the pre-amendment behaviour exactly; that is the documented baseline configuration for

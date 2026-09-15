@@ -13,7 +13,7 @@ public sealed class GattSubscriptionPollCycleTests
         FakeGattNotificationSubscription fake,
         TimeSpan? settlingWindow = null,
         Func<DateTime>? clock = null) =>
-        new(maxConcurrency: 1, fake, settlingWindow: settlingWindow, clock: clock);
+        new(1, new GattSubscriptionCoordinator(fake, settlingWindow: settlingWindow, clock: clock));
 
     // ── Manager teardown entry points (#161) ──────────────────────────────────────────────
 

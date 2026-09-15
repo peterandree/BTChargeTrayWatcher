@@ -50,9 +50,18 @@ internal sealed class GattConnectionManager : IDisposable, IAsyncDisposable
     private readonly Func<string, string, CancellationToken, Task<DeviceBatteryInfo?>>? _testOverride;
 
     internal GattConnectionManager(int maxConcurrency)
+        : this(maxConcurrency, new GattSubscriptionCoordinator(new WinRtGattNotificationSubscription()))
+    {
+    }
+
+    /// <summary>
+    /// Test-friendly overload: the real read-path shape with an injected subscription coordinator.
+    /// Two parameters, so ADR-008's options-record threshold is not reached.
+    /// </summary>
+    internal GattConnectionManager(int maxConcurrency, GattSubscriptionCoordinator subscriptions)
     {
         _gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-        _subscriptions = new GattSubscriptionCoordinator(new WinRtGattNotificationSubscription());
+        _subscriptions = subscriptions;
     }
 
     internal GattConnectionManager(
@@ -61,25 +70,6 @@ internal sealed class GattConnectionManager : IDisposable, IAsyncDisposable
         : this(maxConcurrency)
     {
         _testOverride = testOverride;
-    }
-
-    /// <summary>
-    /// Test-friendly overload: real read-path shape with an injected subscription seam, plus the
-    /// optional policy knobs so the settling rule can be exercised without hardware or waiting.
-    /// </summary>
-    internal GattConnectionManager(
-        int maxConcurrency,
-        IGattNotificationSubscription subscriptions,
-        int? maxConcurrentSubscriptions = null,
-        TimeSpan? settlingWindow = null,
-        Func<DateTime>? clock = null)
-    {
-        _gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-        _subscriptions = new GattSubscriptionCoordinator(
-            subscriptions,
-            maxConcurrentSubscriptions ?? GattSubscriptionDefaults.MaxConcurrentSubscriptions,
-            settlingWindow,
-            clock);
     }
 
     internal GattConnectionManager()

@@ -125,8 +125,8 @@ of the session, and every subscription is released when the device disconnects, 
 the device is evicted, or the app is closed.
 
 The policy is tunable in `src/Monitoring/Gatt/GattSubscriptionDefaults.cs`:
-`MaxConcurrentSubscriptions` (set to `0` to disable subscriptions and get the pre-3.3 polling
-behaviour back), `SettlingWindow`, and the WinRT call timeout.
+`MaxConcurrentSubscriptions` (set to `0` to disable subscriptions and fall back to plain polling),
+`SettlingWindow`, and the WinRT call timeout.
 
 ### Startup registration
 

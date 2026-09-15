@@ -138,8 +138,9 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
         }
         catch (Exception ex)
         {
+            // The reservation is released by the not-subscribed branch below, which is the single
+            // place that decides whether a slot is kept.
             DebugLog($"Subscribe fault for '{deviceId}': {ex}");
-            ReleaseReservation(deviceId);
             subscribed = false;
         }
 
@@ -161,9 +162,11 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
         }
 
         bool disposeRace;
+        int activeCount;
         lock (_lock)
         {
             disposeRace = _disposed;
+            activeCount = _active.Count;
         }
 
         if (disposeRace)
@@ -175,17 +178,16 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
             return false;
         }
 
-        lock (_lock)
-        {
-            DiscoveryLogger.Log(
-                reader:     ReaderName,
-                operation:  "Subscribe",
-                outcome:    "SUBSCRIBED",
-                errorCode:  DiscoveryLogger.Codes.GattSubscribed,
-                message:    $"active={_active.Count}, cap={_maxConcurrentSubscriptions}",
-                deviceId:   deviceId,
-                deviceName: fallbackName);
-        }
+        // Logging happens outside the lock: the sink is user code (a test observer), and no
+        // bookkeeping decision depends on its result.
+        DiscoveryLogger.Log(
+            reader:     ReaderName,
+            operation:  "Subscribe",
+            outcome:    "SUBSCRIBED",
+            errorCode:  DiscoveryLogger.Codes.GattSubscribed,
+            message:    $"active={activeCount}, cap={_maxConcurrentSubscriptions}",
+            deviceId:   deviceId,
+            deviceName: fallbackName);
 
         return true;
     }
@@ -280,6 +282,7 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
         {
             // Shutdown/suspend cancelled the round-trip. The implementation detaches its handlers
             // and drops its WinRT references before awaiting WinRT, so nothing outlives this call.
+            DebugLog($"Unsubscribe cancelled for '{deviceId}' ({reason}); references already released");
         }
         catch (Exception ex)
         {
@@ -299,37 +302,48 @@ internal sealed class GattSubscriptionCoordinator : IDisposable
     {
         if (e.Battery < 0 || e.Battery > 100) return;
 
+        bool tracked = false;
         lock (_lock)
         {
-            if (!_active.TryGetValue(e.DeviceId, out var state)) return; // post-teardown: ignore
-            state.HasNotified = true;
-            state.LastNotificationBattery = e.Battery;
-
-            DiscoveryLogger.Log(
-                reader:     ReaderName,
-                operation:  "Notify",
-                outcome:    "NOTIFIED",
-                errorCode:  DiscoveryLogger.Codes.GattNotificationReceived,
-                message:    $"battery={e.Battery}",
-                deviceId:   e.DeviceId);
+            if (_active.TryGetValue(e.DeviceId, out var state))
+            {
+                tracked = true;
+                state.HasNotified = true;
+                state.LastNotificationBattery = e.Battery;
+            }
         }
+
+        // Post-teardown pushes are ignored; logged outside the lock so the sink cannot extend the
+        // critical section.
+        if (!tracked) return;
+
+        DiscoveryLogger.Log(
+            reader:     ReaderName,
+            operation:  "Notify",
+            outcome:    "NOTIFIED",
+            errorCode:  DiscoveryLogger.Codes.GattNotificationReceived,
+            message:    $"battery={e.Battery}",
+            deviceId:   e.DeviceId);
     }
 
     private void OnSubscriptionLost(object? sender, GattSubscriptionLostEventArgs e)
     {
         // The implementation already released its WinRT references, so only bookkeeping remains.
+        bool removed;
         lock (_lock)
         {
-            if (!_active.Remove(e.DeviceId)) return;
-
-            DiscoveryLogger.Log(
-                reader:     ReaderName,
-                operation:  "Drop",
-                outcome:    "WARN",
-                errorCode:  DiscoveryLogger.Codes.GattSubscriptionDropped,
-                message:    $"reason={e.Reason}",
-                deviceId:   e.DeviceId);
+            removed = _active.Remove(e.DeviceId);
         }
+
+        if (!removed) return;
+
+        DiscoveryLogger.Log(
+            reader:     ReaderName,
+            operation:  "Drop",
+            outcome:    "WARN",
+            errorCode:  DiscoveryLogger.Codes.GattSubscriptionDropped,
+            message:    $"reason={e.Reason}",
+            deviceId:   e.DeviceId);
     }
 
     public void Dispose()
