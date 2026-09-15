@@ -84,7 +84,11 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
             Callbacks:     new PollingOrchestratorCallbacks(
                 OnBatteryRead:       (name, lvl) => DeviceBatteryRead?.Invoke(name, lvl),
                 OnScanCompleted:     list => BackgroundRefreshCompleted?.Invoke(list),
-                OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert))));
+                OnAlertStateChanged: hasAlert => AlertStateChanged?.Invoke(hasAlert),
+                // #161: release the GATT subscription when a device is evicted after repeated
+                // misses, so no subscription record outlives its known-device cache entry.
+                OnDeviceEvicted:     (deviceId, ct) =>
+                    _gattConnectionManager?.DeviceEvictedAsync(deviceId, ct) ?? Task.CompletedTask)));
 
         _scanner = new Scanner(new ScannerOptions(
             ReadDevices:   readDevices,
@@ -171,6 +175,12 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         if (e.Mode == PowerModes.Suspend)
         {
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
+
+            // #161: drop every GATT subscription before the machine sleeps — a subscription left
+            // open across suspend can leave the peripheral's CCCD inconsistent on some adapters.
+            // Tracked so shutdown waits for the round-trip (ADR-007).
+            if (_gattConnectionManager is not null)
+                _taskTracker.Start(ct => _gattConnectionManager.SuspendSubscriptionsAsync(ct), _shutdownCts.Token);
         }
         else if (e.Mode == PowerModes.Resume)
         {
@@ -228,7 +238,11 @@ public sealed class BluetoothBatteryMonitor : IAsyncDisposable
         _poller.Dispose();
         _scanner.Dispose();
 
-        _gattConnectionManager?.Dispose();
+        // #161: unsubscribe every device before releasing the manager, so shutdown never leaves a
+        // dangling GATT session on a peripheral.
+        if (_gattConnectionManager is not null)
+            await _gattConnectionManager.DisposeAsync().ConfigureAwait(false);
+
         if (_deviceWatcher is not null)
             await _deviceWatcher.DisposeAsync().ConfigureAwait(false);
 

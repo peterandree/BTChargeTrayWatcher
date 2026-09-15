@@ -1,10 +1,28 @@
 # Design proposal — GATT Battery Level notifications (issue #153 phase 2)
 
-**Status:** proposal, **not approved, not implemented**.
+**Status:** **approved and implemented** (2026-09-15).
 **Date:** 2026-09
-**Requires:** amendments to **ADR-003** (polling over push) **and ADR-017** (passive enumeration / no active
-GATT subscriptions) before any code is written. This document exists so that review can happen on the
-design instead of on a pull request.
+**Sign-off:** issue #158 (all four decision boxes ticked by @peterandree).
+**Amendments merged with the implementation:** ADR-003 (bounded hybrid watchdog read) and ADR-017
+(bounded, revocable subscriptions, teardown obligations).
+**Implemented by:** `GattSubscriptionDefaults`, `GattSubscriptionPolicy`,
+`GattSubscriptionCoordinator`, `WinRtGattNotificationSubscription`, `GattBatteryCharacteristicLocator`
+(all under `src/Monitoring/Gatt/`), wired in `GattConnectionManager` and `BluetoothBatteryMonitor`.
+**Still open:** the hardware measurement below (§6). Until its result is recorded in ADR-003, the
+feature stays enabled by default with `MaxConcurrentSubscriptions = 2`.
+
+## How to run the measurement
+
+The policy is tunable without touching logic, exactly as the sign-off required:
+
+| Configuration | Change | Effect |
+| :-- | :-- | :-- |
+| Baseline (pre-feature behaviour) | `GattSubscriptionDefaults.MaxConcurrentSubscriptions = 0` | The policy refuses every subscribe attempt; the read path is byte-for-byte the old one. |
+| Prototype | `GattSubscriptionDefaults.MaxConcurrentSubscriptions = 2` (default) | Up to two devices hold a notification subscription. |
+
+`DiscoveryLogger` (codes 1010–1012) records which devices were subscribed, how many notifications
+each produced, and why each subscription ended — that trail is the input for the write-up, and it is
+what makes the before/after comparison verifiable after the fact.
 
 ---
 
@@ -87,17 +105,34 @@ outcome is a valid result and the reason the ADR amendment has to come first.
 
 ## 7. Decision requested
 
-- [ ] Approve amending ADR-003 (hybrid push/poll) and ADR-017 (bounded, revocable subscriptions).
-- [ ] Approve the cap (2) and the watchdog/settling windows in §4.
-- [ ] Accept §6 as an exit criterion, including the possibility of a "no-go" result.
-- [ ] Confirm who owns the hardware measurement.
+- [x] Approve amending ADR-003 (hybrid push/poll) and ADR-017 (bounded, revocable subscriptions).
+- [x] Approve the cap (2) and the watchdog/settling windows in §4.
+- [x] Accept §6 as an exit criterion, including the possibility of a "no-go" result.
+- [x] Confirm who owns the hardware measurement — @peterandree.
 
-Until all four are ticked, `GattConnectionManager` stays polling-only.
+All four were ticked in issue #158 on 2026-09-15. The exit-criterion threshold was fixed **before**
+measuring (≤ 2 %/hour additional peripheral drain over a 30-minute idle baseline); it is not
+renegotiated after the data arrives. The result is recorded in the amendment note in ADR-003.
 
 ## 8. Related
 
 - Issue #153 (phase 1 shipped, phase 3 documented in `docs/bluetooth/classic-battery-coverage.md`)
-- ADR-003 — polling over push
-- ADR-017 — passive enumeration, no active GATT subscriptions
-- ADR-018 — discovery logging
+- Issues #160 (policy), #161 (teardown), #162 (logging) — the junior-sized sub-issues
+- ADR-003 — polling over push (amended)
+- ADR-017 — passive enumeration, no active GATT subscriptions (amended)
+- ADR-018 — discovery logging (codes 1010–1012)
 - #78 — the original "peripherals kept awake" regression
+
+## 9. Implementation deviations from this proposal
+
+Two details were decided during implementation and are recorded here and in the ADR amendments:
+
+1. **Charging state stays uncached.** §4 says subscribed devices are read with
+   `BluetoothCacheMode.Cached`; that applies to the Battery Level read. The charging-state
+   characteristics (`0x2BEA` / `0x2A1B`) are still read uncached on every poll, because the #146
+   "charging suppresses the High alert" contract must not depend on an OS cache the app does not
+   control and the peripheral is already connected. If the measurement shows these reads dominate
+   the drain, they are the first follow-up candidate.
+2. **Latency is unchanged by design.** The watchdog poll cadence is untouched and no new alert path
+   was introduced, so the benefit measured here is reduced client-initiated radio traffic, not faster
+   alerts. A notification feeds exactly the value the next poll reads.

@@ -4,6 +4,21 @@ using System.Text.Json;
 namespace BTChargeTrayWatcher.Monitoring.Logging;
 
 /// <summary>
+/// Structured view of one discovery log entry, as passed to the
+/// <see cref="DiscoveryLogger.Capture"/> test seam. Mirrors the JSON fields written by
+/// <see cref="DiscoveryLogger.Log"/>.
+/// </summary>
+internal sealed record DiscoveryLogEntry(
+    string Reader,
+    string Operation,
+    string Outcome,
+    int ErrorCode,
+    string? Message,
+    string? DeviceId,
+    string? DeviceName,
+    int? DurationMs);
+
+/// <summary>
 /// Centralized structured discovery logger (ADR-018).
 /// Default sink: <see cref="Debug.WriteLine"/> with a compact JSON payload.
 /// Optional file sink (rotating, 1 MB cap) is enabled only when the
@@ -17,10 +32,41 @@ internal static class DiscoveryLogger
     {
         internal const int GattTimeout          = 1000;
         internal const int GattDisconnected     = 1001;
+        internal const int GattSubscribed       = 1010;
+        internal const int GattNotificationReceived = 1011;
+        internal const int GattSubscriptionDropped  = 1012;
         internal const int ClassicSetupApiFault = 2000;
         internal const int ClassicPropertyMissing = 2001;
         internal const int EnumerationAccessDenied = 3000;
         internal const int MappingAmbiguous     = 4000;
+    }
+
+    // ── Test seam ────────────────────────────────────────────────────────────
+
+    private static readonly AsyncLocal<Action<DiscoveryLogEntry>?> _observer = new();
+
+    /// <summary>
+    /// Captures every entry logged inside the current async flow. Production never sets this;
+    /// it exists so the ADR-018 logging contract of the GATT subscription policy (#162) can be
+    /// asserted without parsing <see cref="Debug.WriteLine"/> output.
+    /// </summary>
+    internal static IDisposable Capture(Action<DiscoveryLogEntry> sink)
+    {
+        Action<DiscoveryLogEntry>? previous = _observer.Value;
+        _observer.Value = sink;
+        return new CaptureScope(previous);
+    }
+
+    private sealed class CaptureScope(Action<DiscoveryLogEntry>? previous) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _observer.Value = previous;
+        }
     }
 
     // ── File sink (developer-only) ────────────────────────────────────────────
@@ -76,6 +122,27 @@ internal static class DiscoveryLogger
             errorCode,
             message
         };
+
+        if (_observer.Value is { } sink)
+        {
+            try
+            {
+                sink(new DiscoveryLogEntry(
+                    Reader: reader,
+                    Operation: operation,
+                    Outcome: outcome,
+                    ErrorCode: errorCode,
+                    Message: message,
+                    DeviceId: deviceId,
+                    DeviceName: deviceName,
+                    DurationMs: durationMs));
+            }
+            catch (Exception ex)
+            {
+                // A faulty observer must never break the logging path itself.
+                Debug.WriteLine($"[DiscoveryLogger] Observer fault: {ex.Message}");
+            }
+        }
 
         string json = JsonSerializer.Serialize(entry);
         Debug.WriteLine(json);

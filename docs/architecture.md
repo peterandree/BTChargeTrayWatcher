@@ -102,11 +102,21 @@ own. There is no legacy parallel path left to describe — see the ADR-002 amend
 
 ### PollingOrchestrator
 
-Holds the `BatteryAlertState` finite state machine per device (`Normal`, `Low`, `High`). On each poll it re-reads devices via the injected `ReadDevices` delegate (backed by `BatteryReaderOrchestrator`), updates `_lastKnown`, evaluates threshold transitions with hysteresis, and calls `NotificationService.NotifyLow` / `NotifyHigh` on state changes. Tracks consecutive miss-count per device and evicts absent devices after `PollingDefaults.MissCountThreshold` (3) misses. Fires `AlertStateChanged` (bool) as the authoritative tray-overlay signal.
+Holds the `BatteryAlertState` finite state machine per device (`Normal`, `Low`, `High`). On each poll it re-reads devices via the injected `ReadDevices` delegate (backed by `BatteryReaderOrchestrator`), updates `_lastKnown`, evaluates threshold transitions with hysteresis, and calls `NotificationService.NotifyLow` / `NotifyHigh` on state changes. Tracks consecutive miss-count per device and evicts absent devices after `PollingDefaults.MissCountThreshold` (3) misses. Before evicting, it calls `PollingOrchestratorCallbacks.OnDeviceEvicted` so any GATT notification subscription for that device is released first (#161). Fires `AlertStateChanged` (bool) as the authoritative tray-overlay signal.
 
 ### GattConnectionManager
 
-Long-lived per-device reader for BLE devices enumerated by `DeviceWatcherService`. Opens `BluetoothLEDevice.FromIdAsync`, reads the Battery Level characteristic (UUID `0x2A19` of the standard Battery Service `0x180F`) with `BluetoothCacheMode.Uncached`, and applies a hard 2-second timeout to every WinRT call via `WaitAsync`. Caches only *knowledge* (which device IDs expose the service), never WinRT objects — all device references are dropped after each read so peripherals can sleep (#78). Limits concurrency to `PollingDefaults.GattMaxConcurrentReads` (2) via a `SemaphoreSlim`. The read contract, concurrency gate, and cancellation are unit-tested through an injectable override; the real WinRT read path is integration-only (see `TESTING.md`).
+Long-lived per-device reader for BLE devices enumerated by `DeviceWatcherService`. Opens `BluetoothLEDevice.FromIdAsync`, reads the Battery Level characteristic (UUID `0x2A19`, looked up through `GattBatteryCharacteristicLocator` in the standard Battery Service `0x180F` first and the Common Battery Service `0x182B` second) with `BluetoothCacheMode.Uncached`, and applies a hard 2-second timeout to every WinRT call via `WaitAsync`. Caches only *knowledge* (which device IDs expose the service), never WinRT objects — all device references are dropped after each read so peripherals can sleep (#78). Limits concurrency to `PollingDefaults.GattMaxConcurrentReads` (2) via a `SemaphoreSlim`. The read contract, concurrency gate, and cancellation are unit-tested through an injectable override; the real WinRT read path is integration-only (see `TESTING.md`).
+
+Since the #158 amendment of ADR-003/ADR-017 the manager also owns the **bounded notification
+subscription set** (`GattSubscriptionCoordinator`, policy in `GattSubscriptionPolicy`, constants in
+`GattSubscriptionDefaults`, WinRT side in `WinRtGattNotificationSubscription`). A device that
+advertises `Notify` on `0x2A19` and is already connected may hold one of at most two subscriptions;
+for such a device the watchdog poll reads `BluetoothCacheMode.Cached` (falling back to the last pushed
+value, then to one uncached read), while charging-state reads stay uncached so the #146 contract does
+not depend on the OS cache. Subscriptions are released on disconnect, suspend, eviction and disposal,
+and one that never notifies within the settling window is dropped for the rest of the session. Setting
+`GattSubscriptionDefaults.MaxConcurrentSubscriptions` to `0` restores plain polling.
 
 ### ClassicBatteryReader
 

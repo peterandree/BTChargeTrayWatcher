@@ -31,6 +31,9 @@ Constraints:
 
    - `1000` — GATT_TIMEOUT
    - `1001` — GATT_DISCONNECTED
+   - `1010` — GATT_SUBSCRIBED (added 2026-09-15, issue #162)
+   - `1011` — GATT_NOTIFICATION_RECEIVED (added 2026-09-15, issue #162)
+   - `1012` — GATT_SUBSCRIPTION_DROPPED (added 2026-09-15, issue #162)
    - `2000` — CLASSIC_SETUPAPI_FAILURE
    - `2001` — CLASSIC_PROPERTY_MISSING
    - `3000` — ENUMERATION_ACCESS_DENIED
@@ -47,8 +50,18 @@ Constraints:
 
 ## Implementation Notes
 
+- Codes `1010`–`1012` carry the GATT notification subscription trail required by the #158
+  measurement. `reader` is `GattSubscriptionCoordinator`, `operation` is `Subscribe`, `Notify` or
+  `Drop`, `outcome` is `SUBSCRIBED`, `NOTIFIED` or `WARN`, and the `message` of a drop always
+  contains `reason=<GattSubscriptionDropReason>`. Together these answer, after the fact: which
+  devices were ever subscribed, how many notifications each produced, and why each subscription
+  ended.
 - Keep the `DiscoveryLogger` dependency minimal. Prefer static helpers (e.g., `DiscoveryLogger.Log(reader, operation, ...)`) to avoid polluting constructor signatures; readers may call the static helper directly.
 - Where possible include `durationMs` and `deviceId` to make performance regressions and repeated failures visible.
+- `DiscoveryLogger.Capture(sink)` is an internal, `AsyncLocal`-scoped test seam that receives a
+  `DiscoveryLogEntry` for every log call inside the current async flow. Production never sets it; it
+  exists so the code/field contract above is asserted by unit tests instead of by parsing
+  `Debug.WriteLine` output.
 
 ## Consequences
 

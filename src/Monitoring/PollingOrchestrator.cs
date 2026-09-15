@@ -157,6 +157,11 @@ internal sealed class PollingOrchestrator : IDisposable
                     int misses = _missCount.AddOrUpdate(id, 1, (_, prev) => prev + 1);
                     if (misses >= PollingDefaults.MissCountThreshold)
                     {
+                        // ADR-017/#161: release any GATT subscription *before* the device leaves
+                        // the known-device set, so no subscription record outlives its cache entry.
+                        if (_callbacks.OnDeviceEvicted is { } onEvicted)
+                            await onEvicted(id, ct).ConfigureAwait(false);
+
                         _lastKnown.TryRemove(id, out _);
                         _alertStates.TryRemove(id, out _);
                         _missCount.TryRemove(id, out _);
@@ -239,7 +244,8 @@ internal sealed class PollingOrchestrator : IDisposable
 internal sealed record PollingOrchestratorCallbacks(
     Action<string, int?> OnBatteryRead,
     Action<IReadOnlyList<DeviceBatteryInfo>> OnScanCompleted,
-    Action<bool> OnAlertStateChanged);
+    Action<bool> OnAlertStateChanged,
+    Func<string, CancellationToken, Task>? OnDeviceEvicted = null);
 
 /// ADR-009: infrastructure fields separated from callback delegates.
 internal sealed record PollingOrchestratorOptions(
