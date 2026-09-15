@@ -88,6 +88,33 @@ laptop battery is in an alert state. Individual devices and the laptop battery
 can be excluded from this overlay so their alert state does not affect the tray
 icon — useful for devices that are always near a threshold boundary.
 
+### Tray context menu
+
+The tray menu mirrors the Options dialog, so most settings can be changed
+without opening it:
+
+| Entry | What it does |
+| :-- | :-- |
+| `<device>  55 %` | One submenu per detected device |
+| ↳ Low / High threshold | Per-device threshold override (falls back to the global value) |
+| ↳ Exclude from tray icon alert | Same as the Options dialog's *Excluded* column for the overlay |
+| ↳ Ignore device (no notifications) | Tracked but never alerts |
+| Laptop battery | Laptop thresholds and exclusions (see below) |
+| Low / High threshold | Global thresholds for every device without an override |
+
+> The device list and the tick marks are re-read every time the menu opens, so
+they stay in sync with the Options dialog.
+
+### Excluding the laptop battery
+
+| Setting | Effect |
+| :-- | :-- |
+| Exclude laptop from tray icon overlay | The laptop's alert state no longer influences the tray icon or the tooltip's `!` marker; notifications still fire |
+| Exclude laptop from monitoring and alerts | The laptop battery is not evaluated at all: no notifications, no alert state, no overlay. The tooltip still shows the current charge, marked `(not monitored)` |
+
+Both are available in the tray menu (right-click the icon → **Laptop battery**)
+and in **Options → General**.
+
 ### Startup registration
 
 The application can register itself to start with Windows via the tray menu.

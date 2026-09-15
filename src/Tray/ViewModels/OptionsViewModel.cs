@@ -40,6 +40,16 @@ internal sealed class OptionsViewModel
         set => _settings.ExcludeLaptopFromTrayIconOverlay = value;
     }
 
+    /// <summary>
+    /// Full laptop exclusion (#156): no threshold evaluation and no notifications.
+    /// Implies the tray-icon-overlay exclusion as well.
+    /// </summary>
+    public bool ExcludeLaptopFromMonitoring
+    {
+        get => _settings.ExcludeLaptopFromMonitoring;
+        set => _settings.ExcludeLaptopFromMonitoring = value;
+    }
+
     // ── Auto-start (Windows startup) ─────────────────────────────────────
     public bool AutoStartEnabled
     {

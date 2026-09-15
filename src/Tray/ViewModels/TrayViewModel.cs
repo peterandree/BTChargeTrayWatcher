@@ -32,14 +32,30 @@ internal sealed class TrayViewModel
     {
         bool before = HasAlert;
         info ??= _laptopMonitor.LastKnownBattery;
-        _laptopAlert = false;
-        if (!_settings.ExcludeLaptopFromTrayIconOverlay
-            && info is { HasBattery: true, BatteryPercent: >= 0 })
-        {
-            _laptopAlert = info.BatteryPercent <= _settings.LaptopLow
-                        || info.BatteryPercent >= _settings.LaptopHigh;
-        }
+        _laptopAlert = IsLaptopAlert(
+            info,
+            _settings.LaptopLow,
+            _settings.LaptopHigh,
+            _settings.ExcludeLaptopFromMonitoring,
+            _settings.ExcludeLaptopFromTrayIconOverlay);
         NotifyIfChanged(before);
+    }
+
+    /// <summary>
+    /// Pure laptop alert decision used for both the tray-icon overlay and the tooltip "!"
+    /// marker. Excluding the laptop from monitoring (#156) suppresses alerts everywhere,
+    /// not just for the overlay. Advisory levels (no battery / unknown sentinel) never alert.
+    /// </summary>
+    internal static bool IsLaptopAlert(
+        LaptopBatteryInfo? info,
+        int low,
+        int high,
+        bool excludeFromMonitoring,
+        bool excludeFromOverlay)
+    {
+        if (excludeFromMonitoring || excludeFromOverlay) return false;
+        if (info is not { HasBattery: true, BatteryPercent: >= 0 }) return false;
+        return info.BatteryPercent <= low || info.BatteryPercent >= high;
     }
 
     // ── Tooltip ───────────────────────────────────────────────────────────
@@ -64,15 +80,14 @@ internal sealed class TrayViewModel
         {
             if (sb.Length > 0) sb.Append('\n');
             // #144: an unknown level is the -1 sentinel — never alert on it.
-            if (laptop.BatteryPercent >= 0)
-            {
-                bool laptopAlert = laptop.BatteryPercent <= _settings.LaptopLow
-                                || laptop.BatteryPercent >= _settings.LaptopHigh;
-                if (laptopAlert) sb.Append("! ");
-            }
+            // #156: an unmonitored laptop is informational only — no "!" marker.
+            if (IsLaptopAlert(laptop, _settings.LaptopLow, _settings.LaptopHigh,
+                    _settings.ExcludeLaptopFromMonitoring, _settings.ExcludeLaptopFromTrayIconOverlay))
+                sb.Append("! ");
             sb.Append("Laptop ")
               .Append(BatteryDisplay.FormatBattery(laptop.BatteryPercent, laptop.IsCharging));
             if (laptop.IsCharging) sb.Append(" (charging)");
+            if (_settings.ExcludeLaptopFromMonitoring) sb.Append(" (not monitored)");
             // #154: show discharge rate and estimated time when available.
             if (laptop.DischargeRateWatts is not null)
                 sb.Append(" \u00b7 ").Append(BatteryDisplay.FormatPowerRate(laptop.DischargeRateWatts));

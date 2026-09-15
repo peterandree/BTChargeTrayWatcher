@@ -4,7 +4,18 @@ namespace BTChargeTrayWatcher;
 
 public sealed class LaptopBatteryMonitor : IAsyncDisposable
 {
-    private enum AlertState { Normal = 0, Low = 1, High = 2 }
+    internal enum AlertState { Normal = 0, Low = 1, High = 2 }
+
+    /// <summary>
+    /// Result of one threshold evaluation for the laptop battery: the new alert state plus
+    /// which (if any) notification must fire. Extracted as a pure decision so the alert rules —
+    /// including the <c>ExcludeLaptopFromMonitoring</c> short-circuit (#156) — are unit-testable
+    /// without constructing the monitor (which owns a timer and system-event subscriptions).
+    /// </summary>
+    internal readonly record struct LaptopAlertDecision(
+        AlertState State,
+        bool NotifyLow,
+        bool NotifyHigh);
 
     private readonly ILaptopBatteryReader _reader;
     private readonly ThresholdSettings _settings;
@@ -132,30 +143,55 @@ public sealed class LaptopBatteryMonitor : IAsyncDisposable
         if (!info.HasBattery || info.BatteryPercent < 0) return;
 
         int pct = info.BatteryPercent;
-        int low = _settings.LaptopLow;
-        int high = _settings.LaptopHigh;
 
-        AlertState previous = _alertState;
-        AlertState current = ClassifyAlertState(pct, low, high, previous, info);
+        LaptopAlertDecision decision = Decide(
+            pct,
+            _settings.LaptopLow,
+            _settings.LaptopHigh,
+            _alertState,
+            info,
+            _settings.ExcludeLaptopFromMonitoring);
 
-        bool newHasAlert = current != AlertState.Normal;
+        bool newHasAlert = decision.State != AlertState.Normal;
         bool alertChanged = newHasAlert != _hasAlert;
 
-        if (previous != current)
-        {
-            if (current == AlertState.Low)
-                _notifier.NotifyLaptopLow(pct);
-            else if (current == AlertState.High)
-                _notifier.NotifyLaptopHigh(pct);
-        }
+        if (decision.NotifyLow)
+            _notifier.NotifyLaptopLow(pct);
+        else if (decision.NotifyHigh)
+            _notifier.NotifyLaptopHigh(pct);
 
-        _alertState = current;
+        _alertState = decision.State;
 
         if (alertChanged)
         {
             _hasAlert = newHasAlert;
             AlertStateChanged?.Invoke(_hasAlert);
         }
+    }
+
+    /// <summary>
+    /// Pure threshold decision for one laptop battery reading.
+    /// When <paramref name="excludeFromMonitoring"/> is true the laptop is treated as
+    /// not monitored at all: state is reset to <see cref="AlertState.Normal"/> and no
+    /// notification is ever produced (#156).
+    /// </summary>
+    internal static LaptopAlertDecision Decide(
+        int pct,
+        int low,
+        int high,
+        AlertState previous,
+        LaptopBatteryInfo info,
+        bool excludeFromMonitoring)
+    {
+        if (excludeFromMonitoring)
+            return new LaptopAlertDecision(AlertState.Normal, false, false);
+
+        AlertState current = ClassifyAlertState(pct, low, high, previous, info);
+
+        return new LaptopAlertDecision(
+            current,
+            NotifyLow:  previous != current && current == AlertState.Low,
+            NotifyHigh: previous != current && current == AlertState.High);
     }
 
     private static AlertState ClassifyAlertState(

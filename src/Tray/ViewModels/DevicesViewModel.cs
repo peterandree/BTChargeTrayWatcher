@@ -84,10 +84,9 @@ internal sealed class DevicesViewModel
 
     public void SetExcluded(DeviceRow row, bool excluded)
     {
-        if (excluded)
-            _settings.SetIgnoredDevicesByIds(_settings.IgnoredDevices.Union(new[] { row.DeviceId }));
-        else
-            _settings.SetIgnoredDevicesByIds(_settings.IgnoredDevices.Except(new[] { row.DeviceId }));
+        // Device-id-aware toggle: also drops any legacy name-keyed entry for the same
+        // device so the persisted set cannot disagree with IsIgnored(id, name) (#156).
+        _settings.SetIgnored(row.DeviceId, row.DisplayName, excluded);
     }
 
     public void ResetDevice(DeviceRow row)

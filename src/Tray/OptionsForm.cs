@@ -27,6 +27,7 @@ public sealed class OptionsForm : Form
     private readonly NumericUpDown laptopLowNumeric;
     private readonly NumericUpDown laptopHighNumeric;
     private readonly CheckBox      excludeLaptopOverlayCheck;
+    private readonly CheckBox      excludeLaptopMonitoringCheck;
     private readonly CheckBox      autoStartCheck;
     private readonly CheckBox      autoStartTaskFallbackCheck;
 
@@ -258,6 +259,8 @@ public sealed class OptionsForm : Form
         // Group the two checkboxes in a horizontal FlowLayoutPanel so they stay together
         excludeLaptopOverlayCheck = new CheckBox
             { Text = "Exclude laptop from tray icon overlay", Anchor = AnchorStyles.Left, AutoSize = true };
+        excludeLaptopMonitoringCheck = new CheckBox
+            { Text = "Exclude laptop from monitoring and alerts", Anchor = AnchorStyles.Left, AutoSize = true };
         autoStartCheck = new CheckBox
             { Text = "Start automatically with Windows", Anchor = AnchorStyles.Left, AutoSize = true };
         autoStartTaskFallbackCheck = new CheckBox
@@ -272,6 +275,7 @@ public sealed class OptionsForm : Form
         generalCheckPanel.Controls.Add(autoStartCheck);
         generalCheckPanel.Controls.Add(autoStartTaskFallbackCheck);
         generalCheckPanel.Controls.Add(excludeLaptopOverlayCheck);
+        generalCheckPanel.Controls.Add(excludeLaptopMonitoringCheck);
         generalPanel.Controls.Add(generalCheckPanel, 0, 4);
         generalPanel.SetColumnSpan(generalCheckPanel, 2);
         generalTab.Controls.Add(generalPanel);
@@ -314,6 +318,7 @@ public sealed class OptionsForm : Form
         laptopLowNumeric.Value    = vm.LaptopLow;
         laptopHighNumeric.Value   = vm.LaptopHigh;
         excludeLaptopOverlayCheck.Checked = vm.ExcludeLaptopFromTrayIconOverlay;
+        excludeLaptopMonitoringCheck.Checked = vm.ExcludeLaptopFromMonitoring;
         autoStartCheck.Checked = vm.AutoStartEnabled;
         autoStartTaskFallbackCheck.Checked = vm.AutoStartUseScheduledTaskFallback;
 
@@ -355,6 +360,8 @@ public sealed class OptionsForm : Form
         };
         excludeLaptopOverlayCheck.CheckedChanged += (_, _) =>
             vm.ExcludeLaptopFromTrayIconOverlay = excludeLaptopOverlayCheck.Checked;
+        excludeLaptopMonitoringCheck.CheckedChanged += (_, _) =>
+            vm.ExcludeLaptopFromMonitoring = excludeLaptopMonitoringCheck.Checked;
         autoStartTaskFallbackCheck.CheckedChanged += (_, _) =>
             vm.AutoStartUseScheduledTaskFallback = autoStartTaskFallbackCheck.Checked;
         autoStartCheck.CheckedChanged += (_, _) =>
