@@ -18,6 +18,7 @@ public sealed class OptionsForm : Form
     // ntfy controls
     private readonly CheckBox      ntfyEnabledCheck;
     private readonly TextBox       ntfyTopicTextBox;
+    private readonly TextBox       ntfyAccessTokenTextBox;
     private readonly Button        regenerateTopicBtn;
     private readonly Button        sendNtfyTestBtn;
 
@@ -93,7 +94,9 @@ public sealed class OptionsForm : Form
         int checkRowHeight   = (int)Math.Ceiling(34f * dpiScale);
         int topicRowHeight   = (int)Math.Ceiling(36f * dpiScale);
         int buttonRowHeight  = (int)Math.Ceiling(42f * dpiScale);
-        int topBlockHeight   = headingRowHeight + checkRowHeight + topicRowHeight + buttonRowHeight + 24;
+        int warningRowHeight = (int)Math.Ceiling(40f * dpiScale);
+        int topBlockHeight   = headingRowHeight + checkRowHeight + (2 * topicRowHeight)
+                             + warningRowHeight + buttonRowHeight + 24;
         var notifRoot = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -116,7 +119,7 @@ public sealed class OptionsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 6,
             Margin = new Padding(0),
             Padding = new Padding(0)
         };
@@ -124,6 +127,8 @@ public sealed class OptionsForm : Form
         ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, headingRowHeight));
         ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, checkRowHeight));
         ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, topicRowHeight));
+        ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, topicRowHeight));
+        ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, warningRowHeight));
         ntfyCardLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, buttonRowHeight));
 
         var ntfyHeading = new Label
@@ -168,6 +173,44 @@ public sealed class OptionsForm : Form
         topicRow.Controls.Add(topicLabelCtl, 0, 0);
         topicRow.Controls.Add(ntfyTopicTextBox, 1, 0);
 
+        // Access token row (#152). Masked by default — it is a credential and is never logged.
+        var tokenRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0)
+        };
+        tokenRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 76));
+        tokenRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        tokenRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var tokenLabelCtl = new Label
+        {
+            Text = "Token:",
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        ntfyAccessTokenTextBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            UseSystemPasswordChar = true,
+            PlaceholderText = "optional \u2014 required for private topics"
+        };
+        tokenRow.Controls.Add(tokenLabelCtl, 0, 0);
+        tokenRow.Controls.Add(ntfyAccessTokenTextBox, 1, 0);
+
+        // The topic is a shared secret on the public server; say so where the user sets it (#152).
+        var ntfySecretWarning = new Label
+        {
+            Text = "Anyone who knows your topic name can read and publish to it. Treat the topic as a secret, "
+                 + "and add an access token above for private, revocable topics.",
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            ForeColor = SystemColors.GrayText,
+            TextAlign = ContentAlignment.TopLeft
+        };
+
         var buttonRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -197,7 +240,9 @@ public sealed class OptionsForm : Form
         ntfyCardLayout.Controls.Add(ntfyHeading, 0, 0);
         ntfyCardLayout.Controls.Add(ntfyEnabledCheck, 0, 1);
         ntfyCardLayout.Controls.Add(topicRow, 0, 2);
-        ntfyCardLayout.Controls.Add(buttonRow, 0, 3);
+        ntfyCardLayout.Controls.Add(tokenRow, 0, 3);
+        ntfyCardLayout.Controls.Add(ntfySecretWarning, 0, 4);
+        ntfyCardLayout.Controls.Add(buttonRow, 0, 5);
         ntfyCard.Controls.Add(ntfyCardLayout);
 
         var ntfyHelpBox = new GroupBox
@@ -398,9 +443,13 @@ public sealed class OptionsForm : Form
         var vm = _optionsVm!;
         ntfyEnabledCheck.Checked = vm.NtfyEnabled;
         ntfyTopicTextBox.Text    = vm.NtfyTopic;
+        ntfyAccessTokenTextBox.Text = vm.NtfyAccessToken;
 
         ntfyEnabledCheck.CheckedChanged += (_, _) =>
             vm.NtfyEnabled = ntfyEnabledCheck.Checked;
+
+        ntfyAccessTokenTextBox.TextChanged += (_, _) =>
+            vm.NtfyAccessToken = ntfyAccessTokenTextBox.Text;
 
         regenerateTopicBtn.Click += (_, _) =>
         {

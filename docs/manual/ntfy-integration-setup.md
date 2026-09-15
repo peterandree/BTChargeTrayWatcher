@@ -36,6 +36,19 @@ When enabled, BTChargeTrayWatcher sends battery alerts (low threshold, high thre
 2. Confirm the notification appears on your phone.
 3. If it does not arrive within 10 seconds, follow the troubleshooting steps below.
 
+### 5 — (Optional) Protect the topic with an access token
+Topics on the public server are **unauthenticated**: anyone who knows the topic name can read your
+alerts and publish to it. For a private, revocable topic:
+
+1. Create an access token in the ntfy web app (*Account* → *Access tokens*) or the Android app.
+2. Open **Options → Notifications** and paste it into the **Token** field. The field is masked and the
+   token is never logged; it is persisted in `settings.json` alongside the topic.
+3. Optionally rename the topic to a `$`-prefixed private topic, then use **Send ntfy test** to verify.
+
+When a token is set, every publish carries `Authorization: Bearer <token>`, which is what ntfy needs for
+`$`-prefixed and ACL-protected topics. The Options dialog also shows a warning that the topic itself is a
+shared secret that anyone can read.
+
 ## Managing the integration
 
 | Action | Menu path |

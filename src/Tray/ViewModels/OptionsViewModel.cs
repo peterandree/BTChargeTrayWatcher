@@ -90,6 +90,18 @@ internal sealed class OptionsViewModel
     public string NtfyTopic => _settings.GetNtfySettings().Topic ?? string.Empty;
 
     /// <summary>
+    /// Optional ntfy access token (#152). When set, publishes are authenticated with
+    /// <c>Authorization: Bearer &lt;token&gt;</c>, which is what private (<c>$</c>-prefixed)
+    /// and ACL-protected topics require. Never logged.
+    /// </summary>
+    public string NtfyAccessToken
+    {
+        get => _settings.GetNtfySettings().AccessToken ?? string.Empty;
+        set => _settings.UpdateNtfySettings(s =>
+            s.AccessToken = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+    }
+
+    /// <summary>
     /// Generates a new random ntfy topic, disables the integration until the
     /// user re-enables it, and returns the new topic string.
     /// </summary>
