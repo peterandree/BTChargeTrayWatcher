@@ -115,6 +115,19 @@ they stay in sync with the Options dialog.
 Both are available in the tray menu (right-click the icon → **Laptop battery**)
 and in **Options → General**.
 
+### GATT notification subscriptions
+
+Some BLE peripherals push their battery level instead of waiting to be asked. Up to **2** such
+devices are subscribed at a time; the 60 s poll remains as a watchdog and reads those devices from
+the Windows cache (falling back to the last pushed value), so the cadence — and therefore alert
+latency — is unchanged. A subscription that never pushes within 10 minutes is dropped for the rest
+of the session, and every subscription is released when the device disconnects, the machine sleeps,
+the device is evicted, or the app is closed.
+
+The policy is tunable in `src/Monitoring/Gatt/GattSubscriptionDefaults.cs`:
+`MaxConcurrentSubscriptions` (set to `0` to disable subscriptions and get the pre-3.3 polling
+behaviour back), `SettlingWindow`, and the WinRT call timeout.
+
 ### Startup registration
 
 The application can register itself to start with Windows via the tray menu.
@@ -127,7 +140,8 @@ The application can register itself to start with Windows via the tray menu.
 Program.cs
 └── BluetoothBatteryMonitor          (src/Monitoring/)
     ├── GattConnectionManager       (src/Monitoring/Gatt/)
-    │   └── Reads battery via BLE GATT Battery Service (0x180F), no object caching
+    │   ├── Reads battery via BLE Battery Service (0x180F) or Common Battery Service (0x182B)
+    │   └── Up to 2 bounded 0x2A19 notification subscriptions (GattSubscriptionCoordinator)
     ├── ClassicBatteryReader         (src/Monitoring/Classic/)
     │   └── Reads battery via Windows.Devices.Enumeration / SetupAPI
     ├── PollingOrchestrator          timer-driven 60 s poll cycle
@@ -167,11 +181,12 @@ device. Classic-only headsets that report battery solely through HFP AT commands
 cannot be read from a background tray app without taking over the audio session.
 Details, an oracle for triaging (Windows *Settings → Bluetooth & devices*) and the
 follow-ups we consider worth doing are in
-[`docs/bluetooth/classic-battery-coverage.md`](docs/bluetooth/classic-battery-coverage.md).
-- Devices that support Battery Level *notifications* are still polled every
-60 s. Moving them to push updates is a documented proposal that needs an ADR
-amendment and hardware measurements first — see
-[`docs/plans/gatt-notification-subscriptions.md`](docs/plans/gatt-notification-subscriptions.md).
+[`docs/bluetooth/classic-battery-coverage.md`](docs/bluetooth/classic-battery-coverage.md).- Devices that support Battery Level *notifications* (`Notify` on `0x2A19`) can hold a bounded
+  GATT subscription: at most two at a time, watchdog-polled every 60 s with a cached read and
+  released on disconnect, sleep, eviction or shutdown. Subscription support is the amended
+  ADR-003 / ADR-017 policy and is still subject to a hardware power measurement — see
+  [`docs/plans/gatt-notification-subscriptions.md`](docs/plans/gatt-notification-subscriptions.md).
+  Alerts still fire at the 60 s poll cadence; the subscription reduces radio traffic, not latency.
 - Multiple simultaneous Bluetooth adapters are not explicitly tested.
 - Runs on Windows only; no cross-platform support is planned.
 

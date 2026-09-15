@@ -1,6 +1,6 @@
 # ADR-017 — Passive Windows.Devices.Enumeration reader
 
-**Status:** Proposed
+**Status:** Proposed (amended 2026-09-15 for bounded, revocable GATT notification subscriptions)
 **Date:** 2026-05-20
 
 ## Context
@@ -39,7 +39,57 @@ Constraints:
 - Enumeration results may be stale or incomplete. Treat them as advisory data rather than authoritative battery values.
 - Additional maintenance surface (new reader) but no increase in active device wakeups.
 
+---
+
+## Amendment (2026-09-15) — bounded, revocable Battery Level subscriptions
+
+**Trigger:** issue **#158**, approved in the issue thread; see ADR-003's amendment for the policy.
+
+### What changes
+
+The constraint "must not perform active GATT subscriptions" is narrowed for one specific case: the
+existing GATT reader may hold at most `GattSubscriptionDefaults.MaxConcurrentSubscriptions` (default
+2) **Battery Level (0x2A19) notification subscriptions**, and only for devices that advertise
+`Notify` and are already `Connected`. No new reader is added by this amendment, and the passive
+enumeration reader described above is unaffected — it stays strictly passive.
+
+### Teardown obligations (the reason this is allowed at all)
+
+A subscription holds a `BluetoothLEDevice` and a `GattCharacteristic` open, which is exactly what
+#78 showed can keep a peripheral's radio awake. Every one of these paths must release the
+subscription, and each is covered by a unit test against the fake seam:
+
+| Trigger | Entry point |
+| :-- | :-- |
+| Peripheral disconnected (`ConnectionStatus != Connected`) | `WinRtGattNotificationSubscription.OnConnectionStatusChanged` self-teardown, bookkeeping removed by `GattSubscriptionCoordinator.OnSubscriptionLost` |
+| Machine suspends | `BluetoothBatteryMonitor.SystemEvents_PowerModeChanged` → `GattConnectionManager.SuspendSubscriptionsAsync` (tracked task, ADR-007) |
+| Device evicted after `PollingDefaults.MissCountThreshold` misses | `PollingOrchestrator` → `PollingOrchestratorCallbacks.OnDeviceEvicted` → `GattConnectionManager.DeviceEvictedAsync`, called *before* the cache entry is removed |
+| Manager disposed | `GattConnectionManager.DisposeAsync` (preferred) or `Dispose` |
+| No notification within the settling window | `GattSubscriptionCoordinator.PruneAsync`, evaluated once per poll cycle from `BatteryReaderOrchestrator.ReadAllAsync` |
+
+Release means: detach the `ValueChanged`/`ConnectionStatusChanged` handlers first, drop the
+references, then attempt a best-effort CCCD write-off to `None`. A failed, cancelled or impossible
+descriptor write never leaves a reference behind.
+
+### What stays forbidden
+
+- No forced `BluetoothLEDevice.FromIdAsync` connection for a device that is not already connected.
+- No subscription for a device without the `Notify` property.
+- No subscription when the cap is reached, and no re-subscription in the same session after a
+  settling-window drop.
+- No unbounded or background-initiated WinRT object retention: the only long-lived objects are the
+  bounded subscription set described here.
+
+### Verification
+
+Unit tests cover cap enforcement, settling-window drop and every teardown trigger through the
+`IGattNotificationSubscription` fake. The hardware check from #78 (a sleeping peripheral is not kept
+awake) remains a release check and is recorded in the PR description; the power measurement and its
+fixed threshold live in ADR-003's amendment.
+
 ## Related ADRs
 
 - ADR-002 — Dual Bluetooth reader strategy
+- ADR-003 — Polling over push (amended for the hybrid watchdog read)
+- ADR-007 — TaskTracker cooperative shutdown
 - ADR-018 — Centralized discovery logging & error classification

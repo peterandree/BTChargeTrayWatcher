@@ -23,6 +23,9 @@ All dependencies are injectable via constructor parameters or delegate options. 
 | `NtfyTopicGenerator` | `NtfyTopicGeneratorTests` |
 | `NtfyIntegrationSettings` | `NtfyIntegrationSettingsTests` |
 | `DeviceAggregationPipeline` | `DeviceAggregationPipelineTests` |
+| `GattSubscriptionPolicy` | `GattSubscriptionPolicyTests` |
+| `GattSubscriptionCoordinator` | `GattSubscriptionCoordinatorTests`, `GattSubscriptionLoggingTests` |
+| `GattConnectionManager` (subscription teardown wiring) | `GattSubscriptionPollCycleTests` |
 
 ---
 
@@ -48,7 +51,8 @@ The correct approach for each class is an **integration test** that runs on a re
 
 | Class | Blocking API | Notes |
 |---|---|---|
-| `GattConnectionManager` (real WinRT read path) | `BluetoothLEDevice.FromIdAsync`, `GetGattServicesForUuidAsync`, `ReadValueAsync` | Requires a paired GATT device. The read contract, concurrency gate, and cancellation are covered by unit tests via the injectable override in `GattConnectionManagerTests`; the actual WinRT service/characteristic round-trip is hardware-only. |
+| `GattConnectionManager` (real WinRT read path) | `BluetoothLEDevice.FromIdAsync`, `GetGattServicesForUuidAsync`, `ReadValueAsync` | Requires a paired GATT device. The read contract, concurrency gate, and cancellation are covered by unit tests via the injectable override in `GattConnectionManagerTests`; the actual WinRT service/characteristic round-trip, the cached-read watchdog path and the notification-fallback path are hardware-only. |
+| `WinRtGattNotificationSubscription` | `WriteClientCharacteristicConfigurationDescriptorAsync`, `ValueChanged`, `ConnectionStatusChanged` | Requires a paired GATT device that exposes `Notify` on `0x2A19`. The policy, cap, settling window, teardown triggers and logging are unit-tested through the `IGattNotificationSubscription` fake (`FakeGattNotificationSubscription`); the CCCD write and WinRT event delivery are integration-only. The #78 check (a sleeping peripheral is not kept awake) is a manual release check. |
 | `ClassicBatteryReader` | `Windows.Devices.Bluetooth.BluetoothDevice.FromIdAsync` | Requires a paired Classic BT device with an exposed battery service. |
 
 ### WinForms / Win32
@@ -91,6 +95,15 @@ Manual execution on a developer machine with hardware:
 ```bash
 dotnet test --filter "Category=Integration"
 ```
+
+---
+
+## Capturing log output in tests
+
+`DiscoveryLogger` writes to `Debug.WriteLine`, which is awkward to assert on. Its internal
+`Capture(sink)` seam hands every `DiscoveryLogEntry` to a callback scoped to the current async flow
+(`AsyncLocal`), so logging contracts — e.g. the ADR-018 codes 1010–1012 of the GATT subscription
+policy — are asserted directly in `GattSubscriptionLoggingTests`. Production code never sets it.
 
 ---
 
