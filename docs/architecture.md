@@ -77,6 +77,8 @@ Owns the `NotifyIcon` and the WinForms message loop context. Receives events fro
 
 Bridges the background monitor and the UI. Owns the `ScanWindow` lifetime. Routes `ManualScanCompleted` and `AlertStateChanged` events to the UI thread. Alert state is driven exclusively by `PollingOrchestrator`'s classified, hysteresis-consistent state (ADR-011).
 
+It also owns the user-initiated diagnostic **deep scan** through `DeepScanRunner` (`src/Tray/`): the runner enforces ADR-019's single run per invocation, the `PollingDefaults.DeepScanTimeBudget` (30 s) and cooperative cancellation, and `DeepScanPolicy` classifies and words the outcome. The window's own scan (opening it, and its auto-refresh) is deliberately passive — active probing is reachable only through the window's confirmed `Deep scan (diagnostic)` action.
+
 ### BluetoothBatteryMonitor
 
 Public facade. Owns the 60-second polling `Timer`, reacts to `PowerModeChanged` (suspends/resumes the timer), and delegates actual reading to `Scanner` and `PollingOrchestrator`. Manages cooperative shutdown via `CancellationTokenSource` and `TaskTracker`.
@@ -85,7 +87,7 @@ The production entry point is a constructor that accepts a single infrastructure
 
 ### Scanner
 
-Executes full device scans (used at startup and on user request). On the cooperation-stack path, both readers are delegates over `BatteryReaderOrchestrator.ReadAllAsync` (fed by `DeviceWatcherService.CurrentDevices`), one per read mode: `ScannerOptions.ReadDevices` → `BatteryReadMode.Background` for the quiet read, `ScannerOptions.DeepReadDevices` → `BatteryReadMode.DeepScan` for the user-initiated scan. They are separate so a scan can never silently run on the passive path (issue #164). Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
+Executes full device scans (used at startup and on user request). On the cooperation-stack path, both readers are delegates over `BatteryReaderOrchestrator.ReadAllAsync` (fed by `DeviceWatcherService.CurrentDevices`), one per read mode: `ScannerOptions.ReadDevices` → `BatteryReadMode.Background` for the quiet read, `ScannerOptions.DeepReadDevices` → `BatteryReadMode.DeepScan` for the confirmed diagnostic scan (ADR-019). They are separate so a scan can never silently run on the passive path (issue #164). Writes results into the shared `_lastKnown` dictionary so that background polls and manual scans cannot interleave. Fires `DeviceFound` events as each device is discovered.
 
 ### BatteryReaderOrchestrator
 
@@ -167,22 +169,41 @@ Timer tick (every 60 s)
                     └─► ScanCoordinator → TrayApp: update tooltip + icon
 ```
 
-## Data flow: manual scan
+## Data flow: scan window (passive)
 
 ```
 User clicks tray → ScanCoordinator.OpenScanWindowAndTriggerScan
   └─► ScanWindow shown
-  └─► BluetoothBatteryMonitor.StartTrackedDeepScanAsync           └─► Scanner.ScanNowAsync(DeepScan)
-                    └─► BatteryReaderOrchestrator.ReadAllAsync (BatteryReadMode.DeepScan,
+  └─► BluetoothBatteryMonitor.StartTrackedScanAsync               └─► Scanner.ScanNowAsync(Background)
+                    └─► BatteryReaderOrchestrator.ReadAllAsync (BatteryReadMode.Background,
                           raises DeviceFound events)
-                          ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device;
-                          │     uncached, never subscribes)
-                          └─► ClassicBatteryReader.ReadAllAsync (skipConnectionCheck: false,
-                                actively verifies each candidate)
+                          ├─► GattConnectionManager.TryReadBatteryAsync (per BLE device; may use the
+                          │     Windows cache for a subscribed device)
+                          └─► ClassicBatteryReader.ReadAllAsync (skipConnectionCheck: true —
+                                passive, no radio query per candidate)
               └─► update _lastKnown
               └─► fire ManualScanCompleted
                     └─► ScanWindow.OnScanComplete
                     └─► ScanCoordinator → TrayApp: update icon
+```
+
+## Data flow: confirmed deep scan (ADR-019)
+
+```
+User presses "Deep scan (diagnostic)" → warning + confirmation (default: No)
+  └─► ScanWindow.DeepScanRequested → ScanCoordinator.RequestDeepScan
+        └─► DeepScanRunner.RunAsync (single run, 30 s budget, cancellable)
+              └─► BluetoothBatteryMonitor.StartTrackedDeepScanAsync(budget token)
+                    └─► Scanner.ScanNowAsync(DeepScan)
+                          └─► BatteryReaderOrchestrator.ReadAllAsync (BatteryReadMode.DeepScan)
+                                ├─► GattConnectionManager.TryReadBatteryAsync (uncached;
+                                │     never subscribes)
+                                └─► ClassicBatteryReader.ReadAllAsync (skipConnectionCheck: false —
+                                      actively verifies each candidate)
+  └─► DeepScanPolicy.Classify/Describe → ScanWindow summary
+        "Deep scan complete: N device(s) found, M with battery data."
+  └─► Cancel button (enabled only while running) → ScanCoordinator.RequestDeepScanCancel
+  └─► Closing the window cancels a run in progress
 ```
 
 ---
@@ -244,4 +265,6 @@ All device discovery and aggregation operations in `BatteryReaderOrchestrator` n
 > **Note:** ADR-018 logging applies to `BatteryReaderOrchestrator` (the only aggregation path since #149).
 
 ### Manual "Deep Scan" UX & operational limits (ADR-019)
-The Scan UI now exposes a "Deep Scan" action for diagnostic purposes. Deep scans are user-initiated, timeboxed, and cancellable, and never increase background scan frequency. They allow users to resolve recognition issues, confirm alias suggestions, and include filtered devices, all without increasing long-term battery impact.
+The Scan UI exposes a **Deep scan (diagnostic)** action for diagnostic purposes. It presents ADR-019's warning and requires explicit confirmation (default *No*), runs at most once per invocation under a 30 s `PollingDefaults.DeepScanTimeBudget`, is cancellable from the window, and reports a summary (devices found / with battery data) that the auto-refresh tick cannot overwrite. Deep scans never increase background scan frequency, and no automatic path (startup, window open, auto-refresh) reaches the active read mode — the window's own scan is passive.
+
+Not implemented: a separate modal progress panel (the run is surfaced inline) and the completion-time presentation of alias suggestions / category-filtered devices; see the ADR status note.

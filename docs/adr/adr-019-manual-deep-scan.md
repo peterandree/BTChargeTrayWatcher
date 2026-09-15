@@ -62,10 +62,45 @@ Before #164 the `skipConnectionCheck: false` branch was unreachable in productio
 only by accident (the scan ran the same passive path as the poll, which also meant the active
 verification promised above never happened and a scan *could* create subscriptions as a side effect).
 
-**Still unimplemented from §1–§2:** the dedicated *"Deep scan (diagnostic)"* button with its warning and
-explicit confirmation, the global 30 s time budget, and the progress/cancel panel in `ScanWindow`. Until
-those exist, the app's plain user-initiated scan is the diagnostic path and it now behaves per this ADR's
-read-side rules without the confirmation gate. Tracked in #164.
+**§1–§3 implemented (issue #165).** The diagnostic path now has its own confirmed action and its own
+operational limits:
+
+- `ScanWindow` shows the **`Deep scan (diagnostic)`** button (`ScanViewModel.DeepScanButtonText`, §1's
+  exact label). It presents §1's warning verbatim (`ScanViewModel.DeepScanWarningText`) and starts
+  nothing unless the user answers *Yes* to a confirmation whose default answer is *No*.
+- `DeepScanRunner` (`src/Tray/DeepScanRunner.cs`) owns §2's operational rules: **one run per invocation**
+  (a second request is refused, not queued), the **global budget**
+  (`PollingDefaults.DeepScanTimeBudget`, 30 s) passed to the readers as a `CancellationToken`, and an
+  explicit **user cancel** that is reported distinctly from the budget expiring
+  (`DeepScanPolicy.Classify`).
+- On completion the window shows §3's summary — devices found / devices with battery data — and the
+  Cancel control is enabled only while a run is in progress. The summary outranks the 1 s auto-refresh
+  tick, which would otherwise overwrite it a second later, and closing the window stops a run, because
+  the window is the only control surface the run has.
+- **The window's plain scan (and its auto-refresh) is now passive.** Opening the window is not a
+  confirmation, and an auto-refreshing window would otherwise run an active scan every 30 s — which is
+  exactly the "automatic" case the Context section forbids. The active path is reachable only through
+  the confirmed button, so `BluetoothBatteryMonitor.StartTrackedDeepScanAsync` requires a caller-supplied
+  token (no overload defaulting to the shutdown token) and has one production caller.
+- Unchanged from the earlier read-side work: no GATT subscription is created during a deep scan, existing
+  subscriptions are left untouched, and the automatic startup scan stays passive.
+
+**Deliberately not done — §2's per-reader tuning.** The ADR says reader calls *may* use a slightly longer
+per-device timeout (e.g. GATT 6 s → 8 s). That is not implemented: the 30 s budget is the binding limit,
+and raising per-read timeouts makes it *more* likely that a run is cut off before it reaches every device,
+which defeats the purpose of a diagnostic scan. Revisit only with a measurement showing per-device reads
+are being truncated by the current timeouts.
+
+**Deliberately not done — a separate modal progress panel.** §3 asks for a "modal progress panel". The run
+is surfaced inline instead (status line with the running state and the cancel button; the action itself is
+disabled while running), because the scan window already presents the results the summary reports and a
+nested modal message loop adds nothing the inline surface does not already provide.
+
+**Still unimplemented — §3's last bullet.** Presenting *suggested alias mappings* (ADR-015) and *devices
+filtered by the category policy* (ADR-016) when a run finishes. The aggregation pipeline drops filtered
+devices inside `BatteryReaderOrchestrator`, so the scan caller cannot see them; surfacing them needs new
+plumbing and is tracked separately. Confirmed alias suggestions keep flowing through
+`AliasSuggestionService` as before.
 
 ## Consequences
 
