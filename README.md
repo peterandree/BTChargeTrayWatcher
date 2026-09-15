@@ -157,11 +157,21 @@ tasks, then releases all managed resources in order.
 
 ## Known Limitations
 
-- GATT battery reads require the device to support the standard Battery Service
-characteristic (UUID `0x180F`). Devices that expose battery level only via
-proprietary means fall back to the Classic reader.
-- The Classic reader relies on Windows device enumeration properties; some
-devices report battery level only when actively connected.
+- GATT battery reads require the device to support a standard Battery Service —
+Battery Service `0x180F` or Common Battery Service `0x182B`, both exposing Battery
+Level `0x2A19`. Devices that expose battery level only via proprietary
+characteristics fall back to the Classic reader.
+- The Classic reader reads the Windows device property store, so it can only show a
+battery the Windows Bluetooth stack (or a vendor driver) has published for that
+device. Classic-only headsets that report battery solely through HFP AT commands
+cannot be read from a background tray app without taking over the audio session.
+Details, an oracle for triaging (Windows *Settings → Bluetooth & devices*) and the
+follow-ups we consider worth doing are in
+[`docs/bluetooth/classic-battery-coverage.md`](docs/bluetooth/classic-battery-coverage.md).
+- Devices that support Battery Level *notifications* are still polled every
+60 s. Moving them to push updates is a documented proposal that needs an ADR
+amendment and hardware measurements first — see
+[`docs/plans/gatt-notification-subscriptions.md`](docs/plans/gatt-notification-subscriptions.md).
 - Multiple simultaneous Bluetooth adapters are not explicitly tested.
 - Runs on Windows only; no cross-platform support is planned.
 
